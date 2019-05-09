@@ -19,7 +19,7 @@ public class Hits implements ActionListener,ChangeListener
 	int            start,end,length,offset;
 	int            rows,cols;
 	int[][]        beat;
-	int[]		   instruments,notes;
+	int[]		       instruments,notes;
 	boolean        loading_from_file;
 	//  *********    CONSTANTS    **************
 	static final int   TICK_BUTTON_SIZE = 20;
@@ -33,14 +33,14 @@ public class Hits implements ActionListener,ChangeListener
 	//  *********  GUI COMPONENTS  *************
 	JFrame             Composer = new JFrame();
 	JToggleButton      play;     
-	JButton			   save,load;
+	JButton			       save,load;
 	JToggleButton[][]  hits;
 	JToggleButton      tick;	
 	Timer              timer;
 	JScrollBar         speedy;
 	JTextArea          what_speed;
-	JTextField		   file_field;
-	JSlider[]		   note_bars;
+	JTextField		     file_field;
+	JSlider[]		       note_bars;
 	JTextField[]       note_info;
 	JComboBox[]        instrument_info;
 	JToggleButton[]    muter;
@@ -70,7 +70,7 @@ public class Hits implements ActionListener,ChangeListener
 		instrumentArray = GetAvailableInstruments();	
 
 		// Create Input List for Combobox Model
-		Vector comboBoxItems = new Vector();	
+		Vector comboBoxItems = new Vector();
 		for (int i = 0; i < instrumentArray.length; i++) {
 			comboBoxItems.add( instrumentArray[i].getName() );
 		}	
@@ -167,7 +167,8 @@ public class Hits implements ActionListener,ChangeListener
   } // end constructor
 
   public static void main(String[] args) {
-     Hits music = new Hits();         
+		// Hits music = new Hits();
+		new Hits();
   } // end main
 
   private void Update_Instruments() {
@@ -270,20 +271,19 @@ public class Hits implements ActionListener,ChangeListener
   }
 
 	public void stateChanged(ChangeEvent e) {
-		JSlider source = (JSlider)e.getSource();
+		System.out.println("stateChanged");
+		// JSlider source = (JSlider)e.getSource();
 
-		for ( int n = 0; n < instruments.length; n++ ) {
-			if ( source == note_bars[n] ) {
-				note_info[n].setText(String.valueOf( source.getValue() ));
-				Play_Note(n);
-				return;
-			}
-		}		
+		// for ( int n = 0; n < instruments.length; n++ ) {
+		// 	if ( source == note_bars[n] ) {
+		// 		note_info[n].setText(String.valueOf( source.getValue() ));
+		// 		Play_Note(n);
+		// 		return;
+		// 	}
+		// }		
 	}
 
-	private void Play_Note(int instrumentIndex) {
-
-	}
+	// private void Play_Note(int instrumentIndex) {}
 
 	void Reset() {
 		sequencer.stop();
@@ -317,8 +317,7 @@ public class Hits implements ActionListener,ChangeListener
 
 			saver.close();
 		}
-		catch (FileNotFoundException fe) {}
-		catch (IOException ioe) {}
+		catch (IOException ioe) { ioe.printStackTrace(); }
 	}
 
 	void Load(String beatName) {
@@ -330,29 +329,17 @@ public class Hits implements ActionListener,ChangeListener
 
 		loading_from_file = true;
 
-		try
-		{
+		try {
 			FileInputStream loader = new FileInputStream(beatFilePath);
 
-			for ( int r = 0; r < rows; r++ ) 
-			{
-				for ( int c = 0; c < cols; c++ )
-				{
+			for ( int r = 0; r < rows; r++ ) {
+				for ( int c = 0; c < cols; c++ ) {
 					beat[r][c] = loader.read();
-
-					if ( beat[r][c] != 0 )
-					{				
-						hits[r][c].setSelected( true );
-					}
-					else
-					{
-						hits[r][c].setSelected( false );
-					}
+					hits[r][c].setSelected( beat[r][c] != 0 );
 				}
 			}
 
-			for ( int i = 0; i < instruments.length; i++ )
-			{
+			for ( int i = 0; i < instruments.length; i++ ) {
 				int instrumentIndex = loader.read();
 				System.out.println("Instrument index: " + instrumentIndex );
 				instruments[i] = instrumentIndex;
