@@ -189,7 +189,7 @@ public class Hits implements ActionListener,ChangeListener
 		Update_Instruments();
     for ( int i = 0; i < instruments.length; i++ ) {
 			Add_Event(ShortMessage.PROGRAM_CHANGE,myTrack,i,instruments[i],1,0);
-				//Add_Event(ShortMessage.PROGRAM_CHANGE,myTrack,i,instruments[i],0,0);
+			//Add_Event(ShortMessage.PROGRAM_CHANGE,myTrack,i,instruments[i],0,0);
 		}
 
 	  for ( int r = 0; r < rows; r++ ) {
@@ -222,24 +222,23 @@ public class Hits implements ActionListener,ChangeListener
 			// note_instrument --> NOTE_ON:note, PROGRAM_CHANGE:instrument
 			ShortMessage msg = new ShortMessage();        
 	    msg.setMessage(type,chan,note_instrument,vol);
-			MidiEvent event = new MidiEvent(msg,when);
-			tr.add( event );
+			tr.add( new MidiEvent(msg,when) );
 		} catch ( InvalidMidiDataException imde ) { imde.printStackTrace(); }
   }
 
-  private static void Add_Note(Track track, int channel, int startTick, int tickLength, int key, int velocity) {
-		try {
+  // private static void Add_Note(Track track, int channel, int startTick, int tickLength, int key, int velocity) {
+	// 	try {
 
-			ShortMessage on = new ShortMessage();
-			on.setMessage(ShortMessage.NOTE_ON, channel, key, velocity);
-			track.add(new MidiEvent(on, startTick));
+	// 		ShortMessage on = new ShortMessage();
+	// 		on.setMessage(ShortMessage.NOTE_ON, channel, key, velocity);
+	// 		track.add(new MidiEvent(on, startTick));
 
-			ShortMessage off = new ShortMessage();
-			off.setMessage(ShortMessage.NOTE_OFF, channel, key, velocity);		
-			track.add(new MidiEvent(off, startTick + tickLength));
+	// 		ShortMessage off = new ShortMessage();
+	// 		off.setMessage(ShortMessage.NOTE_OFF, channel, key, velocity);		
+	// 		track.add(new MidiEvent(off, startTick + tickLength));
 
-		}  catch ( InvalidMidiDataException imde ) { imde.printStackTrace(); }
-  }
+	// 	} catch ( InvalidMidiDataException imde ) { imde.printStackTrace(); }
+  // }
 
   public void actionPerformed(ActionEvent action) {
       String command = action.getActionCommand();
@@ -298,7 +297,6 @@ public class Hits implements ActionListener,ChangeListener
 
 	void Save(String beatName) {
 		String beatFilePath = GetBeatFilePath(beatName);
-
 		if ( beatFilePath == "" ) {
 			return;
 		}
@@ -322,7 +320,6 @@ public class Hits implements ActionListener,ChangeListener
 
 	void Load(String beatName) {
 		String beatFilePath = GetBeatFilePath(beatName);
-
 		if ( beatFilePath == "" ) {
 			return;
 		}
@@ -341,11 +338,10 @@ public class Hits implements ActionListener,ChangeListener
 
 			for ( int i = 0; i < instruments.length; i++ ) {
 				int instrumentIndex = loader.read();
-				System.out.println("Instrument index: " + instrumentIndex );
 				instruments[i] = instrumentIndex;
 				//instrument_info[i].setSelectedIndex( instrumentIndex );
 				String instrumentName = GetInstrumentName( instrumentIndex );
-				System.out.println("Instrument name: " + instrumentName );
+				System.out.println("Instrument [" + instrumentIndex + "] name: " + instrumentName );
 				instrument_info[i].setSelectedItem( instrumentName );
 				
 				notes[i] = loader.read();
@@ -391,10 +387,7 @@ public class Hits implements ActionListener,ChangeListener
 	}
 
 	String GetInstrumentName(int index) {
-		if (index < instrumentArray.length) {
-			return instrumentArray[index].getName();
-		}
-		return "";
+		return index < instrumentArray.length ? instrumentArray[index].getName() : "";
 	}
   
 	//*********************************************
