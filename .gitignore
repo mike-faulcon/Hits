@@ -1,2 +1,4 @@
 *.class
 settings.json
+.gradle/
+build/
