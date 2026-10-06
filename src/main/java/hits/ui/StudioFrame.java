@@ -3,6 +3,7 @@ package hits.ui;
 import hits.Beat;
 import hits.BeatFiles;
 import hits.Editor;
+import hits.ExportOptions;
 import hits.Gm;
 import hits.Kits;
 import hits.Notes;
@@ -17,6 +18,7 @@ import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
@@ -34,6 +36,8 @@ import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
@@ -44,16 +48,23 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.KeyEventDispatcher;
+import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.function.Consumer;
+import java.util.prefs.Preferences;
 
 /** Studio-desk window: transport, eight tracks, step grid, inspector, and the beat list. */
 final class StudioFrame extends JFrame {
@@ -86,10 +97,17 @@ final class StudioFrame extends JFrame {
     private final JButton drumMode = button("Drum");
     private final JButton noteMode = button("Note");
     private final JButton steps16 = button("16 steps");
-    private final JButton steps32 = button("32");
+    private final JButton steps32 = button("32 steps");
 
     private final JList<BeatFiles.Entry> beatList = new JList<>(beats);
-    private final JLabel status = new JLabel("Space play  ·  click step  ·  shift-click accent  ·  ⌘/Ctrl Z undo");
+    private static final String HINT = "Space play/stop  ·  click step  ·  shift-click loud  ·  right-click select  ·  ⌘/Ctrl S save  ·  ⌘/Ctrl Z undo";
+    private final JLabel status = new JLabel(HINT);
+    private final JPanel header = new JPanel(new BorderLayout());
+    private JComponent coachBar;
+    private boolean coachVisible;
+    private Path savedFile;
+    private KeyEventDispatcher keys;
+    private boolean spaceDown;
 
     private boolean syncing;
     private boolean swingDrag;
@@ -103,11 +121,12 @@ final class StudioFrame extends JFrame {
         this.editor = editor;
         this.player = player;
         this.pattern = new PatternPanel(editor);
+        maybeFirstRun();
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setBackground(Theme.BG);
         getContentPane().setBackground(Theme.BG);
         getContentPane().setLayout(new BorderLayout());
-        getContentPane().add(transport(), BorderLayout.NORTH);
+        getContentPane().add(buildHeader(), BorderLayout.NORTH);
         getContentPane().add(body(), BorderLayout.CENTER);
         getContentPane().add(footer(), BorderLayout.SOUTH);
         wire();
@@ -137,32 +156,95 @@ final class StudioFrame extends JFrame {
         bar.setLayout(new BoxLayout(bar, BoxLayout.X_AXIS));
         bar.setBackground(Theme.PANEL);
         bar.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        play.setToolTipText("Play or stop. Space does this unless you are typing.");
         play.addActionListener(event -> togglePlay());
         bar.add(play);
         bar.add(Box.createHorizontalStrut(16));
-        bar.add(label("BPM"));
+        JLabel bpmLabel = label("BPM");
+        bpmLabel.setToolTipText("Tempo, from 40 to 240.");
+        bpm.setToolTipText("Tempo, from 40 to 240.");
+        bar.add(bpmLabel);
         bar.add(Box.createHorizontalStrut(6));
         fix(bpm, 72, 32);
         bar.add(bpm);
         bar.add(Box.createHorizontalStrut(16));
-        bar.add(label("Swing"));
+        JLabel swingLabel = label("Swing");
+        swingLabel.setToolTipText("50% is straight. Higher values delay every other 16th note.");
+        swing.setToolTipText("50% is straight. Higher values delay every other 16th note.");
+        bar.add(swingLabel);
         fix(swing, 160, 32);
         bar.add(swing);
+        fix(swingValue, 120, 32);
         bar.add(swingValue);
         bar.add(Box.createHorizontalStrut(16));
+        slotA.setToolTipText("Pattern A. The other pattern stays in this beat.");
+        slotB.setToolTipText("Pattern B. The other pattern stays in this beat.");
         fix(slotA, 44, 32);
         fix(slotB, 44, 32);
         bar.add(slotA);
         bar.add(Box.createHorizontalStrut(4));
         bar.add(slotB);
         bar.add(Box.createHorizontalStrut(8));
-        copySlot.setToolTipText("Copy this pattern onto the other slot");
+        copySlot.setToolTipText("Copy this pattern onto the other slot, replacing it.");
         bar.add(copySlot);
         bar.add(Box.createHorizontalGlue());
         documentName.setFont(documentName.getFont().deriveFont(Font.BOLD, 16f));
-        fix(documentName, 160, 32);
+        documentName.setToolTipText("Name stored in the file. The file name keeps letters, numbers, _ and -.");
+        fix(documentName, 180, 32);
         bar.add(documentName);
         return bar;
+    }
+
+    private JPanel buildHeader() {
+        header.setOpaque(false);
+        header.add(transport(), BorderLayout.NORTH);
+        if (coachVisible) {
+            coachBar = coachBanner();
+            header.add(coachBar, BorderLayout.SOUTH);
+        }
+        return header;
+    }
+
+    private JComponent coachBanner() {
+        JPanel panel = new JPanel(new BorderLayout(12, 0));
+        panel.setBackground(Theme.SELECT);
+        panel.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
+        JLabel text = new JLabel("Starting on Boom bap.  Space plays.  Click a square to add a hit.  Shift-click makes it loud.");
+        text.setForeground(Theme.TEXT);
+        panel.add(text, BorderLayout.CENTER);
+        JButton dismiss = button("Got it");
+        dismiss.setToolTipText("Hide this hint. Later launches start from an empty kit.");
+        dismiss.addActionListener(event -> dismissCoach());
+        panel.add(dismiss, BorderLayout.EAST);
+        return panel;
+    }
+
+    private void maybeFirstRun() {
+        try {
+            coachVisible = !Preferences.userNodeForPackage(HitsApp.class).getBoolean("coachDismissed", false);
+        } catch (Exception exception) {
+            coachVisible = false;
+            return;
+        }
+        if (coachVisible) {
+            editor.edit(Kits::boomBap);
+            editor.markClean();
+        }
+    }
+
+    private void dismissCoach() {
+        coachVisible = false;
+        if (coachBar != null) {
+            header.remove(coachBar);
+            coachBar = null;
+            header.revalidate();
+            header.repaint();
+        }
+        try {
+            Preferences.userNodeForPackage(HitsApp.class).putBoolean("coachDismissed", true);
+        } catch (Exception ignored) {
+            // The hint can come back next launch if preferences cannot be stored.
+        }
     }
 
     private JComponent body() {
@@ -193,7 +275,7 @@ final class StudioFrame extends JFrame {
         JPanel panel = new JPanel(new BorderLayout(0, 6));
         panel.setBackground(Theme.PANEL);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        panel.setPreferredSize(new Dimension(200, 176));
+        panel.setPreferredSize(new Dimension(200, 210));
         JLabel title = label("Beats");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
         panel.add(title, BorderLayout.NORTH);
@@ -229,18 +311,28 @@ final class StudioFrame extends JFrame {
         actions.setOpaque(false);
         JButton load = button("Load");
         JButton save = button("Save");
+        JButton saveAs = button("Save As");
         JButton export = button("Export MIDI");
         JButton fresh = button("New");
         JButton boom = button("Boom bap");
         JButton reggae = button("Reggae");
+        load.setToolTipText("Load the selected beat. Double-click the list too.");
+        save.setToolTipText("Save this beat. ⌘/Ctrl S. Asks before replacing a different file.");
+        saveAs.setToolTipText("Save under a name you type. Shows the file name that will be written.");
+        export.setToolTipText("Write a MIDI file. All tracks are included unless you choose As heard.");
+        fresh.setToolTipText("Start a new empty drum kit.");
+        boom.setToolTipText("Replace the pattern on screen with a boom bap groove. Asks first.");
+        reggae.setToolTipText("Replace the pattern on screen with a reggae groove. Asks first.");
         load.addActionListener(event -> loadSelected());
         save.addActionListener(event -> save());
+        saveAs.addActionListener(event -> saveAs());
         export.addActionListener(event -> exportMidi());
         fresh.addActionListener(event -> fresh());
-        boom.addActionListener(event -> editor.edit(Kits::boomBap));
-        reggae.addActionListener(event -> editor.edit(Kits::reggae));
+        boom.addActionListener(event -> applyKit("Boom bap", Kits::boomBap));
+        reggae.addActionListener(event -> applyKit("Reggae", Kits::reggae));
         actions.add(load);
         actions.add(save);
+        actions.add(saveAs);
         actions.add(export);
         actions.add(fresh);
         actions.add(boom);
@@ -269,24 +361,36 @@ final class StudioFrame extends JFrame {
         constraints.insets = new Insets(4, 0, 4, 0);
         constraints.anchor = GridBagConstraints.WEST;
 
+        trackName.setToolTipText("Name shown on this row.");
         addRow(panel, constraints, trackName);
         addRow(panel, constraints, noteValue);
-        JPanel noteButtons = row(buttonPair("−", "Note down", -1), buttonPair("+", "Note up", 1),
-            buttonPair("−8", "Octave down", -12), buttonPair("+8", "Octave up", 12));
+        JPanel noteButtons = row(
+            buttonPair("−", "One semitone down", -1, 44),
+            buttonPair("+", "One semitone up", 1, 44),
+            buttonPair("Oct −", "One octave down", -12, 72),
+            buttonPair("Oct +", "One octave up", 12, 72)
+        );
         addRow(panel, constraints, noteButtons);
         addRow(panel, constraints, label("Sound"));
+        drums.setToolTipText("Drum sound for this track.");
+        programs.setToolTipText("Instrument for this track. One pitch for every step.");
         soundPicker.setOpaque(false);
         soundPicker.add(drums, "drum");
         soundPicker.add(programs, "note");
         addRow(panel, constraints, soundPicker);
-        addRow(panel, constraints, labeled("Gate", gate, gateValue));
-        addRow(panel, constraints, labeled("Velocity", velocity, velocityValue));
-        addRow(panel, constraints, labeled("Accent", accent, accentValue));
+        addRow(panel, constraints, labeled("Length", "How long each note holds, as a percent of the step.", gate, gateValue));
+        addRow(panel, constraints, labeled("Volume", "How hard a hit is. Right-click or Alt-click a step to edit that step.", velocity, velocityValue));
+        addRow(panel, constraints, labeled("Loud hit", "Shift-click uses this volume. Pads at least this loud use the bright color.", accent, accentValue));
         addRow(panel, constraints, label("Mode"));
+        drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
+        noteMode.setToolTipText("One pitched instrument for the whole track.");
         addRow(panel, constraints, row(drumMode, noteMode));
         JButton copyBar = button("Copy bar");
+        copyBar.setToolTipText("Copy the first 16 steps into a second bar and switch to 32 steps.");
         copyBar.addActionListener(event -> editor.edit(Beat::copyBar));
         addRow(panel, constraints, copyBar);
+        steps16.setToolTipText("One bar of 16th notes.");
+        steps32.setToolTipText("Two bars of 16th notes.");
         addRow(panel, constraints, row(steps16, steps32));
         constraints.weighty = 1;
         addRow(panel, constraints, new JPanel() {{
@@ -295,10 +399,10 @@ final class StudioFrame extends JFrame {
         return panel;
     }
 
-    private JButton buttonPair(String text, String tip, int delta) {
+    private JButton buttonPair(String text, String tip, int delta, int width) {
         JButton button = button(text);
         button.setToolTipText(tip);
-        fix(button, 44, 32);
+        fix(button, width, 32);
         button.addActionListener(event -> changeNote(delta));
         return button;
     }
@@ -380,14 +484,10 @@ final class StudioFrame extends JFrame {
         int shortcut = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
         var input = getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
         var actions = getRootPane().getActionMap();
-        input.put(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "play");
         input.put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, shortcut), "undo");
-        input.put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, shortcut | java.awt.event.InputEvent.SHIFT_DOWN_MASK), "redo");
-        actions.put("play", action(event -> {
-            if (!typing()) {
-                togglePlay();
-            }
-        }));
+        input.put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, shortcut | InputEvent.SHIFT_DOWN_MASK), "redo");
+        input.put(KeyStroke.getKeyStroke(KeyEvent.VK_S, shortcut), "save");
+        input.put(KeyStroke.getKeyStroke(KeyEvent.VK_S, shortcut | InputEvent.SHIFT_DOWN_MASK), "saveAs");
         actions.put("undo", action(event -> {
             if (!typing()) {
                 editor.undo();
@@ -398,6 +498,38 @@ final class StudioFrame extends JFrame {
                 editor.redo();
             }
         }));
+        actions.put("save", action(event -> save()));
+        actions.put("saveAs", action(event -> saveAs()));
+        keys = this::dispatchKey;
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keys);
+    }
+
+    /**
+     * Space is play/stop for the whole window. Buttons and the beat list would otherwise take it.
+     * A text field still receives the character.
+     */
+    private boolean dispatchKey(KeyEvent event) {
+        boolean space = event.getKeyCode() == KeyEvent.VK_SPACE
+            || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && event.getKeyChar() == ' ');
+        if (!space) {
+            return false;
+        }
+        if (event.getID() == KeyEvent.KEY_RELEASED) {
+            spaceDown = false;
+        }
+        if (event.getModifiersEx() != 0 || typing()) {
+            return false;
+        }
+        Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+        if (focused != this) {
+            spaceDown = false;
+            return focused != null && focused.getOwner() == this;
+        }
+        if (event.getID() == KeyEvent.KEY_PRESSED && !spaceDown) {
+            spaceDown = true;
+            javax.swing.SwingUtilities.invokeLater(this::togglePlay);
+        }
+        return true;
     }
 
     private void changed(boolean musical) {
@@ -416,7 +548,7 @@ final class StudioFrame extends JFrame {
             if (!swing.getValueIsAdjusting()) {
                 swing.setValue(beat.swing());
             }
-            swingValue.setText(beat.swing() + "%");
+            swingValue.setText(beat.swing() == 50 ? "50% straight" : beat.swing() + "%");
             paintToggle(slotA, beat.activeSlot() == 'a');
             paintToggle(slotB, beat.activeSlot() == 'b');
             if (!documentName.isFocusOwner()) {
@@ -438,6 +570,17 @@ final class StudioFrame extends JFrame {
                 velocity.setValue(shownVelocity);
             }
             velocityValue.setText(Integer.toString(shownVelocity));
+            int selectedStep = editor.stepIndex();
+            if (selectedStep >= 0 && selectedStep < beat.stepCount() && track.step(selectedStep).on()) {
+                velocity.setToolTipText("Volume of step " + (selectedStep + 1) + " on " + track.name() + ".");
+            } else {
+                velocity.setToolTipText("Volume of new hits on this track. Right-click or Alt-click a pad to edit that hit.");
+            }
+            String safe = BeatFiles.safeName(beat.name());
+            documentName.setToolTipText(safe.isEmpty()
+                ? "Add a letter or number. This name cannot be a file yet."
+                : "Name stored in the file. Saves as " + safe + ".json");
+            updateTitle();
             if (!accent.getValueIsAdjusting()) {
                 accent.setValue(track.accent());
             }
@@ -529,12 +672,27 @@ final class StudioFrame extends JFrame {
         play.setForeground(playShown ? Theme.INK : Theme.TEXT);
     }
 
+    private void updateTitle() {
+        StringBuilder title = new StringBuilder("Hits — ");
+        title.append(editor.beat().name());
+        if (editor.isDirty()) {
+            title.append(" •");
+        }
+        if (!player.isOpen()) {
+            title.append(" — MIDI unavailable");
+        }
+        setTitle(title.toString());
+    }
+
     private void commitDocumentName() {
-        String next = BeatFiles.safeName(documentName.getText());
-        if (next.isEmpty() || next.equals(editor.beat().name())) {
+        String next = documentName.getText().trim();
+        if (next.isEmpty()) {
             if (!documentName.isFocusOwner()) {
                 documentName.setText(editor.beat().name());
             }
+            return;
+        }
+        if (next.equals(editor.beat().name())) {
             return;
         }
         editor.edit(beat -> beat.setName(next));
@@ -550,54 +708,196 @@ final class StudioFrame extends JFrame {
 
     private void loadSelected() {
         BeatFiles.Entry entry = beatList.getSelectedValue();
-        if (entry == null || !confirmDiscard()) {
+        if (entry == null || !confirmProceed()) {
             return;
         }
         try {
             editor.replace(BeatFiles.load(entry.path()), false);
+            String filename = entry.path().getFileName().toString().toLowerCase(Locale.ROOT);
+            savedFile = filename.endsWith(".json") ? entry.path().toAbsolutePath().normalize() : null;
             status.setText("Loaded " + entry.label());
         } catch (RuntimeException | IOException exception) {
             JOptionPane.showMessageDialog(this, exception.getMessage(), "Hits", JOptionPane.ERROR_MESSAGE);
         }
     }
 
-    private void save() {
+    private boolean save() {
         commitDocumentName();
+        commitTrackName();
+        return writeFile(false);
+    }
+
+    private boolean saveAs() {
+        commitTrackName();
+        String initial = editor.beat().name();
+        JTextField nameField = new JTextField(initial, 28);
+        JLabel fileLabel = new JLabel(" ");
+        Runnable refreshLabel = () -> fileLabel.setText(saveAsCaption(nameField.getText()));
+        onText(nameField, refreshLabel);
+        refreshLabel.run();
+        JPanel form = new JPanel();
+        form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+        form.add(new JLabel("Name stored in the file"));
+        form.add(nameField);
+        form.add(Box.createVerticalStrut(8));
+        form.add(fileLabel);
+        int choice = JOptionPane.showConfirmDialog(this, form, "Save As", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) {
+            return false;
+        }
+        String typed = nameField.getText().trim();
+        if (BeatFiles.safeName(typed).isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Add a letter or number to the name before saving.", "Hits", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+        if (!typed.equals(editor.beat().name())) {
+            editor.edit(beat -> beat.setName(typed));
+        }
+        documentName.setText(editor.beat().name());
+        return writeFile(true);
+    }
+
+    private static String saveAsCaption(String typed) {
+        String display = typed == null ? "" : typed.trim();
+        String safe = BeatFiles.safeName(display);
+        if (safe.isEmpty()) {
+            return "Add a letter or number. This name cannot be a file.";
+        }
+        boolean exists = Files.exists(BeatFiles.directory().resolve(safe + ".json"));
+        String kept = safe.equals(display) ? "" : "  Name in the file stays \"" + display + "\".";
+        if (exists) {
+            return "Replaces " + safe + ".json." + kept;
+        }
+        return "File: " + safe + ".json." + kept;
+    }
+
+    private boolean writeFile(boolean alreadyConfirmed) {
+        String display = editor.beat().name();
+        String safe = BeatFiles.safeName(display);
+        if (safe.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                this,
+                "Add a letter or number to the name before saving.",
+                "Hits",
+                JOptionPane.WARNING_MESSAGE
+            );
+            return false;
+        }
+        Path target = BeatFiles.directory().resolve(safe + ".json");
+        boolean exists = Files.exists(target);
+        BeatFiles.SaveChoice choice = BeatFiles.plan(display, target, savedFile, false, exists);
+        if (!alreadyConfirmed && choice != BeatFiles.SaveChoice.WRITE) {
+            String message = choice == BeatFiles.SaveChoice.CONFIRM_REPLACE
+                ? "Replace " + safe + ".json?"
+                : "Save as " + safe + ".json?";
+            if (!safe.equals(display)) {
+                message += "\nThe name stored in the file stays \"" + display + "\".";
+            }
+            String[] options = choice == BeatFiles.SaveChoice.CONFIRM_REPLACE
+                ? new String[]{"Replace", "Cancel"}
+                : new String[]{"Save", "Cancel"};
+            int answer = JOptionPane.showOptionDialog(
+                this,
+                message,
+                "Save",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]
+            );
+            if (answer != 0) {
+                return false;
+            }
+        }
         try {
-            Path path = BeatFiles.save(editor.beat(), BeatFiles.directory());
+            Path path = BeatFiles.write(editor.beat(), target);
             editor.markClean();
+            savedFile = path.toAbsolutePath().normalize();
             reloadBeats(path);
             status.setText("Saved " + path.getFileName());
+            updateTitle();
+            return true;
         } catch (RuntimeException | IOException exception) {
             JOptionPane.showMessageDialog(this, message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
+            return false;
         }
     }
 
     private void exportMidi() {
         JFileChooser chooser = new JFileChooser(BeatFiles.directory().toFile());
-        chooser.setSelectedFile(new java.io.File(editor.beat().name() + ".mid"));
+        String stem = BeatFiles.safeName(editor.beat().name());
+        if (stem.isEmpty()) {
+            stem = "untitled";
+        }
+        chooser.setSelectedFile(new java.io.File(stem + ".mid"));
         chooser.setFileFilter(new FileNameExtensionFilter("Standard MIDI", "mid"));
+        JCheckBox asHeard = new JCheckBox("As heard (mute and solo)");
+        asHeard.setToolTipText("Off writes every track. On leaves muted tracks out and respects solo.");
+        JCheckBox both = new JCheckBox("A then B");
+        both.setToolTipText("Write pattern A followed by pattern B.");
+        JSpinner repeats = new JSpinner(new SpinnerNumberModel(1, 1, ExportOptions.MAX_REPEATS, 1));
+        repeats.setToolTipText("How many times to write that material, from 1 to " + ExportOptions.MAX_REPEATS + ".");
+        JPanel accessory = new JPanel();
+        accessory.setLayout(new BoxLayout(accessory, BoxLayout.Y_AXIS));
+        accessory.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
+        JLabel exportLabel = new JLabel("Export");
+        exportLabel.setToolTipText("All tracks is the default. Mute and solo are ignored unless As heard is checked.");
+        accessory.add(exportLabel);
+        accessory.add(Box.createVerticalStrut(6));
+        accessory.add(asHeard);
+        accessory.add(both);
+        accessory.add(Box.createVerticalStrut(6));
+        JPanel repeatRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        repeatRow.add(new JLabel("Repeats"));
+        repeatRow.add(repeats);
+        accessory.add(repeatRow);
+        chooser.setAccessory(accessory);
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
         Path path = chooser.getSelectedFile().toPath();
-        if (!path.toString().toLowerCase().endsWith(".mid")) {
+        if (!path.toString().toLowerCase(Locale.ROOT).endsWith(".mid")) {
             path = path.resolveSibling(path.getFileName() + ".mid");
         }
+        ExportOptions options = new ExportOptions(asHeard.isSelected(), both.isSelected(), (Integer) repeats.getValue());
         try {
-            BeatFiles.exportMidi(editor.beat(), path);
-            status.setText("Exported " + path.getFileName());
+            BeatFiles.exportMidi(editor.beat(), path, options);
+            status.setText("Exported " + path.getFileName() + exportSummary(options));
         } catch (RuntimeException | IOException | javax.sound.midi.InvalidMidiDataException exception) {
             JOptionPane.showMessageDialog(this, message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
         }
     }
 
+    private static String exportSummary(ExportOptions options) {
+        String heard = options.asHeard() ? "as heard" : "all tracks";
+        String span = options.bothSlots() ? ", A then B" : "";
+        String times = options.repeats() == 1 ? "" : ", " + options.repeats() + " times";
+        return " (" + heard + span + times + ")";
+    }
+
     private void fresh() {
-        if (!confirmDiscard()) {
+        if (!confirmProceed()) {
             return;
         }
+        savedFile = null;
         editor.replace(Beat.drumKit("untitled"), false);
         status.setText("New kit");
+    }
+
+    private void applyKit(String name, Consumer<Beat> kit) {
+        String slot = editor.beat().activeSlot() == 'b' ? "B" : "A";
+        int choice = JOptionPane.showConfirmDialog(
+            this,
+            name + " replaces pattern " + slot + ", the tempo, and the swing.\nThe other pattern is kept.",
+            "Hits",
+            JOptionPane.OK_CANCEL_OPTION,
+            JOptionPane.WARNING_MESSAGE
+        );
+        if (choice == JOptionPane.OK_OPTION) {
+            editor.edit(kit);
+            status.setText(name + " on pattern " + slot);
+        }
     }
 
     private void reloadBeats(Path select) {
@@ -621,20 +921,30 @@ final class StudioFrame extends JFrame {
         }
     }
 
-    private boolean confirmDiscard() {
+    /** Save, discard, or cancel before replacing or closing the open beat. */
+    private boolean confirmProceed() {
         if (!editor.isDirty()) {
             return true;
         }
-        return JOptionPane.showConfirmDialog(
+        String[] options = {"Save", "Don't Save", "Cancel"};
+        int choice = JOptionPane.showOptionDialog(
             this,
-            "Discard unsaved changes?",
+            "Save changes to \"" + editor.beat().name() + "\"?",
             "Hits",
-            JOptionPane.YES_NO_OPTION
-        ) == JOptionPane.YES_OPTION;
+            JOptionPane.YES_NO_CANCEL_OPTION,
+            JOptionPane.QUESTION_MESSAGE,
+            null,
+            options,
+            options[0]
+        );
+        if (choice == 0) {
+            return save();
+        }
+        return choice == 1;
     }
 
     private void close() {
-        if (!confirmDiscard()) {
+        if (!confirmProceed()) {
             return;
         }
         playhead.stop();
@@ -645,6 +955,10 @@ final class StudioFrame extends JFrame {
 
     @Override
     public void dispose() {
+        if (keys != null) {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(keys);
+            keys = null;
+        }
         playhead.stop();
         super.dispose();
     }
@@ -676,16 +990,38 @@ final class StudioFrame extends JFrame {
         constraints.weighty = 0;
     }
 
-    private static JPanel labeled(String name, JSlider slider, JLabel value) {
+    private static JPanel labeled(String name, String tip, JSlider slider, JLabel value) {
         JPanel panel = new JPanel(new BorderLayout(8, 0));
         panel.setOpaque(false);
         JLabel title = label(name);
-        title.setPreferredSize(new Dimension(72, 32));
+        title.setToolTipText(tip);
+        title.setPreferredSize(new Dimension(88, 32));
         panel.add(title, BorderLayout.WEST);
+        slider.setToolTipText(tip);
         panel.add(slider, BorderLayout.CENTER);
+        value.setToolTipText(tip);
         value.setPreferredSize(new Dimension(44, 32));
         panel.add(value, BorderLayout.EAST);
         return panel;
+    }
+
+    private static void onText(JTextField field, Runnable listener) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent event) {
+                listener.run();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent event) {
+                listener.run();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent event) {
+                listener.run();
+            }
+        });
     }
 
     private static JPanel row(JComponent... components) {
@@ -718,6 +1054,8 @@ final class StudioFrame extends JFrame {
         button.setPreferredSize(new Dimension(width, height));
         button.setMinimumSize(new Dimension(28, height));
         button.setMaximumSize(new Dimension(Math.max(width, 28), height));
+        button.setFocusable(false);
+        button.setRequestFocusEnabled(false);
         return button;
     }
 

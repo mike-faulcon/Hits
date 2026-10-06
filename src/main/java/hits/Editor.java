@@ -66,6 +66,16 @@ public final class Editor {
         fire(false);
     }
 
+    /** Points the velocity slider at a step without toggling it. */
+    public void selectStep(int row, int column) {
+        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.stepCount()) {
+            return;
+        }
+        trackIndex = row;
+        stepIndex = column;
+        fire(false);
+    }
+
     public void tap(int row, int column, boolean accent) {
         if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.stepCount()) {
             return;
