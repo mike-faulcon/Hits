@@ -8,6 +8,7 @@ import hits.Editor;
 import hits.ExportOptions;
 import hits.Gm;
 import hits.Kits;
+import hits.LaunchPaths;
 import hits.MidiOutputs;
 import hits.Notes;
 import hits.Player;
@@ -1434,7 +1435,15 @@ final class StudioFrame extends JFrame {
 
     private Path loadBeatsDirectory() {
         String saved = pref(BeatFolders.PREF_DIRECTORY);
-        Path folder = BeatFolders.resolve(saved, Path.of("").toAbsolutePath());
+        Path base = LaunchPaths.baseDirectory();
+        Path folder = BeatFolders.resolve(saved, base);
+        if (LaunchPaths.packaged() && LaunchPaths.isDefaultFolder(saved, folder, base)) {
+            try {
+                LaunchPaths.ensureSamples(folder, LaunchPaths.bundledSamples(LaunchPaths.codeSource(HitsApp.class)));
+            } catch (IOException exception) {
+                // The folder chooser still works if the samples cannot be copied.
+            }
+        }
         String absolute = BeatFolders.remember(folder);
         if (!absolute.equals(saved)) {
             prefPut(BeatFolders.PREF_DIRECTORY, absolute);

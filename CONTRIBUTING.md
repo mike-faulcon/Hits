@@ -5,14 +5,17 @@
 JDK 21 is required. Use the Gradle wrapper from the repository root; a separate Gradle install is not needed.
 
 ```shell
-./gradlew test    # unit tests
-./gradlew build   # tests, jar, and distributions
-./gradlew run     # desktop window
+./gradlew test        # unit tests
+./gradlew build       # tests, jar, and distributions
+./gradlew run         # desktop window
+./gradlew packageApp  # double-clickable app for this OS
 ```
 
 `./gradlew run` needs a display. Playback uses the built-in Java synth, or an external MIDI output if you pick one. Tests do not.
 
-WAV export renders through Gervill's `AudioSynthesizer.openStream`, which the JDK does not export. The `run` and `test` tasks pass `--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED`. A render test skips itself when that call is blocked. It does not open a window or an audio device.
+WAV export renders through Gervill's `AudioSynthesizer.openStream`, which the JDK does not export. The `run` and `test` tasks pass `--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED`. `packageApp` puts that flag in the packaged launcher. A render test skips itself when that call is blocked. It does not open a window or an audio device.
+
+`build` stops at the jar. `packageApp` is a separate task. It needs JDK 21's `jpackage` and `jlink`. Output, per-OS tools, and how to open an unsigned app are in the README. The package workflow runs on tags and when started by hand. Pull requests keep the existing test workflow.
 
 ## Branches and pull requests
 
