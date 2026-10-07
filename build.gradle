@@ -13,6 +13,8 @@ java {
 
 application {
     mainClass = "hits.ui.HitsApp"
+    // AudioSynthesizer.openStream is the JDK software synth. The package is not exported.
+    applicationDefaultJvmArgs = ["--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED"]
 }
 
 repositories {
@@ -27,6 +29,7 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
+    jvmArgs("--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED")
 }
 
 tasks.withType(JavaCompile).configureEach {

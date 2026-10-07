@@ -2,6 +2,7 @@ package hits;
 
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MidiSystem;
+import javax.sound.midi.Soundbank;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -10,6 +11,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntConsumer;
 
 public final class BeatFiles {
     private BeatFiles() {}
@@ -107,6 +110,32 @@ public final class BeatFiles {
 
     public static void exportMidi(Beat beat, Path path, ExportOptions options) throws IOException, InvalidMidiDataException {
         MidiSystem.write(SequenceBuilder.export(beat, options), 1, path.toFile());
+    }
+
+    /**
+     * Writes the same sequence as {@link #exportMidi} as 44.1 kHz 16-bit stereo PCM.
+     * {@code soundbank} is the SoundFont loaded on the built-in synth, or null for General MIDI.
+     * {@code progress} receives 0–100 from the render thread. A cancelled render leaves {@code path} unchanged.
+     */
+    public static void exportWav(
+        Beat beat,
+        Path path,
+        ExportOptions options,
+        Soundbank soundbank,
+        IntConsumer progress
+    ) throws IOException, InvalidMidiDataException {
+        exportWav(beat, path, options, soundbank, progress, () -> false);
+    }
+
+    public static void exportWav(
+        Beat beat,
+        Path path,
+        ExportOptions options,
+        Soundbank soundbank,
+        IntConsumer progress,
+        BooleanSupplier cancelled
+    ) throws IOException, InvalidMidiDataException {
+        WavRenderer.render(SequenceBuilder.export(beat, options), path, soundbank, progress, cancelled);
     }
 
     public static String safeName(String name) {

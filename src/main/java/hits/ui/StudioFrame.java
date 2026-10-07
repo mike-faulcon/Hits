@@ -14,6 +14,7 @@ import hits.SoundFonts;
 import hits.Step;
 import hits.Track;
 import hits.TrackMode;
+import hits.WavRenderer;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -25,12 +26,14 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
@@ -39,7 +42,9 @@ import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingWorker;
 import javax.swing.Timer;
+import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -67,6 +72,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 import java.util.prefs.Preferences;
 
@@ -342,6 +349,7 @@ final class StudioFrame extends JFrame {
         JButton save = button("Save");
         JButton saveAs = button("Save As");
         JButton export = button("Export MIDI");
+        JButton exportWav = button("Export WAV");
         JButton fresh = button("New");
         JButton boom = button("Boom bap");
         JButton reggae = button("Reggae");
@@ -349,6 +357,7 @@ final class StudioFrame extends JFrame {
         save.setToolTipText("Save this beat. ⌘/Ctrl S. Asks before replacing a different file.");
         saveAs.setToolTipText("Save under a name you type. Shows the file name that will be written.");
         export.setToolTipText("Write a MIDI file. All tracks are included unless you choose As heard.");
+        exportWav.setToolTipText("Write a WAV file of the same notes. Uses the built-in synth, and a loaded SoundFont when one is active.");
         fresh.setToolTipText("Start a new empty drum kit.");
         boom.setToolTipText("Replace the pattern on screen with a boom bap groove. Asks first.");
         reggae.setToolTipText("Replace the pattern on screen with a reggae groove. Asks first.");
@@ -356,6 +365,7 @@ final class StudioFrame extends JFrame {
         save.addActionListener(event -> save());
         saveAs.addActionListener(event -> saveAs());
         export.addActionListener(event -> exportMidi());
+        exportWav.addActionListener(event -> exportWav());
         fresh.addActionListener(event -> fresh());
         boom.addActionListener(event -> applyKit("Boom bap", Kits::boomBap));
         reggae.addActionListener(event -> applyKit("Reggae", Kits::reggae));
@@ -363,6 +373,7 @@ final class StudioFrame extends JFrame {
         actions.add(save);
         actions.add(saveAs);
         actions.add(export);
+        actions.add(exportWav);
         actions.add(fresh);
         actions.add(boom);
         actions.add(reggae);
@@ -932,13 +943,111 @@ final class StudioFrame extends JFrame {
     }
 
     private void exportMidi() {
+        ExportChoice choice = askExport("Export MIDI", "mid", "Standard MIDI");
+        if (choice == null) {
+            return;
+        }
+        try {
+            BeatFiles.exportMidi(editor.beat(), choice.path(), choice.options());
+            status.setText("Exported " + choice.path().getFileName() + exportSummary(choice.options()));
+        } catch (RuntimeException | IOException | javax.sound.midi.InvalidMidiDataException exception) {
+            JOptionPane.showMessageDialog(this, message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void exportWav() {
+        ExportChoice choice = askExport("Export WAV", "wav", "WAV audio");
+        if (choice == null) {
+            return;
+        }
+        Beat beat = editor.beat().copy();
+        Path soundFont = player.soundFont();
+        JDialog dialog = new JDialog(this, "Export WAV", java.awt.Dialog.ModalityType.APPLICATION_MODAL);
+        JProgressBar bar = new JProgressBar(0, 100);
+        bar.setStringPainted(true);
+        bar.setString("Rendering…");
+        bar.setPreferredSize(new Dimension(320, 22));
+        JButton cancel = button("Cancel");
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        south.add(cancel);
+        JPanel body = new JPanel(new BorderLayout(0, 8));
+        body.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        body.add(new JLabel("Rendering " + choice.path().getFileName()), BorderLayout.NORTH);
+        body.add(bar, BorderLayout.CENTER);
+        body.add(south, BorderLayout.SOUTH);
+        dialog.getContentPane().add(body);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+
+        SwingWorker<Void, Integer> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                javax.sound.midi.Soundbank bank = soundFont == null ? null : SoundFonts.read(soundFont);
+                BeatFiles.exportWav(
+                    beat,
+                    choice.path(),
+                    choice.options(),
+                    bank,
+                    this::publishPercent,
+                    this::isCancelled
+                );
+                return null;
+            }
+
+            private void publishPercent(int percent) {
+                publish(percent);
+            }
+
+            @Override
+            protected void process(java.util.List<Integer> chunks) {
+                int percent = chunks.get(chunks.size() - 1);
+                bar.setValue(percent);
+                bar.setString(percent >= 100 ? "Done" : percent + "%");
+            }
+
+            @Override
+            protected void done() {
+                dialog.dispose();
+            }
+        };
+        cancel.addActionListener(event -> worker.cancel(false));
+        dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent event) {
+                worker.cancel(false);
+            }
+        });
+        worker.execute();
+        dialog.setVisible(true);
+        try {
+            worker.get();
+            status.setText("Exported " + choice.path().getFileName() + exportSummary(choice.options()));
+        } catch (CancellationException exception) {
+            status.setText("Export cancelled");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            status.setText("Export cancelled");
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            if (cause instanceof WavRenderer.Cancelled) {
+                status.setText("Export cancelled");
+                return;
+            }
+            JOptionPane.showMessageDialog(this, message(cause), "Hits", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /** Save dialog shared by MIDI and WAV. Null when the user cancels. */
+    private ExportChoice askExport(String title, String extension, String description) {
         JFileChooser chooser = new JFileChooser(beatsDirectory.toFile());
+        chooser.setDialogTitle(title);
         String stem = BeatFiles.safeName(editor.beat().name());
         if (stem.isEmpty()) {
             stem = "untitled";
         }
-        chooser.setSelectedFile(new java.io.File(stem + ".mid"));
-        chooser.setFileFilter(new FileNameExtensionFilter("Standard MIDI", "mid"));
+        chooser.setSelectedFile(new java.io.File(stem + "." + extension));
+        chooser.setFileFilter(new FileNameExtensionFilter(description, extension));
         JCheckBox asHeard = new JCheckBox("As heard (mute and solo)");
         asHeard.setToolTipText("Off writes every track. On leaves muted tracks out and respects solo.");
         JCheckBox both = new JCheckBox("A then B");
@@ -961,20 +1070,18 @@ final class StudioFrame extends JFrame {
         accessory.add(repeatRow);
         chooser.setAccessory(accessory);
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
-            return;
+            return null;
         }
         Path path = chooser.getSelectedFile().toPath();
-        if (!path.toString().toLowerCase(Locale.ROOT).endsWith(".mid")) {
-            path = path.resolveSibling(path.getFileName() + ".mid");
+        String suffix = "." + extension;
+        if (!path.toString().toLowerCase(Locale.ROOT).endsWith(suffix)) {
+            path = path.resolveSibling(path.getFileName() + suffix);
         }
         ExportOptions options = new ExportOptions(asHeard.isSelected(), both.isSelected(), (Integer) repeats.getValue());
-        try {
-            BeatFiles.exportMidi(editor.beat(), path, options);
-            status.setText("Exported " + path.getFileName() + exportSummary(options));
-        } catch (RuntimeException | IOException | javax.sound.midi.InvalidMidiDataException exception) {
-            JOptionPane.showMessageDialog(this, message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
-        }
+        return new ExportChoice(path, options);
     }
+
+    private record ExportChoice(Path path, ExportOptions options) {}
 
     private static String exportSummary(ExportOptions options) {
         String heard = options.asHeard() ? "as heard" : "all tracks";
@@ -1422,7 +1529,9 @@ final class StudioFrame extends JFrame {
         };
     }
 
-    private static String message(Exception exception) {
-        return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+    private static String message(Throwable exception) {
+        return exception.getMessage() == null || exception.getMessage().isBlank()
+            ? exception.getClass().getSimpleName()
+            : exception.getMessage();
     }
 }

@@ -38,6 +38,16 @@ Export writes a Standard MIDI file of 16th notes. Swing is part of the note time
 
 The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note.
 
+## Export WAV
+
+**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: all tracks or as heard, A then B, and repeats from 1 to 32. The notes are the ones Export MIDI would write for those choices, including swing and a step's own pitch.
+
+Hits renders the file through the built-in Java synth, without playing it out loud, and usually faster than real time. The file keeps two seconds after the loop ends so a note and its reverb can ring instead of stopping dead. A longer export shows a progress bar. **Cancel**, or closing that window, leaves any file already at that name in place. If rendering fails, Hits shows the reason.
+
+A SoundFont loaded on the built-in synth is the sound in the file. Otherwise the file uses the Java General MIDI set. WAV does not record an external MIDI output. If MIDI out is a hardware port or another application, switch to **Built-in synth** and load the SoundFont before exporting when you want that bank in the file.
+
+The suggested `.wav` name uses the same file-safe spelling as Save.
+
 ## MIDI out
 
 **MIDI out** is at the bottom of the window. **Built-in synth** is the Java instrument and the fallback. Choose another output to send notes to Ableton, an IAC bus, or a hardware port. Hits remembers the choice. If that device is not connected the next time you open Hits, playback uses the built-in synth and the saved choice is kept until the device is back.
