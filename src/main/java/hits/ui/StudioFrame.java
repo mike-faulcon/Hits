@@ -3,6 +3,7 @@ package hits.ui;
 import hits.Beat;
 import hits.BeatFiles;
 import hits.BeatFolders;
+import hits.Chain;
 import hits.Editor;
 import hits.ExportOptions;
 import hits.Gm;
@@ -10,6 +11,7 @@ import hits.Kits;
 import hits.MidiOutputs;
 import hits.Notes;
 import hits.Player;
+import hits.SequenceBuilder;
 import hits.SoundFonts;
 import hits.Step;
 import hits.Track;
@@ -71,6 +73,7 @@ import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -92,6 +95,17 @@ final class StudioFrame extends JFrame {
     private final JButton slotA = button("A");
     private final JButton slotB = button("B");
     private final JButton copySlot = button("Copy");
+    private final JButton patternMode = button("Pattern");
+    private final JButton songMode = button("Song");
+    private final JPanel chainSlots = new JPanel();
+    private final JButton addChainA = button("+A");
+    private final JButton addChainB = button("+B");
+    private final JButton removeChain = button("Remove");
+    private final JButton chainUp = button("Up");
+    private final JButton chainDown = button("Down");
+    private final JSpinner chainRepeats = new JSpinner(new SpinnerNumberModel(1, 1, ExportOptions.MAX_REPEATS, 1));
+    private int chainIndex = -1;
+    private String chainButtons = "";
     private final JTextField documentName = new JTextField("untitled", 12);
 
     private final JTextField trackName = new JTextField();
@@ -149,14 +163,28 @@ final class StudioFrame extends JFrame {
         getContentPane().add(body(), BorderLayout.CENTER);
         getContentPane().add(footer(), BorderLayout.SOUTH);
         wire();
-        setSize(1180, 760);
-        setMinimumSize(new Dimension(960, 640));
+        setSize(1180, 800);
+        setMinimumSize(new Dimension(960, 680));
         setLocationByPlatform(true);
         editor.addListener(this::changed);
         reloadBeats(null);
         refresh();
         playhead = new Timer(40, event -> {
-            pattern.setPlayhead(player.currentStep(editor.beat()));
+            if (!player.isPlaying()) {
+                editor.stopped();
+                pattern.setPlayhead(-1);
+            } else {
+                Chain.Place place = player.place(editor.beat());
+                boolean arranged = editor.songMode() && editor.beat().hasChain();
+                if (place != null && arranged && !editor.isAdjusting() && !editor.holding()) {
+                    editor.showPlayingSlot(place.slot());
+                }
+                int step = -1;
+                if (place != null && (!arranged || editor.viewSlot() == place.slot())) {
+                    step = place.step();
+                }
+                pattern.setPlayhead(step);
+            }
             if (player.isPlaying() != playShown) {
                 updatePlayButton();
             }
@@ -225,12 +253,61 @@ final class StudioFrame extends JFrame {
 
     private JPanel buildHeader() {
         header.setOpaque(false);
-        header.add(transport(), BorderLayout.NORTH);
+        JPanel stack = new JPanel(new BorderLayout());
+        stack.setOpaque(false);
+        stack.add(transport(), BorderLayout.NORTH);
+        stack.add(chainBar(), BorderLayout.SOUTH);
+        header.add(stack, BorderLayout.NORTH);
         if (coachVisible) {
             coachBar = coachBanner();
             header.add(coachBar, BorderLayout.SOUTH);
         }
         return header;
+    }
+
+    private JPanel chainBar() {
+        JPanel bar = new JPanel(new BorderLayout(6, 0));
+        bar.setOpaque(true);
+        bar.setBackground(Theme.PANEL);
+        bar.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        patternMode.setToolTipText("Play the pattern on screen and loop it.");
+        songMode.setToolTipText("Play the chain and loop it. Click again to follow the pattern you hear.");
+        fix(patternMode, 88, 32);
+        fix(songMode, 72, 32);
+        bar.add(row(patternMode, songMode), BorderLayout.WEST);
+
+        chainSlots.setLayout(new BoxLayout(chainSlots, BoxLayout.X_AXIS));
+        chainSlots.setOpaque(false);
+        JScrollPane chainScroll = new JScrollPane(
+            chainSlots,
+            JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+            JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        );
+        chainScroll.setBorder(BorderFactory.createEmptyBorder());
+        chainScroll.setOpaque(false);
+        chainScroll.getViewport().setOpaque(true);
+        chainScroll.getViewport().setBackground(Theme.PANEL);
+        chainScroll.setMinimumSize(new Dimension(72, 36));
+        chainScroll.setPreferredSize(new Dimension(180, 36));
+        bar.add(chainScroll, BorderLayout.CENTER);
+
+        addChainA.setToolTipText("Add pattern A to the chain.");
+        addChainB.setToolTipText("Add pattern B to the chain.");
+        removeChain.setToolTipText("Remove the selected chain entry.");
+        chainUp.setToolTipText("Move the selected entry earlier.");
+        chainDown.setToolTipText("Move the selected entry later.");
+        chainRepeats.setToolTipText("How many times the selected entry plays, from 1 to " + ExportOptions.MAX_REPEATS + ".");
+        fix(addChainA, 48, 32);
+        fix(addChainB, 48, 32);
+        fix(chainUp, 52, 32);
+        fix(chainDown, 64, 32);
+        JLabel repeatsLabel = label("×");
+        repeatsLabel.setToolTipText("Repeats for the selected entry.");
+        fix(chainRepeats, 64, 32);
+        bar.add(row(addChainA, addChainB, removeChain, chainUp, chainDown, repeatsLabel, chainRepeats), BorderLayout.EAST);
+        bar.setMinimumSize(new Dimension(720, 52));
+        bar.setPreferredSize(new Dimension(960, 52));
+        return bar;
     }
 
     private JComponent coachBanner() {
@@ -356,8 +433,8 @@ final class StudioFrame extends JFrame {
         load.setToolTipText("Load the selected beat. Double-click the list too.");
         save.setToolTipText("Save this beat. ⌘/Ctrl S. Asks before replacing a different file.");
         saveAs.setToolTipText("Save under a name you type. Shows the file name that will be written.");
-        export.setToolTipText("Write a MIDI file. All tracks are included unless you choose As heard.");
-        exportWav.setToolTipText("Write a WAV file of the same notes. Uses the built-in synth, and a loaded SoundFont when one is active.");
+        export.setToolTipText("Write a MIDI file. All tracks are included unless you choose As heard. Song writes the chain.");
+        exportWav.setToolTipText("Write a WAV file of the same notes. Uses the built-in synth, and a loaded SoundFont when one is active. Song writes the chain.");
         fresh.setToolTipText("Start a new empty drum kit.");
         boom.setToolTipText("Replace the pattern on screen with a boom bap groove. Asks first.");
         reggae.setToolTipText("Replace the pattern on screen with a reggae groove. Asks first.");
@@ -437,7 +514,10 @@ final class StudioFrame extends JFrame {
         addRow(panel, constraints, row(drumMode, noteMode));
         JButton copyBar = button("Copy bar");
         copyBar.setToolTipText("Copy the first 16 steps into a second bar and switch to 32 steps.");
-        copyBar.addActionListener(event -> editor.edit(Beat::copyBar));
+        copyBar.addActionListener(event -> {
+            char slot = editor.viewSlot();
+            editor.edit(beat -> beat.copyBar(slot));
+        });
         addRow(panel, constraints, copyBar);
         steps16.setToolTipText("One bar of 16th notes.");
         steps32.setToolTipText("Two bars of 16th notes.");
@@ -488,13 +568,16 @@ final class StudioFrame extends JFrame {
             editor.edit(beat -> beat.setBpm(value));
         });
         drag(swing, () -> swingDrag, value -> swingDrag = value, beat -> beat.setSwing(swing.getValue()));
-        drag(gate, () -> gateDrag, value -> gateDrag = value, beat -> beat.track(editor.trackIndex()).setGate(gate.getValue()));
+        drag(gate, () -> gateDrag, value -> gateDrag = value, beat -> onScreen(beat).setGate(gate.getValue()));
         drag(velocity, () -> velocityDrag, value -> velocityDrag = value, this::applyVelocity);
-        drag(accent, () -> accentDrag, value -> accentDrag = value, beat -> beat.track(editor.trackIndex()).setAccent(accent.getValue()));
+        drag(accent, () -> accentDrag, value -> accentDrag = value, beat -> onScreen(beat).setAccent(accent.getValue()));
 
         slotA.addActionListener(event -> switchSlot('a'));
         slotB.addActionListener(event -> switchSlot('b'));
-        copySlot.addActionListener(event -> editor.edit(Beat::copyActiveToOther));
+        copySlot.addActionListener(event -> {
+            char slot = editor.viewSlot();
+            editor.edit(beat -> beat.copySlotToOther(slot));
+        });
         drumMode.addActionListener(event -> setMode(TrackMode.DRUM));
         noteMode.addActionListener(event -> setMode(TrackMode.NOTE));
         steps16.addActionListener(event -> {
@@ -515,7 +598,7 @@ final class StudioFrame extends JFrame {
             if (note == editor.selectedTrack().note()) {
                 return;
             }
-            editor.edit(beat -> beat.track(editor.trackIndex()).setNote(note));
+            editor.edit(beat -> onScreen(beat).setNote(note));
             player.audition(editor.selectedTrack());
         });
         programs.addActionListener(event -> {
@@ -526,7 +609,7 @@ final class StudioFrame extends JFrame {
             if (program == editor.selectedTrack().program()) {
                 return;
             }
-            editor.edit(beat -> beat.track(editor.trackIndex()).setProgram(program));
+            editor.edit(beat -> onScreen(beat).setProgram(program));
             player.audition(editor.selectedTrack());
         });
         documentName.addActionListener(event -> commitDocumentName());
@@ -566,6 +649,24 @@ final class StudioFrame extends JFrame {
         stepPitchDown.addActionListener(event -> nudgeStepPitch(-1));
         stepPitchUp.addActionListener(event -> nudgeStepPitch(1));
         stepPitchTrack.addActionListener(event -> clearStepPitch());
+        patternMode.addActionListener(event -> chooseMode(false));
+        songMode.addActionListener(event -> chooseMode(true));
+        addChainA.addActionListener(event -> appendChain('a'));
+        addChainB.addActionListener(event -> appendChain('b'));
+        removeChain.addActionListener(event -> removeSelectedChain());
+        chainUp.addActionListener(event -> moveSelectedChain(-1));
+        chainDown.addActionListener(event -> moveSelectedChain(1));
+        chainRepeats.addChangeListener(event -> {
+            if (syncing || chainIndex < 0 || chainIndex >= editor.beat().chain().size()) {
+                return;
+            }
+            int repeats = (Integer) chainRepeats.getValue();
+            if (editor.beat().chain().get(chainIndex).repeats() == repeats) {
+                return;
+            }
+            int index = chainIndex;
+            editor.edit(beat -> beat.setChainRepeats(index, repeats));
+        });
         midiOut.addActionListener(event -> midiOutputChosen());
         keys = this::dispatchKey;
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keys);
@@ -602,7 +703,7 @@ final class StudioFrame extends JFrame {
     private void changed(boolean musical) {
         refresh();
         if (musical && player.isPlaying()) {
-            player.update(editor.beat());
+            player.update(editor.beat(), editor.songMode());
         }
     }
 
@@ -616,8 +717,9 @@ final class StudioFrame extends JFrame {
                 swing.setValue(beat.swing());
             }
             swingValue.setText(beat.swing() == 50 ? "50% straight" : beat.swing() + "%");
-            paintToggle(slotA, beat.activeSlot() == 'a');
-            paintToggle(slotB, beat.activeSlot() == 'b');
+            paintToggle(slotA, editor.viewSlot() == 'a');
+            paintToggle(slotB, editor.viewSlot() == 'b');
+            refreshChain();
             if (!documentName.isFocusOwner()) {
                 documentName.setText(beat.name());
             }
@@ -695,8 +797,9 @@ final class StudioFrame extends JFrame {
         if (column < 0 || column >= editor.beat().stepCount() || !current.step(column).on()) {
             return;
         }
+        char slot = editor.viewSlot();
         editor.edit(beat -> {
-            Track track = beat.track(row);
+            Track track = beat.slot(slot)[row];
             Step step = track.step(column);
             step.setPitch(step.soundingNote(track.note()) + delta);
         });
@@ -711,7 +814,8 @@ final class StudioFrame extends JFrame {
         if (column < 0 || !current.step(column).hasPitch()) {
             return;
         }
-        editor.edit(beat -> beat.track(row).step(column).clearPitch());
+        char slot = editor.viewSlot();
+        editor.edit(beat -> beat.slot(slot)[row].step(column).clearPitch());
         player.audition(editor.selectedTrack());
     }
 
@@ -734,7 +838,7 @@ final class StudioFrame extends JFrame {
     }
 
     private void applyVelocity(Beat beat) {
-        Track track = beat.track(editor.trackIndex());
+        Track track = onScreen(beat);
         int step = editor.stepIndex();
         int value = velocity.getValue();
         if (step >= 0 && track.step(step).on()) {
@@ -744,9 +848,22 @@ final class StudioFrame extends JFrame {
         }
     }
 
+    private Track onScreen(Beat beat) {
+        return beat.slot(editor.viewSlot())[editor.trackIndex()];
+    }
+
+    /** Kits and copy bar act on the pattern currently on screen. */
+    private void editOnScreen(Consumer<Beat> action) {
+        char slot = editor.viewSlot();
+        editor.edit(beat -> {
+            beat.setActiveSlot(slot);
+            action.accept(beat);
+        });
+    }
+
     private void changeNote(int delta) {
         editor.edit(beat -> {
-            Track track = beat.track(editor.trackIndex());
+            Track track = onScreen(beat);
             track.setNote(track.note() + delta);
         });
         player.audition(editor.selectedTrack());
@@ -756,15 +873,159 @@ final class StudioFrame extends JFrame {
         if (editor.selectedTrack().mode() == mode) {
             return;
         }
-        editor.edit(beat -> beat.track(editor.trackIndex()).setMode(mode));
+        editor.edit(beat -> onScreen(beat).setMode(mode));
         player.audition(editor.selectedTrack());
     }
 
     private void switchSlot(char slot) {
-        if (syncing || editor.beat().activeSlot() == slot) {
+        if (syncing) {
+            return;
+        }
+        if (editor.songMode() && player.isPlaying()) {
+            if (editor.beat().activeSlot() != slot) {
+                editor.edit(beat -> beat.setActiveSlot(slot));
+            }
+            editor.holdSlot(slot);
+            status.setText(holdMessage(slot));
+            return;
+        }
+        if (editor.beat().activeSlot() == slot) {
             return;
         }
         editor.edit(beat -> beat.setActiveSlot(slot));
+    }
+
+    private void chooseMode(boolean song) {
+        if (song == editor.songMode()) {
+            if (song) {
+                editor.followAgain();
+                followNow();
+                status.setText(editor.beat().hasChain() ? "Following the song" : "Add A or B to the chain");
+            }
+            return;
+        }
+        int step = -1;
+        if (!song && player.isPlaying()) {
+            Chain.Place place = player.place(editor.beat());
+            if (place != null) {
+                step = place.step();
+            }
+        }
+        editor.setSongMode(song);
+        if (!player.isPlaying()) {
+            return;
+        }
+        if (song && editor.beat().hasChain()) {
+            player.play(editor.beat(), true);
+            followNow();
+            return;
+        }
+        long tick = step < 0 ? 0 : SequenceBuilder.tickForStep(step, editor.beat().swing());
+        player.play(editor.beat(), false, tick);
+    }
+
+    private void followNow() {
+        if (!player.isPlaying() || !editor.beat().hasChain()) {
+            return;
+        }
+        Chain.Place place = player.place(editor.beat());
+        if (place != null) {
+            editor.showPlayingSlot(place.slot());
+        }
+    }
+
+    private void appendChain(char slot) {
+        if (editor.beat().chain().size() >= Chain.MAX_PARTS) {
+            status.setText("The chain holds " + Chain.MAX_PARTS + " entries");
+            return;
+        }
+        chainIndex = editor.beat().chain().size();
+        editor.edit(beat -> beat.addChain(slot));
+        status.setText("Added " + slotName(slot) + " to the chain");
+    }
+
+    private void removeSelectedChain() {
+        int index = chainIndex;
+        if (index < 0 || index >= editor.beat().chain().size()) {
+            return;
+        }
+        editor.edit(beat -> beat.removeChain(index));
+        chainIndex = Math.min(chainIndex, editor.beat().chain().size() - 1);
+        refresh();
+    }
+
+    private void moveSelectedChain(int delta) {
+        int index = chainIndex;
+        int target = index + delta;
+        if (index < 0 || target < 0 || target >= editor.beat().chain().size()) {
+            return;
+        }
+        chainIndex = target;
+        editor.edit(beat -> beat.moveChain(index, delta));
+    }
+
+    private void selectChain(int index) {
+        chainIndex = index;
+        if (editor.songMode() && player.isPlaying() && index >= 0 && index < editor.beat().chain().size()) {
+            char slot = editor.beat().chain().get(index).slot();
+            editor.holdSlot(slot);
+            status.setText(holdMessage(slot));
+        }
+        refresh();
+    }
+
+    private void refreshChain() {
+        paintToggle(patternMode, !editor.songMode());
+        paintToggle(songMode, editor.songMode());
+        List<Chain.Part> chain = editor.beat().chain();
+        if (chainIndex >= chain.size()) {
+            chainIndex = chain.size() - 1;
+        }
+        String signature = chainIndex + " " + chain;
+        if (!signature.equals(chainButtons)) {
+            chainButtons = signature;
+            chainSlots.removeAll();
+            for (int i = 0; i < chain.size(); i++) {
+                Chain.Part part = chain.get(i);
+                String name = slotName(part.slot());
+                String text = part.repeats() == 1 ? name : name + "×" + part.repeats();
+                JButton partButton = button(text);
+                int index = i;
+                partButton.setToolTipText(name + " plays " + part.repeats() + (part.repeats() == 1 ? " time" : " times") + ". Click to select.");
+                partButton.addActionListener(event -> selectChain(index));
+                paintToggle(partButton, i == chainIndex);
+                chainSlots.add(partButton);
+                if (i + 1 < chain.size()) {
+                    chainSlots.add(Box.createHorizontalStrut(4));
+                }
+            }
+            if (chain.isEmpty()) {
+                JLabel empty = label("empty");
+                empty.setForeground(Theme.MUTED);
+                chainSlots.add(empty);
+            }
+            chainSlots.revalidate();
+            chainSlots.repaint();
+        }
+        boolean selected = chainIndex >= 0 && chainIndex < chain.size();
+        boolean room = chain.size() < Chain.MAX_PARTS;
+        addChainA.setEnabled(room);
+        addChainB.setEnabled(room);
+        removeChain.setEnabled(selected);
+        chainUp.setEnabled(selected && chainIndex > 0);
+        chainDown.setEnabled(selected && chainIndex + 1 < chain.size());
+        chainRepeats.setEnabled(selected);
+        if (selected) {
+            chainRepeats.setValue(chain.get(chainIndex).repeats());
+        }
+    }
+
+    private static String slotName(char slot) {
+        return slot == 'b' ? "B" : "A";
+    }
+
+    private static String holdMessage(char slot) {
+        return "Holding pattern " + slotName(slot) + ". Click Song to follow the chain.";
     }
 
     private void togglePlay() {
@@ -777,8 +1038,14 @@ final class StudioFrame extends JFrame {
         }
         if (player.isPlaying()) {
             player.stop();
+            editor.stopped();
         } else {
-            player.play(editor.beat());
+            boolean arranged = editor.songMode() && editor.beat().hasChain();
+            if (editor.songMode() && !arranged) {
+                status.setText("The chain is empty. Playing pattern " + slotName(editor.beat().activeSlot()) + ".");
+            }
+            editor.followAgain();
+            player.play(editor.beat(), arranged);
         }
         updatePlayButton();
     }
@@ -821,7 +1088,7 @@ final class StudioFrame extends JFrame {
         if (next.isEmpty() || next.equals(editor.selectedTrack().name())) {
             return;
         }
-        editor.edit(beat -> beat.track(editor.trackIndex()).setName(next));
+        editor.edit(beat -> onScreen(beat).setName(next));
     }
 
     private void loadSelected() {
@@ -1052,8 +1319,28 @@ final class StudioFrame extends JFrame {
         asHeard.setToolTipText("Off writes every track. On leaves muted tracks out and respects solo.");
         JCheckBox both = new JCheckBox("A then B");
         both.setToolTipText("Write pattern A followed by pattern B.");
+        JCheckBox song = new JCheckBox("Song");
+        boolean hasChain = editor.beat().hasChain();
+        song.setEnabled(hasChain);
+        song.setToolTipText(hasChain
+            ? "Write the chain. Each entry's repeats are included."
+            : "Add a chain with +A or +B first.");
         JSpinner repeats = new JSpinner(new SpinnerNumberModel(1, 1, ExportOptions.MAX_REPEATS, 1));
         repeats.setToolTipText("How many times to write that material, from 1 to " + ExportOptions.MAX_REPEATS + ".");
+        song.addActionListener(event -> {
+            if (song.isSelected()) {
+                both.setSelected(false);
+            }
+            both.setEnabled(!song.isSelected());
+            repeats.setEnabled(!song.isSelected());
+        });
+        both.addActionListener(event -> {
+            if (both.isSelected()) {
+                song.setSelected(false);
+                both.setEnabled(true);
+                repeats.setEnabled(true);
+            }
+        });
         JPanel accessory = new JPanel();
         accessory.setLayout(new BoxLayout(accessory, BoxLayout.Y_AXIS));
         accessory.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
@@ -1063,6 +1350,7 @@ final class StudioFrame extends JFrame {
         accessory.add(Box.createVerticalStrut(6));
         accessory.add(asHeard);
         accessory.add(both);
+        accessory.add(song);
         accessory.add(Box.createVerticalStrut(6));
         JPanel repeatRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         repeatRow.add(new JLabel("Repeats"));
@@ -1077,7 +1365,13 @@ final class StudioFrame extends JFrame {
         if (!path.toString().toLowerCase(Locale.ROOT).endsWith(suffix)) {
             path = path.resolveSibling(path.getFileName() + suffix);
         }
-        ExportOptions options = new ExportOptions(asHeard.isSelected(), both.isSelected(), (Integer) repeats.getValue());
+        boolean songChain = song.isSelected() && hasChain;
+        ExportOptions options = new ExportOptions(
+            asHeard.isSelected(),
+            both.isSelected() && !songChain,
+            (Integer) repeats.getValue(),
+            songChain
+        );
         return new ExportChoice(path, options);
     }
 
@@ -1085,6 +1379,9 @@ final class StudioFrame extends JFrame {
 
     private static String exportSummary(ExportOptions options) {
         String heard = options.asHeard() ? "as heard" : "all tracks";
+        if (options.song()) {
+            return " (" + heard + ", song)";
+        }
         String span = options.bothSlots() ? ", A then B" : "";
         String times = options.repeats() == 1 ? "" : ", " + options.repeats() + " times";
         return " (" + heard + span + times + ")";
@@ -1100,7 +1397,7 @@ final class StudioFrame extends JFrame {
     }
 
     private void applyKit(String name, Consumer<Beat> kit) {
-        String slot = editor.beat().activeSlot() == 'b' ? "B" : "A";
+        String slot = slotName(editor.viewSlot());
         int choice = JOptionPane.showConfirmDialog(
             this,
             name + " replaces pattern " + slot + ", the tempo, and the swing.\nThe other pattern is kept.",
@@ -1109,7 +1406,7 @@ final class StudioFrame extends JFrame {
             JOptionPane.WARNING_MESSAGE
         );
         if (choice == JOptionPane.OK_OPTION) {
-            editor.edit(kit);
+            editOnScreen(kit);
             status.setText(name + " on pattern " + slot);
         }
     }

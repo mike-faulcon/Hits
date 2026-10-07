@@ -91,14 +91,15 @@ final class PatternPanel extends JPanel implements Scrollable {
     }
 
     private void paintRow(Graphics2D g, Metrics metrics, FontMetrics names, int row) {
-        Track track = editor.beat().track(row);
+        Track[] tracks = editor.viewTracks();
+        Track track = tracks[row];
         int y = metrics.header + row * metrics.cellHeight;
         if (row == editor.trackIndex()) {
             g.setColor(Theme.SELECT);
             g.fillRect(0, y, getWidth(), metrics.cellHeight);
         }
         Composite previous = g.getComposite();
-        if (!editor.beat().audible(track)) {
+        if (!Beat.audibleIn(tracks, track)) {
             g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f));
         }
         g.setColor(Theme.MUTED);
@@ -187,7 +188,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         }
         int column = row >= 0 ? metrics.columnAt(event.getX(), event.getY()) : -1;
         if (column >= 0) {
-            Step step = editor.beat().track(row).step(column);
+            Step step = editor.viewTrack(row).step(column);
             String pitch = step.hasPitch() ? " Step pitch " + Notes.name(step.pitch()) + "." : "";
             return "Click toggles the step. Shift-click makes a loud hit. Right-click or Alt-click selects it so you can change its volume or step pitch." + pitch;
         }

@@ -47,6 +47,14 @@ public final class SequenceBuilder {
         return found;
     }
 
+    /** Playback of the song chain, as heard. An empty chain is the active pattern. */
+    public static Sequence buildSong(Beat beat) throws InvalidMidiDataException {
+        if (!beat.hasChain()) {
+            return build(beat);
+        }
+        return export(beat, new ExportOptions(true, false, 1, true));
+    }
+
     /** Playback sequence: the active slot, once, with mute and solo applied. */
     public static Sequence build(Beat beat) throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
@@ -78,20 +86,23 @@ public final class SequenceBuilder {
     /**
      * File export. The default options write every track and ignore mute and solo.
      * Repeats append the same notes later in the file. Both slots play A, then B, and that pair repeats.
+     * Song writes the chain once; each entry already carries its own repeats.
      */
     public static Sequence export(Beat beat, ExportOptions options) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.allTracks() : options;
+        boolean song = chosen.song() && beat.hasChain();
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
         int steps = beat.stepCount();
         long sectionTicks = loopTicks(steps);
-        int sections = chosen.sections();
+        int sections = song ? Chain.sections(beat.chain()) : chosen.sections();
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
         tempo.add(new MidiEvent(marker("end"), sectionTicks * sections));
 
+        boolean span = song ? Chain.usesBoth(beat.chain()) : chosen.bothSlots();
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int section = 0; section < sections; section++) {
-            char slot = chosen.slotAt(section, beat.activeSlot());
+            char slot = song ? Chain.slotAt(beat.chain(), section) : chosen.slotAt(section, beat.activeSlot());
             hits.Track[] tracks = beat.slot(slot);
             long offset = section * sectionTicks;
             for (int i = 0; i < tracks.length; i++) {
@@ -101,7 +112,7 @@ public final class SequenceBuilder {
                 }
                 if (midiTracks[i] == null) {
                     midiTracks[i] = sequence.createTrack();
-                    midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i)), 0));
+                    midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i, span)), 0));
                 }
                 int channel = track.mode() == TrackMode.DRUM ? Gm.DRUM_CHANNEL : i;
                 if (track.mode() == TrackMode.NOTE) {
@@ -115,9 +126,9 @@ public final class SequenceBuilder {
         return sequence;
     }
 
-    private static String exportName(Beat beat, ExportOptions options, char slot, int row) {
+    private static String exportName(Beat beat, ExportOptions options, char slot, int row, boolean both) {
         hits.Track current = beat.slot(slot)[row];
-        if (!options.bothSlots()) {
+        if (!both) {
             return current.name();
         }
         char otherSlot = slot == 'b' ? 'a' : 'b';
