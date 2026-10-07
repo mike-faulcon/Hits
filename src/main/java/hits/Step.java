@@ -39,6 +39,27 @@ public final class Step {
         this.velocity = clamp(velocity);
     }
 
+    /**
+     * Grid tint for this cell. A hit at or above the track's loud-hit value is an accent.
+     * Quieter hits, under 80 and below that value, draw dimmer than a normal hit.
+     */
+    public Shade shade(int accent) {
+        if (!on) {
+            return Shade.OFF;
+        }
+        if (velocity >= accent) {
+            return Shade.ACCENT;
+        }
+        if (velocity < 80) {
+            return Shade.QUIET;
+        }
+        return Shade.NORMAL;
+    }
+
+    public enum Shade {
+        OFF, QUIET, NORMAL, ACCENT
+    }
+
     private static int clamp(int velocity) {
         return Math.max(1, Math.min(127, velocity));
     }

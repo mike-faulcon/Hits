@@ -16,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BeatTest {
@@ -122,7 +123,9 @@ class BeatTest {
         Kits.boomBap(beat);
         Path saved = BeatFiles.save(beat, directory);
         assertEquals("Take1.json", saved.getFileName().toString());
+        assertEquals("Take 1", beat.name());
         Beat loaded = BeatFiles.load(saved);
+        assertEquals("Take 1", loaded.name());
         assertEquals(96, loaded.bpm());
         assertTrue(loaded.track(0).step(0).on());
 
@@ -247,6 +250,185 @@ class BeatTest {
     }
 
     @Test
+    void saveKeepsTheDisplayNameAndPlansThePrompt(@TempDir Path directory) throws Exception {
+        Beat beat = Beat.drumKit("Album Track – v3 (final)");
+        beat.track(0).tap(0, false);
+        Path saved = BeatFiles.save(beat, directory);
+        assertEquals("AlbumTrackv3final.json", saved.getFileName().toString());
+        assertEquals("Album Track – v3 (final)", beat.name());
+        Beat loaded = BeatFiles.load(saved);
+        assertEquals("Album Track – v3 (final)", loaded.name());
+        assertTrue(loaded.track(0).step(0).on());
+
+        Beat emoji = Beat.drumKit("🔥");
+        assertThrows(IllegalArgumentException.class, () -> BeatFiles.save(emoji, directory));
+        assertEquals("🔥", emoji.name());
+
+        assertEquals("and", BeatFiles.safeName("ñandú"));
+        assertEquals("myfirebeat", BeatFiles.safeName("my fire beat"));
+        assertEquals("", BeatFiles.safeName("!!!"));
+        assertEquals("", BeatFiles.safeName(null));
+
+        Path target = directory.resolve("AlbumTrackv3final.json");
+        assertEquals(BeatFiles.SaveChoice.CONFIRM_NAME,
+            BeatFiles.plan("Album Track – v3 (final)", target, null, false, false));
+        assertEquals(BeatFiles.SaveChoice.CONFIRM_REPLACE,
+            BeatFiles.plan("Take1", target, null, false, true));
+        assertEquals(BeatFiles.SaveChoice.WRITE,
+            BeatFiles.plan("Take1", target, target, false, true));
+        assertEquals(BeatFiles.SaveChoice.WRITE,
+            BeatFiles.plan("Take 1", target, target, false, true));
+        assertEquals(BeatFiles.SaveChoice.CONFIRM_REPLACE,
+            BeatFiles.plan("Take1", target, target, true, true));
+        assertEquals(BeatFiles.SaveChoice.CONFIRM_NAME,
+            BeatFiles.plan("Take 1", directory.resolve("Other.json"), null, false, false));
+    }
+
+    @Test
+    void exportKeepsMutedTracksUnlessAsHeard(@TempDir Path directory) throws Exception {
+        Beat beat = Beat.drumKit("t");
+        beat.track(0).setGate(50);
+        beat.track(0).tap(0, false);
+        beat.track(0).tap(1, false);
+        assertEquals(
+            noteOffTicks(SequenceBuilder.build(beat)),
+            noteOffTicks(SequenceBuilder.export(beat, ExportOptions.allTracks()))
+        );
+
+        beat.track(0).setMute(true);
+        beat.track(1).tap(0, false);
+        List<ShortMessage> playback = noteOns(SequenceBuilder.build(beat));
+        assertEquals(1, playback.size());
+        assertEquals(38, playback.get(0).getData1());
+        List<ShortMessage> all = noteOns(SequenceBuilder.export(beat, ExportOptions.allTracks()));
+        assertEquals(3, all.size());
+        assertTrue(all.stream().anyMatch(message -> message.getData1() == 36));
+        assertTrue(all.stream().anyMatch(message -> message.getData1() == 38));
+
+        List<ShortMessage> heard = noteOns(SequenceBuilder.export(beat, ExportOptions.matchingPlayback()));
+        assertEquals(1, heard.size());
+        assertEquals(38, heard.get(0).getData1());
+
+        beat.track(0).setMute(false);
+        beat.track(1).setSolo(true);
+        assertEquals(3, noteOns(SequenceBuilder.export(beat, ExportOptions.allTracks())).size());
+        List<ShortMessage> solo = noteOns(SequenceBuilder.export(beat, ExportOptions.matchingPlayback()));
+        assertEquals(1, solo.size());
+        assertEquals(38, solo.get(0).getData1());
+
+        Path midi = directory.resolve("t.mid");
+        beat.track(1).setSolo(false);
+        beat.track(0).setMute(true);
+        beat.track(1).tap(0, true);
+        BeatFiles.exportMidi(beat, midi);
+        assertFalse(noteOns(MidiSystem.getSequence(midi.toFile())).isEmpty());
+        Path heardFile = directory.resolve("heard.mid");
+        BeatFiles.exportMidi(beat, heardFile, ExportOptions.matchingPlayback());
+        List<ShortMessage> heardFileNotes = noteOns(MidiSystem.getSequence(heardFile.toFile()));
+        assertTrue(heardFileNotes.stream().noneMatch(message -> message.getData1() == 36));
+        assertFalse(heardFileNotes.isEmpty());
+    }
+
+    @Test
+    void exportCanChainSlotsAndRepeat() throws Exception {
+        assertEquals(1, new ExportOptions(false, false, 0).repeats());
+        assertEquals(ExportOptions.MAX_REPEATS, new ExportOptions(false, true, 100).repeats());
+        assertEquals(ExportOptions.MAX_REPEATS * 2, new ExportOptions(false, true, 100).sections());
+
+        Beat beat = Beat.drumKit("t");
+        beat.track(0).tap(0, false);
+        beat.setActiveSlot('b');
+        beat.track(1).tap(0, false);
+        beat.track(6).setMode(TrackMode.NOTE);
+        beat.track(6).setProgram(40);
+        beat.track(6).setNote(48);
+        beat.track(6).tap(0, false);
+        beat.setActiveSlot('a');
+        beat.track(6).setMode(TrackMode.NOTE);
+        beat.track(6).setProgram(33);
+        beat.track(6).setNote(36);
+        beat.track(6).tap(0, false);
+
+        long bar = SequenceBuilder.loopTicks(16);
+        Sequence chained = SequenceBuilder.export(beat, new ExportOptions(false, true, 1));
+        List<MidiEvent> notes = noteOnEvents(chained);
+        assertEquals(4, notes.size());
+        assertEquals(0, tickOf(notes, Gm.DRUM_CHANNEL, 36));
+        assertEquals(0, tickOf(notes, 6, 36));
+        assertEquals(bar, tickOf(notes, Gm.DRUM_CHANNEL, 38));
+        assertEquals(bar, tickOf(notes, 6, 48));
+        assertEquals(bar * 2, markerTick(chained));
+        assertTrue(programTicks(chained, 33).contains(0L));
+        assertTrue(programTicks(chained, 40).contains(bar));
+
+        beat.setActiveSlot('b');
+        Sequence repeated = SequenceBuilder.export(beat, new ExportOptions(false, false, 3));
+        List<MidiEvent> reps = noteOnEvents(repeated);
+        assertEquals(6, reps.size());
+        assertEquals(List.of(0L, bar, bar * 2), ticksOf(reps, Gm.DRUM_CHANNEL, 38));
+        assertEquals(List.of(0L, bar, bar * 2), ticksOf(reps, 6, 48));
+        assertEquals(bar * 3, markerTick(repeated));
+
+        Sequence pairTwice = SequenceBuilder.export(beat, new ExportOptions(false, true, 2));
+        List<MidiEvent> pairs = noteOnEvents(pairTwice);
+        assertEquals(8, pairs.size());
+        assertEquals(List.of(0L, bar * 2), ticksOf(pairs, Gm.DRUM_CHANNEL, 36));
+        assertEquals(List.of(bar, bar * 3), ticksOf(pairs, Gm.DRUM_CHANNEL, 38));
+        assertEquals(bar * 4, markerTick(pairTwice));
+    }
+
+    @Test
+    void exportAsHeardUsesEachSlotsOwnSolo() throws Exception {
+        Beat beat = Beat.drumKit("t");
+        beat.track(0).tap(0, false);
+        beat.track(1).tap(4, false);
+        beat.track(0).setSolo(true);
+        beat.setActiveSlot('b');
+        beat.track(1).setName("Rim");
+        beat.track(1).tap(0, false);
+        beat.setActiveSlot('a');
+
+        List<MidiEvent> heard = noteOnEvents(SequenceBuilder.export(beat, new ExportOptions(true, true, 1)));
+        assertEquals(2, heard.size());
+        assertEquals(0, heard.get(0).getTick());
+        assertEquals(36, ((ShortMessage) heard.get(0).getMessage()).getData1());
+        assertEquals(SequenceBuilder.loopTicks(16), heard.get(1).getTick());
+        assertEquals(38, ((ShortMessage) heard.get(1).getMessage()).getData1());
+
+        List<String> names = trackNames(SequenceBuilder.export(beat, new ExportOptions(false, true, 1)));
+        assertTrue(names.contains("Snare / Rim"));
+        List<String> heardNames = trackNames(SequenceBuilder.export(beat, new ExportOptions(true, true, 1)));
+        assertTrue(heardNames.contains("Rim"));
+        assertFalse(heardNames.contains("Snare / Rim"));
+    }
+
+    @Test
+    void selectingAStepLeavesItOn() {
+        Editor editor = new Editor(Beat.drumKit("t"));
+        editor.tap(0, 3, false);
+        editor.markClean();
+        int velocity = editor.beat().track(0).step(3).velocity();
+        editor.selectStep(0, 3);
+        assertTrue(editor.beat().track(0).step(3).on());
+        assertEquals(velocity, editor.beat().track(0).step(3).velocity());
+        assertEquals(0, editor.trackIndex());
+        assertEquals(3, editor.stepIndex());
+        assertFalse(editor.isDirty());
+        editor.selectStep(-1, 0);
+        assertEquals(3, editor.stepIndex());
+    }
+
+    @Test
+    void stepTintFollowsTheLoudHitValue() {
+        assertEquals(Step.Shade.QUIET, new Step(true, 70).shade(120));
+        assertEquals(Step.Shade.NORMAL, new Step(true, 100).shade(120));
+        assertEquals(Step.Shade.NORMAL, new Step(true, 110).shade(120));
+        assertEquals(Step.Shade.ACCENT, new Step(true, 100).shade(100));
+        assertEquals(Step.Shade.ACCENT, new Step(true, 110).shade(100));
+        assertEquals(Step.Shade.OFF, new Step(false, 127).shade(1));
+    }
+
+    @Test
     void shiftClickUsesTheAccentVelocity() {
         Track kick = Beat.drumKit("t").track(0);
         kick.tap(0, true);
@@ -294,6 +476,62 @@ class BeatTest {
             }
         }
         return ticks;
+    }
+
+    private static long tickOf(List<MidiEvent> notes, int channel, int note) {
+        List<Long> ticks = ticksOf(notes, channel, note);
+        assertEquals(1, ticks.size());
+        return ticks.get(0);
+    }
+
+    private static List<Long> ticksOf(List<MidiEvent> notes, int channel, int note) {
+        List<Long> ticks = new ArrayList<>();
+        for (MidiEvent event : notes) {
+            ShortMessage message = (ShortMessage) event.getMessage();
+            if (message.getChannel() == channel && message.getData1() == note) {
+                ticks.add(event.getTick());
+            }
+        }
+        return ticks;
+    }
+
+    private static long markerTick(Sequence sequence) {
+        for (javax.sound.midi.Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                MidiEvent event = track.get(i);
+                if (event.getMessage() instanceof MetaMessage meta && meta.getType() == 0x06) {
+                    return event.getTick();
+                }
+            }
+        }
+        throw new AssertionError("missing end marker");
+    }
+
+    private static List<Long> programTicks(Sequence sequence, int program) {
+        List<Long> ticks = new ArrayList<>();
+        for (javax.sound.midi.Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                MidiEvent event = track.get(i);
+                if (event.getMessage() instanceof ShortMessage message
+                    && message.getCommand() == ShortMessage.PROGRAM_CHANGE
+                    && message.getData1() == program) {
+                    ticks.add(event.getTick());
+                }
+            }
+        }
+        return ticks;
+    }
+
+    private static List<String> trackNames(Sequence sequence) {
+        List<String> names = new ArrayList<>();
+        for (javax.sound.midi.Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                if (track.get(i).getMessage() instanceof MetaMessage meta && meta.getType() == 0x03) {
+                    names.add(new String(meta.getData(), java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+        }
+        return names;
     }
 
     private static int tempoMicros(Sequence sequence) throws Exception {

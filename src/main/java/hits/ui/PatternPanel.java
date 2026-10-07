@@ -2,10 +2,12 @@ package hits.ui;
 
 import hits.Beat;
 import hits.Editor;
+import hits.Step;
 import hits.Track;
 
 import javax.swing.JPanel;
 import javax.swing.Scrollable;
+import javax.swing.SwingUtilities;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -31,7 +33,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         setFocusable(true);
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        setToolTipText("Click a step. Shift-click sets the accent.");
+        setToolTipText("Click a step. Shift-click makes a loud hit. Right-click or Alt-click selects it.");
         addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
@@ -110,20 +112,15 @@ final class PatternPanel extends JPanel implements Scrollable {
         g.drawString(clip(g.getFontMetrics(), track.soundName(), 108), 28, y + metrics.cellHeight / 2 + 14);
         paintChip(g, metrics.mute(row), "M", track.mute(), Theme.MUTE_ON);
         paintChip(g, metrics.solo(row), "S", track.solo(), Theme.SOLO);
-            for (int column = 0; column < metrics.columns; column++) {
+        for (int column = 0; column < metrics.columns; column++) {
             Rectangle cell = metrics.step(row, column);
-            boolean on = track.step(column).on();
-            int velocity = track.step(column).velocity();
-            if (!on) {
-                g.setColor(Theme.STEP_OFF);
-            } else if (velocity >= 110) {
-                g.setColor(Theme.STEP_ACCENT);
-            } else if (velocity < 80) {
-                g.setColor(Theme.STEP_DIM);
-            } else {
-                g.setColor(Theme.STEP_ON);
-            }
+            g.setColor(colorFor(track.step(column).shade(track.accent())));
             g.fillRoundRect(cell.x, cell.y, cell.width, cell.height, 6, 6);
+            if (row == editor.trackIndex() && column == editor.stepIndex()) {
+                g.setColor(Theme.LINE);
+                g.setStroke(new BasicStroke(2f));
+                g.drawRoundRect(cell.x + 1, cell.y + 1, cell.width - 3, cell.height - 3, 6, 6);
+            }
         }
         g.setComposite(previous);
     }
@@ -155,11 +152,48 @@ final class PatternPanel extends JPanel implements Scrollable {
         }
         int column = metrics.columnAt(event.getX(), event.getY());
         if (column >= 0) {
-            boolean accent = (event.getModifiersEx() & MouseEvent.SHIFT_DOWN_MASK) != 0;
-            editor.tap(row, column, accent);
+            boolean selectOnly = SwingUtilities.isRightMouseButton(event)
+                || event.isAltDown()
+                || event.isPopupTrigger();
+            if (selectOnly) {
+                editor.selectStep(row, column);
+                return;
+            }
+            editor.tap(row, column, event.isShiftDown());
             return;
         }
         editor.selectTrack(row);
+    }
+
+    @Override
+    public String getToolTipText(MouseEvent event) {
+        if (event == null) {
+            return getToolTipText();
+        }
+        Metrics metrics = metrics();
+        int row = metrics.rowAt(event.getY());
+        if (row >= 0 && metrics.mute(row).contains(event.getPoint())) {
+            return "Mute this track";
+        }
+        if (row >= 0 && metrics.solo(row).contains(event.getPoint())) {
+            return "Solo this track. Other tracks go quiet.";
+        }
+        if (row >= 0 && metrics.columnAt(event.getX(), event.getY()) >= 0) {
+            return "Click toggles the step. Shift-click makes a loud hit. Right-click or Alt-click selects it so you can change its volume.";
+        }
+        if (row >= 0) {
+            return "Select this track";
+        }
+        return getToolTipText();
+    }
+
+    private static Color colorFor(Step.Shade shade) {
+        return switch (shade) {
+            case OFF -> Theme.STEP_OFF;
+            case QUIET -> Theme.STEP_DIM;
+            case ACCENT -> Theme.STEP_ACCENT;
+            case NORMAL -> Theme.STEP_ON;
+        };
     }
 
     private Metrics metrics() {

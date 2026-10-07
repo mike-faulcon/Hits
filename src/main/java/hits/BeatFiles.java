@@ -52,20 +52,60 @@ public final class BeatFiles {
         return BtfFormat.read(path);
     }
 
+    /**
+     * How Save should ask before writing. The display name stays in the JSON;
+     * only the file name is reduced to {@link #safeName(String)}.
+     */
+    public enum SaveChoice {
+        /** Same file as last time, and the name needs no explanation. */
+        WRITE,
+        /** Show the file name. It drops characters the display name still has. */
+        CONFIRM_NAME,
+        /** The destination already exists and is not the open file. */
+        CONFIRM_REPLACE
+    }
+
     public static Path save(Beat beat, Path directory) throws IOException {
-        Files.createDirectories(directory);
-        String safe = safeName(beat.name());
+        return write(beat, jsonFile(directory, beat.name()));
+    }
+
+    public static Path jsonFile(Path directory, String displayName) {
+        String safe = safeName(displayName);
         if (safe.isEmpty()) {
-            throw new IllegalArgumentException("Name the beat with letters, numbers, _ or -");
+            throw new IllegalArgumentException("Add a letter or number to the name before saving");
         }
-        beat.setName(safe);
-        Path path = directory.resolve(safe + ".json");
+        return directory.resolve(safe + ".json");
+    }
+
+    /** Writes the beat as-is. The display name in the file is not rewritten to the file stem. */
+    public static Path write(Beat beat, Path path) throws IOException {
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         Files.writeString(path, BeatJson.write(beat), StandardCharsets.UTF_8);
         return path;
     }
 
+    public static SaveChoice plan(String displayName, Path target, Path currentFile, boolean forcePrompt, boolean targetExists) {
+        String shown = displayName == null ? "" : displayName.trim();
+        boolean nameAdjusted = !safeName(shown).equals(shown);
+        boolean same = sameFile(target, currentFile);
+        if (targetExists && (forcePrompt || !same)) {
+            return SaveChoice.CONFIRM_REPLACE;
+        }
+        if (forcePrompt || (nameAdjusted && !same)) {
+            return SaveChoice.CONFIRM_NAME;
+        }
+        return SaveChoice.WRITE;
+    }
+
     public static void exportMidi(Beat beat, Path path) throws IOException, InvalidMidiDataException {
-        MidiSystem.write(SequenceBuilder.build(beat), 1, path.toFile());
+        exportMidi(beat, path, ExportOptions.allTracks());
+    }
+
+    public static void exportMidi(Beat beat, Path path, ExportOptions options) throws IOException, InvalidMidiDataException {
+        MidiSystem.write(SequenceBuilder.export(beat, options), 1, path.toFile());
     }
 
     public static String safeName(String name) {
@@ -73,6 +113,13 @@ public final class BeatFiles {
             return "";
         }
         return name.trim().replaceAll("[^A-Za-z0-9_\\-]", "");
+    }
+
+    private static boolean sameFile(Path left, Path right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.toAbsolutePath().normalize().equals(right.toAbsolutePath().normalize());
     }
 
     private static boolean isBeat(Path path) {

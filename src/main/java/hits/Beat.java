@@ -100,17 +100,20 @@ public final class Beat {
     }
 
     public boolean audible(Track track) {
+        return audibleIn(activeTracks(), track);
+    }
+
+    /** Mute and solo judged against one pattern slot, not whichever slot is on screen. */
+    public static boolean audibleIn(Track[] slot, Track track) {
         if (track.mute()) {
             return false;
         }
-        boolean anySolo = false;
-        for (Track candidate : activeTracks()) {
+        for (Track candidate : slot) {
             if (candidate.solo()) {
-                anySolo = true;
-                break;
+                return track.solo();
             }
         }
-        return !anySolo || track.solo();
+        return true;
     }
 
     /** Copies the first 16 steps onto the second bar and switches to 32 steps. */

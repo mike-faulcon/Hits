@@ -21,9 +21,6 @@ public final class HitsApp {
         Player player = new Player();
         player.open();
         StudioFrame frame = new StudioFrame(editor, player);
-        if (!player.isOpen()) {
-            frame.setTitle("Hits — MIDI unavailable");
-        }
         frame.setVisible(true);
     }
 
