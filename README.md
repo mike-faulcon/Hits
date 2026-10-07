@@ -21,7 +21,7 @@ Until you dismiss the hint, Hits opens on the Boom bap pattern, not playing. Und
 
 ## Song
 
-**Pattern** loops the A or B pattern on screen. **Song** loops the chain. The chain is a short list, not a timeline. **+A** and **+B** add an entry, **Remove** deletes the selected one, and **Up** / **Down** reorder it. **×** is how many times that entry plays, from 1 to 32. The chain holds 32 entries. Build something like A, A, B, A, and give any entry its own repeat count.
+**Pattern** loops the A or B pattern on screen. **Song** loops the chain. The chain is a short list, not a timeline. **+A** and **+B** add an entry, **Remove** deletes the selected one, and **Up** / **Down** reorder it. **×** is how many times that entry plays, from 1 to 32. The chain holds 32 entries. When they no longer fit, the entries scroll sideways and the chain buttons stay on the row. Build something like A, A, B, A, and give any entry its own repeat count.
 
 While a song plays, the grid shows the pattern you hear and the playhead sits on that grid. Click a step to edit the pattern on screen. The song keeps its place and picks up the edit. A slider stays on the pattern you started dragging, even if the song moves on, and follows again when you let go.
 

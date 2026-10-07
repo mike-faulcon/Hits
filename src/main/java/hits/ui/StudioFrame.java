@@ -253,11 +253,10 @@ final class StudioFrame extends JFrame {
 
     private JPanel buildHeader() {
         header.setOpaque(false);
-        JPanel stack = new JPanel();
+        JPanel stack = new JPanel(new BorderLayout());
         stack.setOpaque(false);
-        stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
-        stack.add(transport());
-        stack.add(chainBar());
+        stack.add(transport(), BorderLayout.NORTH);
+        stack.add(chainBar(), BorderLayout.SOUTH);
         header.add(stack, BorderLayout.NORTH);
         if (coachVisible) {
             coachBar = coachBanner();
@@ -267,38 +266,30 @@ final class StudioFrame extends JFrame {
     }
 
     private JPanel chainBar() {
-        JPanel bar = new JPanel();
-        bar.setLayout(new BoxLayout(bar, BoxLayout.X_AXIS));
+        JPanel bar = new JPanel(new BorderLayout(6, 0));
         bar.setOpaque(true);
         bar.setBackground(Theme.PANEL);
-        bar.setBorder(BorderFactory.createEmptyBorder(0, 12, 8, 12));
-        bar.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 64));
+        bar.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
         patternMode.setToolTipText("Play the pattern on screen and loop it.");
         songMode.setToolTipText("Play the chain and loop it. Click again to follow the pattern you hear.");
         fix(patternMode, 88, 32);
         fix(songMode, 72, 32);
-        bar.add(patternMode);
-        bar.add(Box.createHorizontalStrut(4));
-        bar.add(songMode);
-        bar.add(Box.createHorizontalStrut(12));
+        bar.add(row(patternMode, songMode), BorderLayout.WEST);
 
         chainSlots.setLayout(new BoxLayout(chainSlots, BoxLayout.X_AXIS));
-        chainSlots.setOpaque(true);
-        chainSlots.setBackground(Theme.PANEL);
-        JScrollPane chainScroll = new JScrollPane(chainSlots);
+        chainSlots.setOpaque(false);
+        JScrollPane chainScroll = new JScrollPane(
+            chainSlots,
+            JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+            JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        );
         chainScroll.setBorder(BorderFactory.createEmptyBorder());
         chainScroll.setOpaque(false);
         chainScroll.getViewport().setOpaque(true);
         chainScroll.getViewport().setBackground(Theme.PANEL);
-        chainScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        chainScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        chainScroll.setPreferredSize(new Dimension(180, 52));
-        chainScroll.setMinimumSize(new Dimension(96, 52));
-        chainScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
-        chainScroll.setAlignmentY(Component.CENTER_ALIGNMENT);
-        bar.add(chainScroll);
-        bar.add(Box.createHorizontalStrut(8));
+        chainScroll.setMinimumSize(new Dimension(72, 36));
+        chainScroll.setPreferredSize(new Dimension(180, 36));
+        bar.add(chainScroll, BorderLayout.CENTER);
 
         addChainA.setToolTipText("Add pattern A to the chain.");
         addChainB.setToolTipText("Add pattern B to the chain.");
@@ -310,21 +301,12 @@ final class StudioFrame extends JFrame {
         fix(addChainB, 48, 32);
         fix(chainUp, 52, 32);
         fix(chainDown, 64, 32);
-        bar.add(addChainA);
-        bar.add(Box.createHorizontalStrut(4));
-        bar.add(addChainB);
-        bar.add(Box.createHorizontalStrut(4));
-        bar.add(removeChain);
-        bar.add(Box.createHorizontalStrut(4));
-        bar.add(chainUp);
-        bar.add(Box.createHorizontalStrut(4));
-        bar.add(chainDown);
-        bar.add(Box.createHorizontalStrut(8));
         JLabel repeatsLabel = label("×");
         repeatsLabel.setToolTipText("Repeats for the selected entry.");
-        bar.add(repeatsLabel);
         fix(chainRepeats, 64, 32);
-        bar.add(chainRepeats);
+        bar.add(row(addChainA, addChainB, removeChain, chainUp, chainDown, repeatsLabel, chainRepeats), BorderLayout.EAST);
+        bar.setMinimumSize(new Dimension(720, 52));
+        bar.setPreferredSize(new Dimension(960, 52));
         return bar;
     }
 
