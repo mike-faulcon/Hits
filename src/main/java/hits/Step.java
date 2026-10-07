@@ -1,9 +1,11 @@
 package hits;
 
-/** One cell in a track. Velocity is kept when the cell is turned off. */
+/** One cell in a track. Velocity is kept when the cell is turned off. Pitch is optional. */
 public final class Step {
     private boolean on;
     private int velocity;
+    /** {@code -1} plays the track note. Any other value is a MIDI note for this step only. */
+    private int pitch = -1;
 
     public Step() {
         this(false, 100);
@@ -15,12 +17,15 @@ public final class Step {
     }
 
     public Step copy() {
-        return new Step(on, velocity);
+        Step copy = new Step(on, velocity);
+        copy.pitch = pitch;
+        return copy;
     }
 
     public void copyFrom(Step other) {
         this.on = other.on;
         this.velocity = other.velocity;
+        this.pitch = other.pitch;
     }
 
     public boolean on() {
@@ -37,6 +42,27 @@ public final class Step {
 
     public void setVelocity(int velocity) {
         this.velocity = clamp(velocity);
+    }
+
+    public boolean hasPitch() {
+        return pitch >= 0;
+    }
+
+    /** The step's own MIDI note, or {@code -1} when the step uses the track note. */
+    public int pitch() {
+        return pitch;
+    }
+
+    public void setPitch(int pitch) {
+        this.pitch = Notes.clamp(pitch);
+    }
+
+    public void clearPitch() {
+        this.pitch = -1;
+    }
+
+    public int soundingNote(int trackNote) {
+        return pitch >= 0 ? pitch : Notes.clamp(trackNote);
     }
 
     /**

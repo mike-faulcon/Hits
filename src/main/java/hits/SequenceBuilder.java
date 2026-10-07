@@ -152,11 +152,12 @@ public final class SequenceBuilder {
             if (start + length > end) {
                 length = Math.max(1, end - start);
             }
+            int note = cell.soundingNote(track.note());
             ShortMessage on = new ShortMessage();
-            on.setMessage(ShortMessage.NOTE_ON, channel, track.note(), cell.velocity());
+            on.setMessage(ShortMessage.NOTE_ON, channel, note, cell.velocity());
             midi.add(new MidiEvent(on, start));
             ShortMessage off = new ShortMessage();
-            off.setMessage(ShortMessage.NOTE_OFF, channel, track.note(), 0);
+            off.setMessage(ShortMessage.NOTE_OFF, channel, note, 0);
             midi.add(new MidiEvent(off, start + length));
         }
     }

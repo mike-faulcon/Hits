@@ -3,12 +3,14 @@ package hits;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiEvent;
 import javax.sound.midi.MidiMessage;
 import javax.sound.midi.MidiSystem;
 import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
+import javax.sound.midi.Soundbank;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,6 +18,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -201,6 +205,9 @@ class BeatTest {
         assertTrue(beat.track(0).step(19).on());
         assertEquals(accent, beat.track(0).step(19).velocity());
         assertFalse(beat.slot('b')[0].step(16).on());
+        beat.track(0).step(0).setPitch(40);
+        beat.copyBar();
+        assertEquals(40, beat.track(0).step(16).pitch());
     }
 
     @Test
@@ -437,6 +444,171 @@ class BeatTest {
         kick.tap(0, true);
         assertEquals(100, kick.step(0).velocity());
         assertTrue(kick.step(0).on());
+    }
+
+    @Test
+    void version1DocumentMigratesAndStepPitchWritesVersion2() {
+        Beat legacy = BeatJson.read(minimalBeat(1, "", ""));
+        assertEquals(1, BeatJson.documentVersion(legacy));
+        assertEquals("old", legacy.name());
+        assertEquals(90, legacy.bpm());
+        assertEquals(52, legacy.swing());
+        assertEquals('b', legacy.activeSlot());
+        assertTrue(legacy.track(0).step(0).on());
+        assertEquals(90, legacy.track(0).step(0).velocity());
+        assertFalse(legacy.track(0).step(0).hasPitch());
+        assertEquals(36, legacy.track(0).step(0).soundingNote(legacy.track(0).note()));
+        assertFalse(legacy.track(0).step(1).on());
+        assertEquals(64, legacy.track(3).program());
+
+        Beat withField = BeatJson.read(minimalBeat(1, ",\"pitch\": 50", ""));
+        assertEquals(50, withField.track(0).step(0).pitch());
+        assertEquals(50, withField.track(0).step(0).soundingNote(36));
+        assertTrue(BeatJson.write(withField).contains("\"version\": 2"));
+        assertTrue(BeatJson.write(withField).contains("\"pitch\":50"));
+
+        Beat version2 = BeatJson.read(minimalBeat(2, "", ",\"pan\": 64"));
+        assertFalse(version2.hasStepPitch());
+        assertEquals(1, BeatJson.documentVersion(version2));
+        assertTrue(BeatJson.write(version2).contains("\"version\": 1"));
+        assertFalse(BeatJson.write(Beat.drumKit("plain")).contains("pitch"));
+
+        Beat pitched = Beat.drumKit("t");
+        pitched.slot('b')[2].step(4).setOn(true);
+        pitched.slot('b')[2].step(4).setPitch(70);
+        assertEquals(2, BeatJson.documentVersion(pitched));
+        Beat loaded = BeatJson.read(BeatJson.write(pitched));
+        assertEquals(70, loaded.slot('b')[2].step(4).pitch());
+        assertFalse(loaded.slot('a')[2].step(4).hasPitch());
+        loaded.slot('b')[2].step(4).clearPitch();
+        assertEquals(1, BeatJson.documentVersion(loaded));
+
+        assertThrows(IllegalArgumentException.class, () -> BeatJson.read(minimalBeat(0, "", "")));
+        IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class, () -> BeatJson.read(minimalBeat(3, "", "")));
+        assertTrue(rejected.getMessage().contains("3"));
+
+        Step step = new Step(true, 100);
+        step.setPitch(200);
+        assertEquals(127, step.pitch());
+        step.setPitch(-3);
+        assertEquals(0, step.pitch());
+        assertEquals(0, step.soundingNote(60));
+        step.clearPitch();
+        assertFalse(step.hasPitch());
+        assertEquals(60, step.soundingNote(60));
+    }
+
+    @Test
+    void stepPitchIsTheNoteThatPlaysAndExports() throws Exception {
+        Beat beat = Beat.drumKit("t");
+        beat.track(0).setNote(36);
+        beat.track(0).tap(0, false);
+        beat.track(0).tap(1, false);
+        beat.track(0).step(1).setPitch(40);
+        List<ShortMessage> notes = noteOns(SequenceBuilder.build(beat));
+        assertEquals(36, notes.get(0).getData1());
+        assertEquals(40, notes.get(1).getData1());
+        List<MidiEvent> exported = noteOnEvents(SequenceBuilder.export(beat, ExportOptions.allTracks()));
+        assertEquals(0L, exported.get(0).getTick());
+        assertEquals(36, ((ShortMessage) exported.get(0).getMessage()).getData1());
+        assertEquals(24L, exported.get(1).getTick());
+        assertEquals(40, ((ShortMessage) exported.get(1).getMessage()).getData1());
+
+        beat.track(0).setNote(38);
+        notes = noteOns(SequenceBuilder.build(beat));
+        assertEquals(38, notes.get(0).getData1());
+        assertEquals(40, notes.get(1).getData1());
+    }
+
+    @Test
+    void beatsFolderRemembersAnAbsolutePath(@TempDir Path directory) {
+        Path project = directory.resolve("project");
+        assertEquals(project.resolve("beats").normalize(), BeatFolders.resolve(null, project));
+        assertEquals(project.resolve("beats").normalize(), BeatFolders.resolve("  ", project));
+        assertEquals(project.resolve("mybeats").normalize(), BeatFolders.resolve("mybeats", project));
+        Path library = directory.resolve("library");
+        String stored = BeatFolders.remember(library);
+        assertEquals(library.toAbsolutePath().normalize().toString(), stored);
+        assertEquals(library.toAbsolutePath().normalize(), BeatFolders.resolve(stored, directory.resolve("elsewhere")));
+        assertTrue(Path.of(BeatFolders.remember(Path.of("beats"))).isAbsolute());
+        assertThrows(IllegalArgumentException.class, () -> BeatFolders.remember(null));
+    }
+
+    @Test
+    void midiOutputChoiceFallsBackToTheBuiltInSynth() {
+        assertEquals("Bus 1|Apple|IAC", MidiOutputs.idFor("Bus 1", "Apple", "IAC"));
+        assertEquals("a%7Cb|c%25d|", MidiOutputs.idFor("a|b", "c%d", null));
+        assertEquals("Apple IAC Driver", MidiOutputs.labelFor("Apple IAC Driver", "Apple"));
+        assertEquals("Bus 1 (Apple Inc.)", MidiOutputs.labelFor("Bus 1", "Apple Inc."));
+        assertEquals("MIDI output", MidiOutputs.labelFor("  ", null));
+        assertEquals(MidiOutputs.BUILTIN_ID, MidiOutputs.resolve(null, java.util.List.of()));
+        assertEquals(MidiOutputs.BUILTIN_ID, MidiOutputs.resolve("gone", java.util.List.of(MidiOutputs.BUILTIN_ID, "other")));
+        assertEquals("other", MidiOutputs.resolve("other", java.util.List.of(MidiOutputs.BUILTIN_ID, "other")));
+
+        java.util.List<MidiOutputs.Choice> choices = MidiOutputs.list();
+        assertFalse(choices.isEmpty());
+        assertEquals(MidiOutputs.BUILTIN_ID, choices.get(0).id());
+        assertEquals(MidiOutputs.BUILTIN_LABEL, choices.get(0).label());
+        assertEquals(choices.size(), choices.stream().map(MidiOutputs.Choice::id).distinct().count());
+        assertTrue(choices.stream().noneMatch(choice -> choice.label().equals("Gervill")));
+        assertTrue(choices.stream().noneMatch(choice -> choice.label().equals("Real Time Sequencer")));
+        assertEquals(MidiOutputs.BUILTIN_ID, MidiOutputs.resolve("unplugged", choices.stream().map(MidiOutputs.Choice::id).toList()));
+    }
+
+    @Test
+    void soundFontLoadsThroughTheJdkReader(@TempDir Path directory) throws Exception {
+        Path fixture = Path.of("src/test/resources/hits-test.sf2");
+        Soundbank bank = SoundFonts.read(fixture);
+        assertEquals("Hits Test", SoundFonts.displayName(bank, fixture));
+        assertEquals("custom.sf2", SoundFonts.displayName(null, directory.resolve("custom.sf2")));
+        assertTrue(SoundFonts.isSoundFontFile(directory.resolve("Kit.SF2")));
+        assertFalse(SoundFonts.isSoundFontFile(directory.resolve("notes.txt")));
+        assertFalse(SoundFonts.isSoundFontFile(null));
+        Path text = directory.resolve("notes.txt");
+        Files.writeString(text, "hello");
+        assertThrows(IllegalArgumentException.class, () -> SoundFonts.read(text));
+        assertThrows(java.io.IOException.class, () -> SoundFonts.read(directory.resolve("gone.sf2")));
+        Path garbage = directory.resolve("bad.sf2");
+        Files.writeString(garbage, "not a soundfont");
+        assertThrows(InvalidMidiDataException.class, () -> SoundFonts.read(garbage));
+
+        try (Player player = new Player()) {
+            player.open();
+            assertFalse(player.useOutput("not-connected|x|y"));
+            assertEquals(MidiOutputs.BUILTIN_ID, player.outputId());
+            assertNotNull(player.failure());
+            if (player.isBuiltIn()) {
+                assertEquals("Hits Test", player.loadSoundFont(fixture));
+                assertEquals(fixture.toAbsolutePath().normalize(), player.soundFont());
+                player.useDefaultSounds();
+                assertNull(player.soundFont());
+            } else {
+                IllegalStateException exception = assertThrows(IllegalStateException.class, () -> player.loadSoundFont(fixture));
+                assertTrue(exception.getMessage().contains("built-in synth"));
+            }
+        }
+    }
+
+    private static String minimalBeat(int version, String stepExtra, String trackExtra) {
+        StringBuilder tracks = new StringBuilder();
+        for (int i = 0; i < Beat.TRACKS; i++) {
+            if (i > 0) {
+                tracks.append(',');
+            }
+            String steps = i == 0
+                ? "{\"on\":true,\"velocity\":90" + stepExtra + "}"
+                : "{\"on\":false,\"velocity\":100}";
+            tracks.append("{\"name\":\"T").append(i)
+                .append("\",\"mode\":\"drum\",\"program\":").append(i == 3 ? 64 : 0)
+                .append(trackExtra)
+                .append(",\"note\":").append(36 + i)
+                .append(",\"mute\":false,\"solo\":false,\"gate\":45,\"velocity\":100,\"accent\":120,\"steps\":[")
+                .append(steps).append("]}");
+        }
+        String body = tracks.toString();
+        return "{\"version\":" + version
+            + ",\"name\":\"old\",\"bpm\":90,\"swing\":52,\"steps\":16,\"active\":\"b\",\"slots\":{"
+            + "\"a\":{\"tracks\":[" + body + "]},\"b\":{\"tracks\":[" + body + "]}}}";
     }
 
     private static List<ShortMessage> noteOns(Sequence sequence) {

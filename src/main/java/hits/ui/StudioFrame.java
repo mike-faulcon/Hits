@@ -2,12 +2,16 @@ package hits.ui;
 
 import hits.Beat;
 import hits.BeatFiles;
+import hits.BeatFolders;
 import hits.Editor;
 import hits.ExportOptions;
 import hits.Gm;
 import hits.Kits;
+import hits.MidiOutputs;
 import hits.Notes;
 import hits.Player;
+import hits.SoundFonts;
+import hits.Step;
 import hits.Track;
 import hits.TrackMode;
 
@@ -98,8 +102,15 @@ final class StudioFrame extends JFrame {
     private final JButton noteMode = button("Note");
     private final JButton steps16 = button("16 steps");
     private final JButton steps32 = button("32 steps");
+    private final JLabel stepPitchValue = new JLabel("—", SwingConstants.LEFT);
+    private final JButton stepPitchDown = button("−");
+    private final JButton stepPitchUp = button("+");
+    private final JButton stepPitchTrack = button("Use track");
+    private final JComboBox<MidiOutputs.Choice> midiOut = new JComboBox<>();
 
     private final JList<BeatFiles.Entry> beatList = new JList<>(beats);
+    private JLabel beatsTitle;
+    private Path beatsDirectory;
     private static final String HINT = "Space play/stop  ·  click step  ·  shift-click loud  ·  right-click select  ·  ⌘/Ctrl S save  ·  ⌘/Ctrl Z undo";
     private final JLabel status = new JLabel(HINT);
     private final JPanel header = new JPanel(new BorderLayout());
@@ -120,6 +131,7 @@ final class StudioFrame extends JFrame {
         super("Hits");
         this.editor = editor;
         this.player = player;
+        this.beatsDirectory = loadBeatsDirectory();
         this.pattern = new PatternPanel(editor);
         maybeFirstRun();
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
@@ -149,6 +161,15 @@ final class StudioFrame extends JFrame {
                 close();
             }
         });
+        addWindowFocusListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowGainedFocus(java.awt.event.WindowEvent event) {
+                if (!midiOut.isPopupVisible()) {
+                    fillMidiOutputs(player.outputId());
+                }
+            }
+        });
+        applySavedOutput();
     }
 
     private JPanel transport() {
@@ -276,9 +297,17 @@ final class StudioFrame extends JFrame {
         panel.setBackground(Theme.PANEL);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         panel.setPreferredSize(new Dimension(200, 210));
-        JLabel title = label("Beats");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
-        panel.add(title, BorderLayout.NORTH);
+        JPanel heading = new JPanel(new BorderLayout());
+        heading.setOpaque(false);
+        beatsTitle = label("Beats");
+        beatsTitle.setFont(beatsTitle.getFont().deriveFont(Font.BOLD, 13f));
+        beatsTitle.setToolTipText(beatsDirectory.toString());
+        JButton folder = button("Folder…");
+        folder.setToolTipText("Choose the folder Load and Save use. Hits remembers the absolute path.");
+        folder.addActionListener(event -> chooseBeatsFolder());
+        heading.add(beatsTitle, BorderLayout.WEST);
+        heading.add(folder, BorderLayout.EAST);
+        panel.add(heading, BorderLayout.NORTH);
         beatList.setBackground(Theme.BG);
         beatList.setForeground(Theme.TEXT);
         beatList.setSelectionBackground(Theme.STEP_ON);
@@ -371,6 +400,16 @@ final class StudioFrame extends JFrame {
             buttonPair("Oct +", "One octave up", 12, 72)
         );
         addRow(panel, constraints, noteButtons);
+        stepPitchValue.setForeground(Theme.TEXT);
+        stepPitchValue.setFont(stepPitchValue.getFont().deriveFont(Font.BOLD, 16f));
+        stepPitchValue.setPreferredSize(new Dimension(52, 32));
+        stepPitchDown.setToolTipText("Lower this step by one semitone.");
+        stepPitchUp.setToolTipText("Raise this step by one semitone.");
+        stepPitchTrack.setToolTipText("Clear this step's pitch and use the track pitch.");
+        JPanel stepPitch = row(stepPitchValue, stepPitchDown, stepPitchUp, stepPitchTrack);
+        stepPitch.setToolTipText("Pitch of the selected step. A step without its own pitch uses the track pitch.");
+        addRow(panel, constraints, label("Step pitch"));
+        addRow(panel, constraints, stepPitch);
         addRow(panel, constraints, label("Sound"));
         drums.setToolTipText("Drum sound for this track.");
         programs.setToolTipText("Instrument for this track. One pitch for every step.");
@@ -408,11 +447,24 @@ final class StudioFrame extends JFrame {
     }
 
     private JPanel footer() {
-        JPanel panel = new JPanel(new BorderLayout());
+        JPanel panel = new JPanel(new BorderLayout(12, 0));
         panel.setBackground(Theme.BG);
         panel.setBorder(BorderFactory.createEmptyBorder(4, 12, 8, 12));
         status.setForeground(Theme.MUTED);
-        panel.add(status, BorderLayout.WEST);
+        panel.add(status, BorderLayout.CENTER);
+        JPanel output = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        output.setOpaque(false);
+        JLabel midiLabel = label("MIDI out");
+        midiLabel.setToolTipText("Where notes are sent. Built-in synth is the Java instrument.");
+        output.add(midiLabel);
+        midiOut.setToolTipText("Built-in synth, or an output such as Ableton, IAC, or a hardware port.");
+        midiOut.setPreferredSize(new Dimension(200, 32));
+        output.add(midiOut);
+        JButton soundFont = button("SoundFont…");
+        soundFont.setToolTipText("Load a .sf2 SoundFont on the built-in synth. External outputs use their own sounds.");
+        soundFont.addActionListener(event -> chooseSoundFont());
+        output.add(soundFont);
+        panel.add(output, BorderLayout.EAST);
         return panel;
     }
 
@@ -500,6 +552,10 @@ final class StudioFrame extends JFrame {
         }));
         actions.put("save", action(event -> save()));
         actions.put("saveAs", action(event -> saveAs()));
+        stepPitchDown.addActionListener(event -> nudgeStepPitch(-1));
+        stepPitchUp.addActionListener(event -> nudgeStepPitch(1));
+        stepPitchTrack.addActionListener(event -> clearStepPitch());
+        midiOut.addActionListener(event -> midiOutputChosen());
         keys = this::dispatchKey;
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keys);
     }
@@ -589,12 +645,63 @@ final class StudioFrame extends JFrame {
             paintToggle(noteMode, track.mode() == TrackMode.NOTE);
             paintToggle(steps16, beat.stepCount() == 16);
             paintToggle(steps32, beat.stepCount() == 32);
+            refreshStepPitch(beat, track);
             pattern.revalidate();
             pattern.repaint();
             updatePlayButton();
         } finally {
             syncing = false;
         }
+    }
+
+    private void refreshStepPitch(Beat beat, Track track) {
+        int column = editor.stepIndex();
+        boolean editable = column >= 0 && column < beat.stepCount() && track.step(column).on();
+        stepPitchDown.setEnabled(editable);
+        stepPitchUp.setEnabled(editable);
+        if (!editable) {
+            stepPitchValue.setText("—");
+            stepPitchTrack.setEnabled(false);
+            stepPitchValue.setToolTipText("Right-click or Alt-click a step that is on.");
+            return;
+        }
+        Step step = track.step(column);
+        if (step.hasPitch()) {
+            stepPitchValue.setText(Notes.name(step.pitch()));
+            stepPitchValue.setToolTipText("This step plays " + Notes.name(step.pitch()) + ". The track pitch is " + Notes.name(track.note()) + ".");
+            stepPitchTrack.setEnabled(true);
+        } else {
+            stepPitchValue.setText(Notes.name(track.note()));
+            stepPitchValue.setToolTipText("Uses the track pitch, " + Notes.name(track.note()) + ".");
+            stepPitchTrack.setEnabled(false);
+        }
+    }
+
+    private void nudgeStepPitch(int delta) {
+        int row = editor.trackIndex();
+        int column = editor.stepIndex();
+        Track current = editor.selectedTrack();
+        if (column < 0 || column >= editor.beat().stepCount() || !current.step(column).on()) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = beat.track(row);
+            Step step = track.step(column);
+            step.setPitch(step.soundingNote(track.note()) + delta);
+        });
+        Track updated = editor.selectedTrack();
+        player.audition(updated, updated.step(column).soundingNote(updated.note()));
+    }
+
+    private void clearStepPitch() {
+        int row = editor.trackIndex();
+        int column = editor.stepIndex();
+        Track current = editor.selectedTrack();
+        if (column < 0 || !current.step(column).hasPitch()) {
+            return;
+        }
+        editor.edit(beat -> beat.track(row).step(column).clearPitch());
+        player.audition(editor.selectedTrack());
     }
 
     private void selectDrum(int note) {
@@ -757,13 +864,13 @@ final class StudioFrame extends JFrame {
         return writeFile(true);
     }
 
-    private static String saveAsCaption(String typed) {
+    private String saveAsCaption(String typed) {
         String display = typed == null ? "" : typed.trim();
         String safe = BeatFiles.safeName(display);
         if (safe.isEmpty()) {
             return "Add a letter or number. This name cannot be a file.";
         }
-        boolean exists = Files.exists(BeatFiles.directory().resolve(safe + ".json"));
+        boolean exists = Files.exists(beatsDirectory.resolve(safe + ".json"));
         String kept = safe.equals(display) ? "" : "  Name in the file stays \"" + display + "\".";
         if (exists) {
             return "Replaces " + safe + ".json." + kept;
@@ -783,7 +890,7 @@ final class StudioFrame extends JFrame {
             );
             return false;
         }
-        Path target = BeatFiles.directory().resolve(safe + ".json");
+        Path target = beatsDirectory.resolve(safe + ".json");
         boolean exists = Files.exists(target);
         BeatFiles.SaveChoice choice = BeatFiles.plan(display, target, savedFile, false, exists);
         if (!alreadyConfirmed && choice != BeatFiles.SaveChoice.WRITE) {
@@ -825,7 +932,7 @@ final class StudioFrame extends JFrame {
     }
 
     private void exportMidi() {
-        JFileChooser chooser = new JFileChooser(BeatFiles.directory().toFile());
+        JFileChooser chooser = new JFileChooser(beatsDirectory.toFile());
         String stem = BeatFiles.safeName(editor.beat().name());
         if (stem.isEmpty()) {
             stem = "untitled";
@@ -903,7 +1010,7 @@ final class StudioFrame extends JFrame {
     private void reloadBeats(Path select) {
         beats.clear();
         try {
-            for (BeatFiles.Entry entry : BeatFiles.list(BeatFiles.directory())) {
+            for (BeatFiles.Entry entry : BeatFiles.list(beatsDirectory)) {
                 beats.addElement(entry);
             }
         } catch (IOException exception) {
@@ -918,6 +1025,235 @@ final class StudioFrame extends JFrame {
                 beatList.setSelectedIndex(i);
                 return;
             }
+        }
+    }
+
+    private Path loadBeatsDirectory() {
+        String saved = pref(BeatFolders.PREF_DIRECTORY);
+        Path folder = BeatFolders.resolve(saved, Path.of("").toAbsolutePath());
+        String absolute = BeatFolders.remember(folder);
+        if (!absolute.equals(saved)) {
+            prefPut(BeatFolders.PREF_DIRECTORY, absolute);
+        }
+        return folder;
+    }
+
+    private void chooseBeatsFolder() {
+        JFileChooser chooser = new JFileChooser(beatsDirectory.toFile());
+        chooser.setDialogTitle("Beats folder");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        chooser.setAcceptAllFileFilterUsed(false);
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
+            return;
+        }
+        beatsDirectory = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
+        prefPut(BeatFolders.PREF_DIRECTORY, BeatFolders.remember(beatsDirectory));
+        if (beatsTitle != null) {
+            beatsTitle.setToolTipText(beatsDirectory.toString());
+        }
+        reloadBeats(savedFile);
+        status.setText("Beats folder: " + beatsDirectory);
+    }
+
+    private void applySavedOutput() {
+        String saved = pref(MidiOutputs.PREF_OUTPUT);
+        String resolved = MidiOutputs.resolve(saved, MidiOutputs.list().stream().map(MidiOutputs.Choice::id).toList());
+        fillMidiOutputs(resolved);
+        if (!player.outputId().equals(resolved) || !player.isOpen()) {
+            player.useOutput(resolved);
+        }
+        fillMidiOutputs(player.outputId());
+        if (!saved.isBlank() && !saved.equals(player.outputId())) {
+            status.setText("Saved MIDI output is not connected. Using the built-in synth.");
+        }
+        applySoundFontPreference();
+    }
+
+    private void fillMidiOutputs(String selectedId) {
+        java.util.List<MidiOutputs.Choice> choices = MidiOutputs.list();
+        syncing = true;
+        try {
+            midiOut.removeAllItems();
+            MidiOutputs.Choice selected = null;
+            for (MidiOutputs.Choice choice : choices) {
+                midiOut.addItem(choice);
+                if (choice.id().equals(selectedId)) {
+                    selected = choice;
+                }
+            }
+            if (selected == null && midiOut.getItemCount() > 0) {
+                selected = midiOut.getItemAt(0);
+            }
+            midiOut.setSelectedItem(selected);
+        } finally {
+            syncing = false;
+        }
+    }
+
+    private void midiOutputChosen() {
+        if (syncing || !(midiOut.getSelectedItem() instanceof MidiOutputs.Choice choice)) {
+            return;
+        }
+        if (choice.id().equals(player.outputId()) && player.isOpen()) {
+            return;
+        }
+        if (!player.useOutput(choice.id())) {
+            JOptionPane.showMessageDialog(
+                this,
+                player.failure() == null ? "That MIDI output is not available." : player.failure(),
+                "Hits",
+                JOptionPane.WARNING_MESSAGE
+            );
+            fillMidiOutputs(player.outputId());
+            updateTitle();
+            return;
+        }
+        prefPut(MidiOutputs.PREF_OUTPUT, choice.id());
+        status.setText("MIDI out: " + choice.label());
+        if (player.soundFontNote() != null) {
+            status.setText(player.soundFontNote());
+        }
+        updateTitle();
+    }
+
+    private void chooseSoundFont() {
+        if (!player.isBuiltIn()) {
+            if (pref(SoundFonts.PREF_FILE).isBlank()) {
+                JOptionPane.showMessageDialog(
+                    this,
+                    SoundFonts.NEEDS_BUILTIN + "\nAn external device uses its own sounds.",
+                    "Hits",
+                    JOptionPane.INFORMATION_MESSAGE
+                );
+                return;
+            }
+            String[] options = {"Forget saved SoundFont", "Cancel"};
+            int choice = JOptionPane.showOptionDialog(
+                this,
+                SoundFonts.NEEDS_BUILTIN + "\nAn external device uses its own sounds.",
+                "SoundFont",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                options,
+                options[1]
+            );
+            if (choice == 0) {
+                player.clearSoundFont();
+                prefRemove(SoundFonts.PREF_FILE);
+                status.setText("Built-in sounds");
+            }
+            return;
+        }
+        if (player.soundFont() == null && !pref(SoundFonts.PREF_FILE).isBlank()) {
+            String[] options = {"Load a SoundFont", "Forget saved SoundFont", "Cancel"};
+            int choice = JOptionPane.showOptionDialog(
+                this,
+                "A SoundFont is remembered, but it is not loaded.",
+                "SoundFont",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                options,
+                options[0]
+            );
+            if (choice == 1) {
+                player.clearSoundFont();
+                prefRemove(SoundFonts.PREF_FILE);
+                status.setText("Built-in sounds");
+                return;
+            }
+            if (choice != 0) {
+                return;
+            }
+        }
+        if (player.soundFont() != null) {
+            String[] options = {"Load another", "Built-in sounds", "Cancel"};
+            int choice = JOptionPane.showOptionDialog(
+                this,
+                "Loaded " + player.soundFontName() + ".",
+                "SoundFont",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                options,
+                options[0]
+            );
+            if (choice == 1) {
+                player.useDefaultSounds();
+                prefRemove(SoundFonts.PREF_FILE);
+                status.setText("Built-in sounds");
+                return;
+            }
+            if (choice != 0) {
+                return;
+            }
+        }
+        Path start = beatsDirectory;
+        String saved = pref(SoundFonts.PREF_FILE);
+        if (!saved.isBlank()) {
+            Path parent = Path.of(saved).getParent();
+            if (parent != null && Files.isDirectory(parent)) {
+                start = parent;
+            }
+        }
+        JFileChooser chooser = new JFileChooser(start.toFile());
+        chooser.setDialogTitle("SoundFont");
+        chooser.setFileFilter(new FileNameExtensionFilter("SoundFont", "sf2"));
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
+            return;
+        }
+        Path path = chooser.getSelectedFile().toPath();
+        try {
+            String name = player.loadSoundFont(path);
+            prefPut(SoundFonts.PREF_FILE, path.toAbsolutePath().normalize().toString());
+            status.setText("SoundFont: " + name);
+        } catch (RuntimeException | java.io.IOException | javax.sound.midi.InvalidMidiDataException exception) {
+            JOptionPane.showMessageDialog(this, message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void applySoundFontPreference() {
+        if (!player.isBuiltIn()) {
+            return;
+        }
+        String saved = pref(SoundFonts.PREF_FILE);
+        if (saved.isBlank()) {
+            return;
+        }
+        Path path = Path.of(saved);
+        if (!Files.isRegularFile(path)) {
+            status.setText("SoundFont not found: " + path.getFileName());
+            return;
+        }
+        try {
+            status.setText("SoundFont: " + player.loadSoundFont(path));
+        } catch (RuntimeException | java.io.IOException | javax.sound.midi.InvalidMidiDataException exception) {
+            status.setText(message(exception));
+        }
+    }
+
+    private static String pref(String key) {
+        try {
+            return Preferences.userNodeForPackage(HitsApp.class).get(key, "");
+        } catch (Exception exception) {
+            return "";
+        }
+    }
+
+    private static void prefPut(String key, String value) {
+        try {
+            Preferences.userNodeForPackage(HitsApp.class).put(key, value);
+        } catch (Exception ignored) {
+            // The choice still applies until the app closes.
+        }
+    }
+
+    private static void prefRemove(String key) {
+        try {
+            Preferences.userNodeForPackage(HitsApp.class).remove(key);
+        } catch (Exception ignored) {
+            // The loaded bank is already cleared.
         }
     }
 

@@ -2,6 +2,7 @@ package hits.ui;
 
 import hits.Beat;
 import hits.Editor;
+import hits.Notes;
 import hits.Step;
 import hits.Track;
 
@@ -114,8 +115,14 @@ final class PatternPanel extends JPanel implements Scrollable {
         paintChip(g, metrics.solo(row), "S", track.solo(), Theme.SOLO);
         for (int column = 0; column < metrics.columns; column++) {
             Rectangle cell = metrics.step(row, column);
-            g.setColor(colorFor(track.step(column).shade(track.accent())));
+            Step cellStep = track.step(column);
+            g.setColor(colorFor(cellStep.shade(track.accent())));
             g.fillRoundRect(cell.x, cell.y, cell.width, cell.height, 6, 6);
+            if (cellStep.hasPitch()) {
+                g.setColor(Theme.LINE);
+                int mark = Math.max(2, cell.height / 8);
+                g.fillRect(cell.x + 4, cell.y + cell.height - mark - 3, Math.max(4, cell.width - 8), 2);
+            }
             if (row == editor.trackIndex() && column == editor.stepIndex()) {
                 g.setColor(Theme.LINE);
                 g.setStroke(new BasicStroke(2f));
@@ -178,8 +185,11 @@ final class PatternPanel extends JPanel implements Scrollable {
         if (row >= 0 && metrics.solo(row).contains(event.getPoint())) {
             return "Solo this track. Other tracks go quiet.";
         }
-        if (row >= 0 && metrics.columnAt(event.getX(), event.getY()) >= 0) {
-            return "Click toggles the step. Shift-click makes a loud hit. Right-click or Alt-click selects it so you can change its volume.";
+        int column = row >= 0 ? metrics.columnAt(event.getX(), event.getY()) : -1;
+        if (column >= 0) {
+            Step step = editor.beat().track(row).step(column);
+            String pitch = step.hasPitch() ? " Step pitch " + Notes.name(step.pitch()) + "." : "";
+            return "Click toggles the step. Shift-click makes a loud hit. Right-click or Alt-click selects it so you can change its volume or step pitch." + pitch;
         }
         if (row >= 0) {
             return "Select this track";
