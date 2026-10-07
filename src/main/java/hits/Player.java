@@ -29,6 +29,7 @@ public final class Player implements AutoCloseable {
     private String failure;
     private Soundbank defaultBank;
     private Soundbank loadedBank;
+    private boolean song;
     private Path soundFont;
     private String soundFontName;
     private String soundFontNote;
@@ -155,12 +156,18 @@ public final class Player implements AutoCloseable {
         return isOpen() && sequencer.isRunning();
     }
 
-    public void play(Beat beat) {
+    /** Starts pattern playback, or the song chain when {@code songMode} is set and the chain is not empty. */
+    public void play(Beat beat, boolean songMode) {
+        play(beat, songMode, 0);
+    }
+
+    public void play(Beat beat, boolean songMode, long tick) {
         if (!isOpen()) {
             return;
         }
+        song = songMode && beat.hasChain();
         try {
-            load(beat, 0);
+            load(beat, Math.max(0, tick));
             sequencer.start();
         } catch (InvalidMidiDataException exception) {
             failure = exception.getMessage();
@@ -175,16 +182,22 @@ public final class Player implements AutoCloseable {
         sequencer.setTickPosition(0);
     }
 
-    /** Rebuilds the playing sequence and keeps the playhead near where it was. */
-    public void update(Beat beat) {
+    /**
+     * Rebuilds the playing sequence and keeps the playhead near where it was.
+     * {@code songMode} follows the chain when the beat has one.
+     */
+    public void update(Beat beat, boolean songMode) {
         if (!isOpen() || !sequencer.isRunning()) {
             return;
         }
         long position = sequencer.getTickPosition();
+        song = songMode && beat.hasChain();
         try {
             load(beat, position);
             sequencer.start();
-            int loop = SequenceBuilder.loopTicks(beat.stepCount());
+            long loop = song
+                ? Chain.ticks(beat.chain(), beat.stepCount())
+                : SequenceBuilder.loopTicks(beat.stepCount());
             if (loop > 0) {
                 sequencer.setTickPosition(Math.floorMod(position, loop));
             }
@@ -194,10 +207,24 @@ public final class Player implements AutoCloseable {
     }
 
     public int currentStep(Beat beat) {
+        Chain.Place place = place(beat);
+        return place == null ? -1 : place.step();
+    }
+
+    /** Slot and step under the playhead, or null when nothing is playing. */
+    public Chain.Place place(Beat beat) {
         if (!isPlaying()) {
-            return -1;
+            return null;
         }
-        return SequenceBuilder.stepForTick(sequencer.getTickPosition(), beat.stepCount(), beat.swing());
+        long tick = sequencer.getTickPosition();
+        if (song && beat.hasChain()) {
+            return Chain.place(beat.chain(), tick, beat.stepCount(), beat.swing());
+        }
+        return new Chain.Place(
+            beat.activeSlot(),
+            SequenceBuilder.stepForTick(tick, beat.stepCount(), beat.swing()),
+            0
+        );
     }
 
     public void audition(Track track) {
@@ -336,9 +363,11 @@ public final class Player implements AutoCloseable {
     }
 
     private void load(Beat beat, long position) throws InvalidMidiDataException {
-        var sequence = SequenceBuilder.build(beat);
+        var sequence = song ? SequenceBuilder.buildSong(beat) : SequenceBuilder.build(beat);
         sequencer.setSequence(sequence);
-        int loop = SequenceBuilder.loopTicks(beat.stepCount());
+        long loop = song
+            ? Chain.ticks(beat.chain(), beat.stepCount())
+            : SequenceBuilder.loopTicks(beat.stepCount());
         long end = Math.min(loop, sequence.getTickLength());
         sequencer.setLoopStartPoint(0);
         if (end > 0) {

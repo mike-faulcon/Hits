@@ -7,15 +7,15 @@ import java.util.Map;
 
 /**
  * Versioned beat document.
- * Version 1 is the original document. Version 2 adds an optional {@code pitch} on a step.
- * A beat that does not use that field is still written as version 1.
+ * Version 1 is the original document. Version 2 adds an optional {@code pitch} on a step
+ * and an optional {@code chain} of pattern entries. A beat that uses neither is still written as version 1.
  */
 public final class BeatJson {
     private BeatJson() {}
 
-    /** 1 unless a step has its own pitch, in which case 2. */
+    /** 1 unless a step has its own pitch or the beat has a song chain, in which case 2. */
     public static int documentVersion(Beat beat) {
-        return beat.hasStepPitch() ? Beat.FORMAT_V2 : Beat.VERSION;
+        return beat.usesFormatV2() ? Beat.FORMAT_V2 : Beat.VERSION;
     }
 
     public static String write(Beat beat) {
@@ -30,7 +30,13 @@ public final class BeatJson {
         out.append("  \"slots\": {\n");
         writeSlot(out, "a", beat.slot('a'), true);
         writeSlot(out, "b", beat.slot('b'), false);
-        out.append("  }\n");
+        out.append("  }");
+        if (beat.hasChain()) {
+            out.append(",\n");
+            writeChain(out, beat.chain());
+        } else {
+            out.append("\n");
+        }
         out.append("}\n");
         return out.toString();
     }
@@ -50,7 +56,32 @@ public final class BeatJson {
         Map<String, Object> slots = asMap(root.get("slots"));
         readSlot(beat, 'a', asMap(slots.get("a")));
         readSlot(beat, 'b', asMap(slots.get("b")));
+        if (root.containsKey("chain") && root.get("chain") != null) {
+            beat.setChain(readChain(root.get("chain")));
+        }
         return beat;
+    }
+
+    private static void writeChain(StringBuilder out, List<Chain.Part> chain) {
+        out.append("  \"chain\": [\n");
+        for (int i = 0; i < chain.size(); i++) {
+            Chain.Part part = chain.get(i);
+            out.append("    {\"slot\": \"").append(part.slot()).append("\", \"repeats\": ").append(part.repeats()).append("}");
+            out.append(i + 1 < chain.size() ? ",\n" : "\n");
+        }
+        out.append("  ]\n");
+    }
+
+    private static List<Chain.Part> readChain(Object value) {
+        List<?> list = asList(value);
+        List<Chain.Part> parts = new ArrayList<>();
+        int count = Math.min(Chain.MAX_PARTS, list.size());
+        for (int i = 0; i < count; i++) {
+            Map<String, Object> part = asMap(list.get(i));
+            char slot = text(part.get("slot")).equals("b") ? 'b' : 'a';
+            parts.add(new Chain.Part(slot, number(part.get("repeats"))));
+        }
+        return parts;
     }
 
     private static void writeSlot(StringBuilder out, String name, Track[] tracks, boolean comma) {
