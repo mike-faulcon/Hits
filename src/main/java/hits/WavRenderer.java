@@ -124,7 +124,7 @@ public final class WavRenderer {
 
     /**
      * {@code openStream} lives on {@code com.sun.media.sound.AudioSynthesizer}, which the JDK does not export.
-     * Gradle opens that package for {@code run} and {@code test}.
+     * Gradle opens that package for {@code run} and {@code test}. The packaged app passes the same flag.
      */
     private static AudioInputStream openStream(Synthesizer synthesizer) throws IOException {
         try {
