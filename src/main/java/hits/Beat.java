@@ -3,6 +3,8 @@ package hits;
 /** A saved beat: tempo, swing, length, and two pattern slots. */
 public final class Beat {
     public static final int VERSION = 1;
+    /** Written when any step stores its own pitch. Version 1 files stay version 1. */
+    public static final int FORMAT_V2 = 2;
     public static final int TRACKS = 8;
 
     private static final String[] KIT_NAMES = {
@@ -134,11 +136,26 @@ public final class Beat {
         }
     }
 
+    public boolean hasStepPitch() {
+        return pitched(slotA) || pitched(slotB);
+    }
+
     public void replaceSlot(char slot, Track[] tracks) {
         Track[] target = slot(slot);
         for (int i = 0; i < TRACKS; i++) {
             target[i] = tracks[i];
         }
+    }
+
+    private static boolean pitched(Track[] tracks) {
+        for (Track track : tracks) {
+            for (int i = 0; i < Track.CAPACITY; i++) {
+                if (track.step(i).hasPitch()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void fillKit(Track[] tracks) {

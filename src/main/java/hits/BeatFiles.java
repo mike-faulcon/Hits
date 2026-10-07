@@ -14,6 +14,7 @@ import java.util.Locale;
 public final class BeatFiles {
     private BeatFiles() {}
 
+    /** Relative default. The window stores an absolute folder with {@link BeatFolders}. */
     public static Path directory() {
         return Path.of("beats");
     }

@@ -5,14 +5,23 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Versioned beat document. Version 1 is the shared format for desktop and a later web client. */
+/**
+ * Versioned beat document.
+ * Version 1 is the original document. Version 2 adds an optional {@code pitch} on a step.
+ * A beat that does not use that field is still written as version 1.
+ */
 public final class BeatJson {
     private BeatJson() {}
+
+    /** 1 unless a step has its own pitch, in which case 2. */
+    public static int documentVersion(Beat beat) {
+        return beat.hasStepPitch() ? Beat.FORMAT_V2 : Beat.VERSION;
+    }
 
     public static String write(Beat beat) {
         StringBuilder out = new StringBuilder();
         out.append("{\n");
-        field(out, 1, "version", Beat.VERSION, true);
+        field(out, 1, "version", documentVersion(beat), true);
         field(out, 1, "name", beat.name(), true);
         field(out, 1, "bpm", beat.bpm(), true);
         field(out, 1, "swing", beat.swing(), true);
@@ -30,7 +39,7 @@ public final class BeatJson {
         Object parsed = new Parser(json).parse();
         Map<String, Object> root = asMap(parsed);
         int version = number(root.get("version"));
-        if (version != Beat.VERSION) {
+        if (version < Beat.VERSION || version > Beat.FORMAT_V2) {
             throw new IllegalArgumentException("Unsupported beat version " + version);
         }
         Beat beat = Beat.drumKit(text(root.get("name")));
@@ -72,7 +81,11 @@ public final class BeatJson {
                 out.append(", ");
             }
             Step step = track.step(i);
-            out.append("{\"on\":").append(step.on()).append(",\"velocity\":").append(step.velocity()).append("}");
+            out.append("{\"on\":").append(step.on()).append(",\"velocity\":").append(step.velocity());
+            if (step.hasPitch()) {
+                out.append(",\"pitch\":").append(step.pitch());
+            }
+            out.append("}");
         }
         out.append("]\n");
         out.append("        }");
@@ -147,6 +160,9 @@ public final class BeatJson {
             Map<String, Object> step = asMap(steps.get(i));
             track.step(i).setOn(bool(step.get("on")));
             track.step(i).setVelocity(number(step.get("velocity")));
+            if (step.containsKey("pitch") && step.get("pitch") != null) {
+                track.step(i).setPitch(number(step.get("pitch")));
+            }
         }
         return track;
     }
