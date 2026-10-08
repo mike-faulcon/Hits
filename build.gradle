@@ -1,3 +1,9 @@
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
+
 plugins {
     id "java"
     id "application"
@@ -35,4 +41,273 @@ tasks.named("test") {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = "UTF-8"
     options.release = 21
+}
+
+// Double-clickable app for this operating system. Not part of `build`, so CI stays on test + jar.
+tasks.register("packageApp") {
+    group = "distribution"
+    description = "Package Hits for this OS with jpackage and a small jlink runtime."
+    dependsOn tasks.named("jar")
+    inputs.file(tasks.named("jar").flatMap { it.archiveFile })
+    inputs.dir(layout.projectDirectory.dir("beats"))
+    inputs.file(layout.projectDirectory.file("pack/HitsIcon.java"))
+    inputs.file(layout.projectDirectory.file("LICENSE"))
+    outputs.dir(layout.buildDirectory.dir("jpackage/dist"))
+
+    doLast {
+        def version = project.version.toString()
+        if (!(version ==~ /\d+(\.\d+){0,2}/)) {
+            throw new GradleException("jpackage needs a numeric version such as 2.0 (this project is '${version}').")
+        }
+        def os = hitsOsName()
+        def jpackage = jdkTool("jpackage")
+        def javac = jdkTool("javac")
+        def java = jdkTool("java")
+        def type = packageTypeFor(os)
+
+        def work = layout.buildDirectory.get().asFile.toPath().resolve("jpackage")
+        def input = work.resolve("input")
+        def icons = work.resolve("icons")
+        def dist = work.resolve("dist")
+        def imageParent = work.resolve("image")
+        project.delete(input, icons, dist, imageParent, work.resolve("tmp-image"), work.resolve("tmp-package"), work.resolve("icon-classes"))
+        Files.createDirectories(input)
+        Files.createDirectories(icons)
+        Files.createDirectories(dist)
+
+        def jar = tasks.named("jar").get().archiveFile.get().asFile.toPath()
+        Files.copy(jar, input.resolve(jar.fileName.toString()))
+        def copiedBeats = copySampleBeats(layout.projectDirectory.dir("beats").asFile.toPath(), input.resolve("beats"))
+        if (copiedBeats == 0) {
+            throw new GradleException("No sample beats were found in the beats directory.")
+        }
+
+        def iconClasses = work.resolve("icon-classes")
+        Files.createDirectories(iconClasses)
+        project.exec {
+            commandLine javac.toString(), "-d", iconClasses.toString(), layout.projectDirectory.file("pack/HitsIcon.java").asFile.absolutePath
+        }
+        project.exec {
+            commandLine java.toString(), "-Djava.awt.headless=true", "-cp", iconClasses.toString(), "HitsIcon", icons.toString()
+        }
+        def icon = iconFile(os, icons)
+
+        def imageDest = type == "app-image" ? dist : imageParent
+        Files.createDirectories(imageDest)
+        def imageTemp = work.resolve("tmp-image")
+        Files.createDirectories(imageTemp)
+        def imageCommand = [
+            jpackage.toString(),
+            "--type", "app-image",
+            "--name", "Hits",
+            "--app-version", version,
+            "--vendor", "Hits",
+            "--description", "A step sequencer for sketching drum and note patterns.",
+            "--copyright", "Copyright (c) 2026 Michael Faulcon",
+            "--input", input.toString(),
+            "--main-jar", jar.fileName.toString(),
+            "--main-class", "hits.ui.HitsApp",
+            "--dest", imageDest.toString(),
+            "--temp", imageTemp.toString(),
+            "--icon", icon.toString(),
+            "--add-modules", "java.desktop,java.prefs",
+            "--jlink-options", "--strip-native-commands --strip-debug --no-man-pages --no-header-files --compress zip-6",
+            "--java-options", "--add-exports=java.desktop/com.sun.media.sound=ALL-UNNAMED",
+            "--java-options", "-Dhits.packaged=true",
+        ]
+        logger.lifecycle("Packaging Hits as ${type}")
+        project.exec {
+            commandLine imageCommand
+        }
+
+        def image = os == "mac" ? imageDest.resolve("Hits.app") : imageDest.resolve("Hits")
+        if (!Files.isDirectory(image)) {
+            throw new GradleException("jpackage did not create ${image}")
+        }
+        assertPackagedImage(image)
+
+        if (type == "app-image") {
+            logger.lifecycle("Wrote ${image}")
+            return
+        }
+
+        def packageTemp = work.resolve("tmp-package")
+        Files.createDirectories(packageTemp)
+        def packageCommand = [
+            jpackage.toString(),
+            "--type", type,
+            "--name", "Hits",
+            "--app-version", version,
+            "--vendor", "Hits",
+            "--description", "A step sequencer for sketching drum and note patterns.",
+            "--copyright", "Copyright (c) 2026 Michael Faulcon",
+            "--about-url", "https://github.com/mike-faulcon/Hits",
+            "--license-file", layout.projectDirectory.file("LICENSE").asFile.absolutePath,
+            "--dest", dist.toString(),
+            "--temp", packageTemp.toString(),
+            "--app-image", image.toString(),
+            "--icon", icon.toString(),
+        ]
+        if (type == "deb") {
+            packageCommand.addAll([
+                "--linux-package-name", "hits",
+                "--linux-shortcut",
+                "--linux-menu-group", "AudioVideo",
+                "--linux-app-category", "sound",
+                "--linux-app-release", "1",
+            ])
+        } else if (type == "msi" || type == "exe") {
+            packageCommand.addAll([
+                "--win-shortcut",
+                "--win-menu",
+                "--win-menu-group", "Hits",
+                "--win-per-user-install",
+            ])
+        }
+        project.exec {
+            commandLine packageCommand
+        }
+        Files.list(dist).withCloseable { stream ->
+            stream.forEach { logger.lifecycle("Wrote ${it}") }
+        }
+    }
+}
+
+String hitsOsName() {
+    def name = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT)
+    if (name.contains("mac")) {
+        return "mac"
+    }
+    if (name.contains("win")) {
+        return "windows"
+    }
+    if (name.contains("linux") || name.contains("nix") || name.contains("nux")) {
+        return "linux"
+    }
+    return "other"
+}
+
+Path jdkTool(String name) {
+    def windows = hitsOsName() == "windows"
+    def tool = Path.of(System.getProperty("java.home")).resolve("bin").resolve(windows ? "${name}.exe" : name)
+    if (!Files.isRegularFile(tool)) {
+        throw new GradleException("JDK tool ${name} was not found at ${tool}. packageApp needs a full JDK 21.")
+    }
+    return tool
+}
+
+boolean commandOnPath(String name) {
+    def path = System.getenv("PATH")
+    if (path == null || path.isBlank()) {
+        return false
+    }
+    def windows = hitsOsName() == "windows"
+    for (String dir : path.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+        if (dir.isBlank()) {
+            continue
+        }
+        def candidates = windows ? ["${name}.exe", "${name}.cmd", "${name}.bat", name] : [name]
+        for (String candidate : candidates) {
+            if (Files.isRegularFile(Path.of(dir).resolve(candidate))) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+String packageTypeFor(String os) {
+    def requested = findProperty("packageType")
+    if (requested != null && !requested.toString().isBlank()) {
+        return requested.toString()
+    }
+    if (os == "mac") {
+        return "dmg"
+    }
+    if (os == "windows") {
+        if (commandOnPath("candle") && commandOnPath("light")) {
+            return "msi"
+        }
+        logger.lifecycle("WiX (candle and light) is not on PATH, so packageApp is building an app image instead of an .msi.")
+        return "app-image"
+    }
+    if (os == "linux" && commandOnPath("fakeroot") && commandOnPath("dpkg-deb")) {
+        return "deb"
+    }
+    if (os == "linux") {
+        logger.lifecycle("fakeroot or dpkg-deb is not on PATH, so packageApp is building an app image instead of a .deb.")
+    }
+    return "app-image"
+}
+
+Path iconFile(String os, Path icons) {
+    def filename = os == "mac" ? "hits.icns" : os == "windows" ? "hits.ico" : "hits.png"
+    def icon = icons.resolve(filename)
+    if (!Files.isRegularFile(icon)) {
+        throw new GradleException("The app icon was not written to ${icon}")
+    }
+    return icon
+}
+
+int copySampleBeats(Path source, Path destination) {
+    Files.createDirectories(destination)
+    int copied = 0
+    Files.list(source).withCloseable { stream ->
+        for (Path file : stream.filter { Files.isRegularFile(it) }.toList()) {
+            def name = file.fileName.toString().toLowerCase(java.util.Locale.ROOT)
+            if (name.endsWith(".btf") || name.endsWith(".json")) {
+                Files.copy(file, destination.resolve(file.fileName.toString()))
+                copied++
+            }
+        }
+    }
+    return copied
+}
+
+void assertPackagedImage(Path image) {
+    def configs = []
+    def beats = []
+    def desktopModule = [false]
+    def compilerModule = [false]
+    Files.walkFileTree(image, new SimpleFileVisitor<Path>() {
+        @Override
+        FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            def name = file.fileName.toString()
+            if (name == "Hits.cfg") {
+                configs.add(file)
+            }
+            if (name.endsWith(".btf") || name.endsWith(".json")) {
+                beats.add(file)
+            }
+            return FileVisitResult.CONTINUE
+        }
+
+        @Override
+        FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+            if (dir.fileName.toString() == "legal") {
+                desktopModule[0] = desktopModule[0] || Files.isDirectory(dir.resolve("java.desktop"))
+                compilerModule[0] = compilerModule[0] || Files.isDirectory(dir.resolve("java.compiler"))
+            }
+            return FileVisitResult.CONTINUE
+        }
+    })
+    if (configs.isEmpty()) {
+        throw new GradleException("jpackage did not write a launcher config under ${image}")
+    }
+    def exportFlag = "--add-exports=java.desktop/com.sun.media.sound=ALL-UNNAMED"
+    for (Path config : configs) {
+        def text = Files.readString(config)
+        if (!text.contains(exportFlag) || !text.contains("-Dhits.packaged=true")) {
+            throw new GradleException("${config} is missing the WAV export flag or -Dhits.packaged=true:\n${text}")
+        }
+    }
+    if (beats.isEmpty()) {
+        throw new GradleException("Sample beats were not copied into ${image}")
+    }
+    if (!desktopModule[0]) {
+        throw new GradleException("The bundled runtime is missing java.desktop under ${image}")
+    }
+    if (compilerModule[0]) {
+        throw new GradleException("The bundled runtime includes java.compiler. Pass a shorter --add-modules list.")
+    }
 }

@@ -8,7 +8,9 @@ A step sequencer for sketching drum and note patterns. The desktop window follow
 ./gradlew run
 ```
 
-Open a pattern from the beats folder. Until you choose another one, that folder is `beats` next to the directory you started in. **Folder…** stores the absolute path, so it stays put when Hits is started from somewhere else. Older `.btf` files still load. Save writes a versioned `.json` file beside them and leaves the original `.btf` in place.
+You can also install a double-clickable app that includes a Java runtime. See [Install](#install).
+
+Open a pattern from the beats folder. Until you choose another one, `./gradlew run` uses `beats` next to the directory you started in. A packaged app uses `Hits/beats` in your home directory (`~/Hits/beats` on macOS and Linux, `%USERPROFILE%\Hits\beats` on Windows) and copies the sample patterns there when that folder is empty. **Folder…** stores the absolute path, so it stays put when Hits is started from somewhere else. The first launch stores that path. Older `.btf` files still load. Save writes a versioned `.json` file beside them and leaves the original `.btf` in place.
 
 ## Playing
 
@@ -92,3 +94,45 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | × | How many times the selected chain entry plays, from 1 to 32. |
 | 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
 | Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other pattern is kept. |
+
+## Install
+
+Prebuilt apps are attached to [GitHub Releases](https://github.com/mike-faulcon/Hits/releases) when a `v*` tag is published. Each one includes a Java runtime, so you do not need a JDK or a terminal. They are not code-signed or notarized. Signing certificates cost money, and this project does not use them.
+
+| System | File | How to open |
+| --- | --- | --- |
+| macOS | `Hits-<version>.dmg` | Open the disk image and drag Hits to Applications. |
+| Windows | `Hits-<version>.msi` | Run the installer. It installs for your user and adds a Start menu shortcut. |
+| Linux | `hits_<version>-1_amd64.deb` | Install the package, then launch Hits from the app menu. |
+
+On macOS, Gatekeeper blocks an unsigned app the first time. Right-click Hits (or Control-click it) and choose **Open**, then **Open** in the dialog. After that, a normal double-click works. The dialog is Gatekeeper reacting to an unsigned build.
+
+On Windows, SmartScreen may say "Windows protected your PC". Choose **More info**, then **Run anyway**.
+
+On Linux, a file manager may ask for your password when you open the `.deb`. From a terminal, `sudo apt install ./hits_<version>-1_amd64.deb` does the same thing. The menu entry is named Hits. The `.deb` is built on GitHub's `ubuntu-latest` image, and its dependencies are the libraries that image provides. On another distribution, `./gradlew packageApp -PpackageType=app-image` writes `build/jpackage/dist/Hits/bin/Hits`.
+
+The first launch of the packaged app creates `Hits/beats` in your home directory and copies the sample patterns into it when the folder is empty. **Folder…** can point somewhere else. `./gradlew run` keeps using the working directory until a launch has stored a folder.
+
+## Build a package
+
+JDK 21 is required. `jpackage` and `jlink` come with the JDK.
+
+```shell
+./gradlew packageApp
+```
+
+The installer is written to `build/jpackage/dist/`. The task builds an app image, checks that WAV export's `--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED` flag is in the launcher config, and checks that the sample beats and a `java.desktop` runtime are inside. It then wraps that image for the current operating system.
+
+`jlink` builds the runtime from `java.desktop` and `java.prefs` (and the modules they require). Debug symbols, man pages, header files, and the extra JDK commands are left out, and resources are compressed. The full JDK is not bundled.
+
+| System | Default output | Extra tool |
+| --- | --- | --- |
+| Linux | `.deb` | `fakeroot` and `dpkg-deb` (`sudo apt install fakeroot`; `dpkg-deb` is in `dpkg`) |
+| macOS | `.dmg` | none |
+| Windows | `.msi` | [WiX Toolset 3](https://github.com/wixtoolset/wix3/releases) (`candle` and `light` on `PATH`). WiX is free. |
+
+If the extra tool is missing, the task writes an app image instead: a `Hits` directory (or `Hits.app` on macOS) with a launcher you can double-click. Pass `-PpackageType=` to choose `app-image`, `deb`, `dmg`, `msi`, or `exe`.
+
+The icon is a step grid drawn by `pack/HitsIcon.java` while the package is built. Linux uses the PNG, Windows the ICO, and macOS the ICNS.
+
+[`.github/workflows/package.yml`](.github/workflows/package.yml) builds the Linux `.deb`, macOS `.dmg`, and Windows `.msi` on GitHub-hosted `ubuntu-latest`, `macos-latest`, and `windows-latest` runners. It runs when a `v*` tag is pushed and when someone starts it by hand (`workflow_dispatch`). It does not run on pull requests. The packages are workflow artifacts kept for 7 days. A tag also attaches them to a GitHub Release. Nothing in that workflow is signed.
