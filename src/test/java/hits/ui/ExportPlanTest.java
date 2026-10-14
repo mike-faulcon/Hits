@@ -42,6 +42,13 @@ class ExportPlanTest {
         assertFalse(noChain.song());
         assertEquals(1, ExportPlan.options(false, false, 0, false, false).repeats());
         assertEquals(32, ExportPlan.options(false, false, 100, false, false).repeats());
+
+        ExportOptions played = ExportPlan.fromDialog(false, false, 1, false, false);
+        assertTrue(played.asHeard());
+        ExportOptions ignored = ExportPlan.fromDialog(true, true, 2, false, true);
+        assertFalse(ignored.asHeard());
+        assertTrue(ignored.bothSlots());
+        assertEquals(2, ignored.repeats());
     }
 
     @Test

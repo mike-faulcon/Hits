@@ -7,10 +7,12 @@ import java.util.List;
 public final class Beat {
     public static final int VERSION = 1;
     /**
-     * Written when any step stores its own pitch, or the beat has a song chain.
-     * Version 1 files stay version 1.
+     * Written when a step stores its own pitch, the beat has a song chain,
+     * or the mixer is off its defaults. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
+    /** Master fader at full. Track levels are not turned down any further. */
+    public static final int MASTER = 127;
     public static final int TRACKS = 8;
 
     private static final String[] KIT_NAMES = {
@@ -23,6 +25,7 @@ public final class Beat {
     private int swing;
     private int stepCount;
     private char active;
+    private int master = MASTER;
     private final Track[] slotA = new Track[TRACKS];
     private final Track[] slotB = new Track[TRACKS];
     private List<Chain.Part> chain = List.of();
@@ -48,6 +51,7 @@ public final class Beat {
         copy.swing = swing;
         copy.stepCount = stepCount;
         copy.active = active;
+        copy.master = master;
         copy.chain = chain;
         copyTracks(slotA, copy.slotA);
         copyTracks(slotB, copy.slotB);
@@ -95,6 +99,14 @@ public final class Beat {
 
     public void setActiveSlot(char slot) {
         this.active = slot == 'b' ? 'b' : 'a';
+    }
+
+    public int master() {
+        return master;
+    }
+
+    public void setMaster(int master) {
+        this.master = Math.max(0, Math.min(127, master));
     }
 
     public Track[] activeTracks() {
@@ -159,9 +171,17 @@ public final class Beat {
         return pitched(slotA) || pitched(slotB);
     }
 
-    /** True when a step has its own pitch or the song chain is not empty. */
+    /** True when a step has its own pitch, the song chain is not empty, or the mixer is not at its defaults. */
     public boolean usesFormatV2() {
-        return hasStepPitch() || hasChain();
+        return hasStepPitch() || hasChain() || hasMixer();
+    }
+
+    /** Pan, track level, or the master fader differs from the value a new kit uses. */
+    public boolean hasMixer() {
+        if (master != MASTER) {
+            return true;
+        }
+        return mixed(slotA) || mixed(slotB);
     }
 
     public List<Chain.Part> chain() {
@@ -222,6 +242,15 @@ public final class Beat {
         for (int i = 0; i < TRACKS; i++) {
             target[i] = tracks[i];
         }
+    }
+
+    private static boolean mixed(Track[] tracks) {
+        for (Track track : tracks) {
+            if (track.level() != Track.LEVEL || track.pan() != Track.PAN_CENTER) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean pitched(Track[] tracks) {

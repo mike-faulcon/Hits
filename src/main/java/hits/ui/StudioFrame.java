@@ -6,12 +6,14 @@ import hits.Kits;
 import hits.Player;
 
 import javax.swing.BorderFactory;
+import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.awt.KeyboardFocusManager;
 import java.awt.KeyEventDispatcher;
@@ -30,6 +32,12 @@ final class StudioFrame extends JFrame {
     private final SaveSession session = new SaveSession();
     private final JPanel header = new JPanel(new BorderLayout());
     private final PatternPanel pattern;
+    private final MixerPanel mixer;
+    private final CardLayout views = new CardLayout();
+    private final JPanel viewCards = new JPanel(views);
+    private final JButton stepsView = Widgets.button("Steps");
+    private final JButton mixerView = Widgets.button("Mixer");
+    private boolean mixerShown;
     private final BeatsFolder beatsFolder;
     private final TransportBar transport;
     private final SongChainBar chain;
@@ -48,6 +56,7 @@ final class StudioFrame extends JFrame {
         this.player = player;
         this.beatsFolder = new BeatsFolder();
         this.pattern = new PatternPanel(editor);
+        this.mixer = new MixerPanel(editor, sync);
         this.coach = new CoachBanner(editor, header);
         coach.maybeFirstRun();
         this.transport = new TransportBar(editor, player, sync, status);
@@ -126,10 +135,17 @@ final class StudioFrame extends JFrame {
         JPanel left = new JPanel(new BorderLayout(0, 8));
         left.setOpaque(false);
         left.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        JScrollPane scroll = new JScrollPane(pattern);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getViewport().setBackground(Theme.BG);
-        left.add(scroll, BorderLayout.CENTER);
+        JScrollPane stepsScroll = new JScrollPane(pattern);
+        stepsScroll.setBorder(BorderFactory.createEmptyBorder());
+        stepsScroll.getViewport().setBackground(Theme.BG);
+        JScrollPane mixerScroll = new JScrollPane(mixer.component());
+        mixerScroll.setBorder(BorderFactory.createEmptyBorder());
+        mixerScroll.getViewport().setBackground(Theme.BG);
+        viewCards.setOpaque(false);
+        viewCards.add(stepsScroll, "steps");
+        viewCards.add(mixerScroll, "mixer");
+        left.add(viewBar(), BorderLayout.NORTH);
+        left.add(viewCards, BorderLayout.CENTER);
         left.add(browser.component(), BorderLayout.SOUTH);
 
         JScrollPane inspectorScroll = new JScrollPane(inspector.component());
@@ -159,6 +175,9 @@ final class StudioFrame extends JFrame {
         transport.wire(this);
         chain.wire();
         inspector.wire();
+        mixer.wire();
+        stepsView.addActionListener(event -> showMixer(false));
+        mixerView.addActionListener(event -> showMixer(true));
         output.wire();
         KeyboardShortcuts.install(
             getRootPane(),
@@ -191,11 +210,35 @@ final class StudioFrame extends JFrame {
             transport.refresh();
             chain.refresh();
             inspector.refresh();
+            mixer.refresh();
+            Widgets.paintToggle(stepsView, !mixerShown);
+            Widgets.paintToggle(mixerView, mixerShown);
             updateTitle();
             pattern.revalidate();
             pattern.repaint();
             transport.updatePlayButton();
         });
+    }
+
+    private JPanel viewBar() {
+        stepsView.setToolTipText("The step grid.");
+        mixerView.setToolTipText("Level, pan, mute, and solo for every track, and the master volume.");
+        Widgets.fix(stepsView, 72, 32);
+        Widgets.fix(mixerView, 80, 32);
+        JPanel bar = Widgets.row(stepsView, mixerView);
+        bar.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
+        return bar;
+    }
+
+    private void showMixer(boolean mixer) {
+        if (mixerShown == mixer) {
+            return;
+        }
+        mixerShown = mixer;
+        views.show(viewCards, mixer ? "mixer" : "steps");
+        viewCards.revalidate();
+        viewCards.repaint();
+        refresh();
     }
 
     private void tickPlayhead() {

@@ -6,6 +6,8 @@ import java.util.Map;
 /** General MIDI program names, matching the list shipped with the original app, and drum labels. */
 public final class Gm {
     public static final int DRUM_CHANNEL = 9;
+    /** GM2 bank select. Puts the drum kit on a channel other than {@link #DRUM_CHANNEL}. */
+    public static final int DRUM_BANK = 120;
 
     private static final String[] PROGRAMS = {
         "Piano", "Bright Piano", "Electric Grand", "Honky Tonk Piano",
