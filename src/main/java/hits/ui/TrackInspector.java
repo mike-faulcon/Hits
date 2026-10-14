@@ -48,6 +48,8 @@ final class TrackInspector {
     private final JButton noteMode = Widgets.button("Note");
     private final JButton steps16 = Widgets.button("16 steps");
     private final JButton steps32 = Widgets.button("32 steps");
+    private final JButton shuffle = Widgets.button("Shuffle");
+    private Runnable shuffleTrack = () -> {};
     private final JLabel stepPitchValue = new JLabel("—", SwingConstants.LEFT);
     private final JButton stepPitchDown = Widgets.button("−");
     private final JButton stepPitchUp = Widgets.button("+");
@@ -63,6 +65,10 @@ final class TrackInspector {
         this.gateDrag = new SliderDrag(editor, sync);
         this.velocityDrag = new SliderDrag(editor, sync);
         this.accentDrag = new SliderDrag(editor, sync);
+    }
+
+    void onShuffle(Runnable action) {
+        shuffleTrack = action;
     }
 
     JPanel component() {
@@ -119,6 +125,9 @@ final class TrackInspector {
         drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
         noteMode.setToolTipText("One pitched instrument for the whole track.");
         addRow(panel, constraints, Widgets.row(drumMode, noteMode));
+        shuffle.setToolTipText("New hits on this track. The sound stays. Undo puts the old hits back.");
+        shuffle.addActionListener(event -> shuffleTrack.run());
+        addRow(panel, constraints, shuffle);
         JButton copyBar = Widgets.button("Copy bar");
         copyBar.setToolTipText("Copy the first 16 steps into a second bar and switch to 32 steps.");
         copyBar.addActionListener(event -> {

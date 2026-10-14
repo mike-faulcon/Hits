@@ -76,6 +76,9 @@ final class StudioFrame extends JFrame {
         browser.onFresh(files::fresh);
         browser.onBoomBap(() -> files.applyKit("Boom bap", Kits::boomBap));
         browser.onReggae(() -> files.applyKit("Reggae", Kits::reggae));
+        GrooveCommands grooves = new GrooveCommands(this, editor, status);
+        browser.onMakeBeat(grooves::makeBeat);
+        inspector.onShuffle(grooves::shuffleSelected);
         browser.onChooseFolder(files::chooseBeatsFolder);
 
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);

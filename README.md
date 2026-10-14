@@ -21,6 +21,12 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 
 Until you dismiss the hint, Hits opens on the Boom bap pattern, not playing. Undo once to clear it back to an empty kit. After you dismiss the hint, later launches start from an empty kit.
 
+## Make me a beat
+
+**Make me a beat** writes a starter groove on the pattern on screen. Pick boom bap, trap, house, rock, or reggaeton, or **Surprise me**. The kick and snare stay on the beats that make that style, and the hats change a little each time. Tempo and swing follow the style. A 32-step pattern keeps those beats in the second bar. Sounds, names, and the other pattern stay.
+
+If that pattern already has hits, the style picker says so. Cancel leaves it alone. **Shuffle**, on the track inspector, writes a new rhythm on the selected track only. A snare that you moved to another row still shuffles as a snare. Both buttons are one undo.
+
 ## Song
 
 **Pattern** loops the A or B pattern on screen. **Song** loops the chain. The chain is a short list, not a timeline. **+A** and **+B** add an entry, **Remove** deletes the selected one, and **Up** / **Down** reorder it. **×** is how many times that entry plays, from 1 to 32. The chain holds 32 entries. When they no longer fit, the entries scroll sideways and the chain buttons stay on the row. Build something like A, A, B, A, and give any entry its own repeat count.
@@ -93,6 +99,8 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Remove / Up / Down | Edit the selected chain entry. |
 | × | How many times the selected chain entry plays, from 1 to 32. |
 | 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
+| Make me a beat | Starter groove from a style. Asks first when the pattern on screen has hits. |
+| Shuffle | New rhythm on the selected track. The sound, tempo, and other tracks stay. |
 | Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other pattern is kept. |
 
 ## Install
