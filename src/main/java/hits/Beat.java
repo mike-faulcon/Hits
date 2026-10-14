@@ -7,8 +7,8 @@ import java.util.List;
 public final class Beat {
     public static final int VERSION = 1;
     /**
-     * Written when any step stores its own pitch, or the beat has a song chain.
-     * Version 1 files stay version 1.
+     * Written when any step stores its own pitch, any step stores a play probability
+     * other than 100, or the beat has a song chain. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
     public static final int TRACKS = 8;
@@ -159,9 +159,19 @@ public final class Beat {
         return pitched(slotA) || pitched(slotB);
     }
 
-    /** True when a step has its own pitch or the song chain is not empty. */
+    /** True when a step stores a probability other than 100, including a step that is off. */
+    public boolean hasChance() {
+        return storedChance(slotA) || storedChance(slotB);
+    }
+
+    /** True when a step that is on in {@code slot} can be skipped or included by a roll. */
+    public boolean playingChance(char slot) {
+        return rollingChance(this.slot(slot));
+    }
+
+    /** True when a step has its own pitch, a probability other than 100, or the song chain is not empty. */
     public boolean usesFormatV2() {
-        return hasStepPitch() || hasChain();
+        return hasStepPitch() || hasChance() || hasChain();
     }
 
     public List<Chain.Part> chain() {
@@ -228,6 +238,31 @@ public final class Beat {
         for (Track track : tracks) {
             for (int i = 0; i < Track.CAPACITY; i++) {
                 if (track.step(i).hasPitch()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean storedChance(Track[] tracks) {
+        for (Track track : tracks) {
+            for (int i = 0; i < Track.CAPACITY; i++) {
+                if (track.step(i).uncertain()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** 0 and 100 need no roll. Anything between them does, and only while the step is on. */
+    private static boolean rollingChance(Track[] tracks) {
+        for (Track track : tracks) {
+            for (int i = 0; i < Track.CAPACITY; i++) {
+                Step step = track.step(i);
+                int probability = step.probability();
+                if (step.on() && probability > 0 && probability < 100) {
                     return true;
                 }
             }

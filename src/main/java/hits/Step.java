@@ -1,9 +1,14 @@
 package hits;
 
-/** One cell in a track. Velocity is kept when the cell is turned off. Pitch is optional. */
+/**
+ * One cell in a track. Velocity and play probability are kept when the cell is turned off.
+ * Pitch is optional. A new hit takes the track's normal or loud-hit velocity; probability starts at 100.
+ */
 public final class Step {
     private boolean on;
     private int velocity;
+    /** 0 never plays. 100 always plays. */
+    private int probability = 100;
     /** {@code -1} plays the track note. Any other value is a MIDI note for this step only. */
     private int pitch = -1;
 
@@ -19,6 +24,7 @@ public final class Step {
     public Step copy() {
         Step copy = new Step(on, velocity);
         copy.pitch = pitch;
+        copy.probability = probability;
         return copy;
     }
 
@@ -26,6 +32,7 @@ public final class Step {
         this.on = other.on;
         this.velocity = other.velocity;
         this.pitch = other.pitch;
+        this.probability = other.probability;
     }
 
     public boolean on() {
@@ -42,6 +49,19 @@ public final class Step {
 
     public void setVelocity(int velocity) {
         this.velocity = clamp(velocity);
+    }
+
+    public int probability() {
+        return probability;
+    }
+
+    public void setProbability(int probability) {
+        this.probability = clampProbability(probability);
+    }
+
+    /** Stored chance is anything other than always-play. */
+    public boolean uncertain() {
+        return probability < 100;
     }
 
     public boolean hasPitch() {
@@ -88,5 +108,9 @@ public final class Step {
 
     private static int clamp(int velocity) {
         return Math.max(1, Math.min(127, velocity));
+    }
+
+    private static int clampProbability(int probability) {
+        return Math.max(0, Math.min(100, probability));
     }
 }

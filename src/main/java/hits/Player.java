@@ -195,9 +195,7 @@ public final class Player implements AutoCloseable {
         try {
             load(beat, position);
             sequencer.start();
-            long loop = song
-                ? Chain.ticks(beat.chain(), beat.stepCount())
-                : SequenceBuilder.loopTicks(beat.stepCount());
+            long loop = SequenceBuilder.playbackTicks(beat, song);
             if (loop > 0) {
                 sequencer.setTickPosition(Math.floorMod(position, loop));
             }
@@ -363,11 +361,9 @@ public final class Player implements AutoCloseable {
     }
 
     private void load(Beat beat, long position) throws InvalidMidiDataException {
-        var sequence = song ? SequenceBuilder.buildSong(beat) : SequenceBuilder.build(beat);
+        var sequence = SequenceBuilder.playback(beat, song);
         sequencer.setSequence(sequence);
-        long loop = song
-            ? Chain.ticks(beat.chain(), beat.stepCount())
-            : SequenceBuilder.loopTicks(beat.stepCount());
+        long loop = SequenceBuilder.playbackTicks(beat, song);
         long end = Math.min(loop, sequence.getTickLength());
         sequencer.setLoopStartPoint(0);
         if (end > 0) {

@@ -23,10 +23,14 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/** Track names, mute, solo, and the step grid, kept in one component so rows stay aligned. */
+/** Track names, mute, solo, the step grid, and a velocity lane for the selected track. */
 final class PatternPanel extends JPanel implements Scrollable {
+    private static final int LANE_RESERVE = 64;
+    private static final int MIN_CELL = 32;
+
     private final Editor editor;
     private int playhead = -1;
+    private Gesture gesture;
 
     PatternPanel(Editor editor) {
         this.editor = editor;
@@ -34,14 +38,26 @@ final class PatternPanel extends JPanel implements Scrollable {
         setFocusable(true);
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        setToolTipText("Click a step. Shift-click makes a loud hit. Right-click or Alt-click selects it.");
-        addMouseListener(new MouseAdapter() {
+        setToolTipText("Click a step. Shift-click makes a loud hit. Drag up or down to set velocity. Right-click or Alt-click selects it.");
+        MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
                 requestFocusInWindow();
-                handle(event);
+                pressed(event);
             }
-        });
+
+            @Override
+            public void mouseDragged(MouseEvent event) {
+                dragged(event);
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent event) {
+                released();
+            }
+        };
+        addMouseListener(mouse);
+        addMouseMotionListener(mouse);
     }
 
     void setPlayhead(int step) {
@@ -56,7 +72,7 @@ final class PatternPanel extends JPanel implements Scrollable {
     public Dimension getPreferredSize() {
         int columns = editor.beat().stepCount();
         int groups = Math.max(0, columns / 4 - 1);
-        return new Dimension(248 + columns * 30 + groups * 12, 36 + Beat.TRACKS * 40);
+        return new Dimension(248 + columns * 30 + groups * 12, 28 + Beat.TRACKS * MIN_CELL + LANE_RESERVE);
     }
 
     @Override
@@ -76,6 +92,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         for (int row = 0; row < Beat.TRACKS; row++) {
             paintRow(g, metrics, names, row);
         }
+        paintLane(g, metrics);
         g.setColor(Theme.GRID_LINE);
         for (int column = 4; column < metrics.columns; column += 4) {
             int line = metrics.stepX(column) - metrics.groupGap / 2;
@@ -117,8 +134,26 @@ final class PatternPanel extends JPanel implements Scrollable {
         for (int column = 0; column < metrics.columns; column++) {
             Rectangle cell = metrics.step(row, column);
             Step cellStep = track.step(column);
-            g.setColor(colorFor(cellStep.shade(track.accent())));
+            g.setColor(Theme.STEP_OFF);
             g.fillRoundRect(cell.x, cell.y, cell.width, cell.height, 6, 6);
+            if (cellStep.on()) {
+                int filled = VelocityGesture.fillHeight(cellStep.velocity(), cell.height);
+                java.awt.Shape clip = g.getClip();
+                g.clipRect(cell.x, cell.y + cell.height - filled, cell.width, filled);
+                g.setColor(colorFor(cellStep.shade(track.accent())));
+                g.fillRoundRect(cell.x, cell.y, cell.width, cell.height, 6, 6);
+                g.setClip(clip);
+            }
+            if (cellStep.uncertain()) {
+                String label = Integer.toString(cellStep.probability());
+                g.setFont(getFont().deriveFont(Font.BOLD, 9f));
+                FontMetrics tiny = g.getFontMetrics();
+                int textX = cell.x + Math.max(2, cell.width - tiny.stringWidth(label) - 3);
+                int textY = cell.y + tiny.getAscent();
+                boolean covered = cellStep.on() && VelocityGesture.fillHeight(cellStep.velocity(), cell.height) > 14;
+                g.setColor(covered ? Theme.INK : Theme.TEXT);
+                g.drawString(label, textX, textY);
+            }
             if (cellStep.hasPitch()) {
                 g.setColor(Theme.LINE);
                 int mark = Math.max(2, cell.height / 8);
@@ -128,6 +163,34 @@ final class PatternPanel extends JPanel implements Scrollable {
                 g.setColor(Theme.LINE);
                 g.setStroke(new BasicStroke(2f));
                 g.drawRoundRect(cell.x + 1, cell.y + 1, cell.width - 3, cell.height - 3, 6, 6);
+            }
+        }
+        g.setComposite(previous);
+    }
+
+    private void paintLane(Graphics2D g, Metrics metrics) {
+        Track track = editor.selectedTrack();
+        Composite previous = g.getComposite();
+        if (!Beat.audibleIn(editor.viewTracks(), track)) {
+            g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f));
+        }
+        g.setFont(getFont().deriveFont(11f));
+        g.setColor(Theme.MUTED);
+        g.drawString("Velocity", 28, metrics.laneTop() + 12);
+        for (int column = 0; column < metrics.columns; column++) {
+            Rectangle bar = metrics.laneBar(column);
+            Step step = track.step(column);
+            g.setColor(Theme.STEP_OFF);
+            g.fillRoundRect(bar.x, bar.y, bar.width, bar.height, 4, 4);
+            if (step.on()) {
+                int filled = VelocityGesture.fillHeight(step.velocity(), bar.height);
+                g.setColor(colorFor(step.shade(track.accent())));
+                g.fillRoundRect(bar.x, bar.y + bar.height - filled, bar.width, filled, 4, 4);
+            }
+            if (column == editor.stepIndex()) {
+                g.setColor(Theme.LINE);
+                g.setStroke(new BasicStroke(2f));
+                g.drawRoundRect(bar.x + 1, bar.y + 1, bar.width - 3, bar.height - 3, 4, 4);
             }
         }
         g.setComposite(previous);
@@ -144,8 +207,26 @@ final class PatternPanel extends JPanel implements Scrollable {
         g.drawString(letter, textX, textY);
     }
 
-    private void handle(MouseEvent event) {
+    private void pressed(MouseEvent event) {
+        gesture = null;
         Metrics metrics = metrics();
+        int laneColumn = metrics.laneColumn(event.getX(), event.getY());
+        if (laneColumn >= 0) {
+            int row = editor.trackIndex();
+            if (SwingUtilities.isRightMouseButton(event) || event.isAltDown() || event.isPopupTrigger()) {
+                editor.selectStep(row, laneColumn);
+                gesture = Gesture.selectOnly(row, laneColumn);
+                return;
+            }
+            char slot = editor.viewSlot();
+            editor.selectStep(row, laneColumn);
+            editor.beginAdjust();
+            Rectangle bar = metrics.laneBar(laneColumn);
+            int velocity = VelocityGesture.fromLane(event.getY(), bar.y, bar.height);
+            gesture = Gesture.lane(row, laneColumn, slot);
+            applyVelocity(slot, row, laneColumn, velocity);
+            return;
+        }
         int row = metrics.rowAt(event.getY());
         if (row < 0) {
             return;
@@ -165,12 +246,70 @@ final class PatternPanel extends JPanel implements Scrollable {
                 || event.isPopupTrigger();
             if (selectOnly) {
                 editor.selectStep(row, column);
+                gesture = Gesture.selectOnly(row, column);
                 return;
             }
-            editor.tap(row, column, event.isShiftDown());
+            Track track = editor.viewTrack(row);
+            Step step = track.step(column);
+            int start = step.on() ? step.velocity() : (event.isShiftDown() ? track.accent() : track.velocity());
+            gesture = Gesture.pad(row, column, event.isShiftDown(), event.getY(), start, editor.viewSlot());
             return;
         }
         editor.selectTrack(row);
+    }
+
+    private void dragged(MouseEvent event) {
+        if (gesture == null || gesture.selectOnly) {
+            return;
+        }
+        Metrics metrics = metrics();
+        if (gesture.lane) {
+            int column = metrics.laneColumn(event.getX(), event.getY());
+            if (column < 0) {
+                return;
+            }
+            if (column != editor.stepIndex() || gesture.row != editor.trackIndex()) {
+                editor.selectStep(gesture.row, column);
+            }
+            Rectangle bar = metrics.laneBar(column);
+            applyVelocity(gesture.slot, gesture.row, column, VelocityGesture.fromLane(event.getY(), bar.y, bar.height));
+            return;
+        }
+        int delta = event.getY() - gesture.y;
+        if (!gesture.dragging) {
+            if (Math.abs(delta) < VelocityGesture.DRAG_SLOP) {
+                return;
+            }
+            gesture.dragging = true;
+            editor.selectStep(gesture.row, gesture.column);
+            editor.beginAdjust();
+        }
+        applyVelocity(gesture.slot, gesture.row, gesture.column, VelocityGesture.fromDrag(gesture.startVelocity, delta));
+    }
+
+    private void released() {
+        Gesture current = gesture;
+        gesture = null;
+        if (current == null) {
+            return;
+        }
+        if (current.lane || current.dragging) {
+            editor.endAdjust();
+            return;
+        }
+        if (!current.selectOnly && current.column >= 0) {
+            editor.tap(current.row, current.column, current.shift);
+        }
+    }
+
+    private void applyVelocity(char slot, int row, int column, int velocity) {
+        editor.adjust(beat -> {
+            Step step = beat.slot(slot)[row].step(column);
+            if (!step.on()) {
+                step.setOn(true);
+            }
+            step.setVelocity(velocity);
+        });
     }
 
     @Override
@@ -186,11 +325,16 @@ final class PatternPanel extends JPanel implements Scrollable {
         if (row >= 0 && metrics.solo(row).contains(event.getPoint())) {
             return "Solo this track. Other tracks go quiet.";
         }
+        if (metrics.laneColumn(event.getX(), event.getY()) >= 0) {
+            return "Drag to set the velocity of this step on " + editor.selectedTrack().name() + ".";
+        }
         int column = row >= 0 ? metrics.columnAt(event.getX(), event.getY()) : -1;
         if (column >= 0) {
             Step step = editor.viewTrack(row).step(column);
             String pitch = step.hasPitch() ? " Step pitch " + Notes.name(step.pitch()) + "." : "";
-            return "Click toggles the step. Shift-click makes a loud hit. Right-click or Alt-click selects it so you can change its volume or step pitch." + pitch;
+            String chance = step.uncertain() ? " Chance " + step.probability() + "%." : "";
+            return "Click toggles the step. Shift-click makes a loud hit. Drag up or down to set velocity. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
+                + pitch + chance;
         }
         if (row >= 0) {
             return "Select this track";
@@ -217,7 +361,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         int groups = Math.max(0, columns / 4 - 1);
         int availableWidth = width - gutter - 12 - groups * groupGap;
         int cellWidth = Math.max(28, availableWidth / columns);
-        int cellHeight = Math.max(40, (height - header - 8) / Beat.TRACKS);
+        int cellHeight = Math.max(MIN_CELL, (height - header - LANE_RESERVE) / Beat.TRACKS);
         return new Metrics(gutter, header, groupGap, cellWidth, cellHeight, columns);
     }
 
@@ -296,8 +440,30 @@ final class PatternPanel extends JPanel implements Scrollable {
             if (row < 0) {
                 return -1;
             }
+            return columnIn(x, y, header + row * cellHeight, cellHeight);
+        }
+
+        int laneTop() {
+            return header + Beat.TRACKS * cellHeight + 4;
+        }
+
+        int laneColumn(int x, int y) {
+            Rectangle bar = laneBar(0);
+            if (y < bar.y || y >= bar.y + bar.height) {
+                return -1;
+            }
+            return columnIn(x, y, bar.y, bar.height);
+        }
+
+        Rectangle laneBar(int column) {
+            Rectangle cell = step(0, column);
+            int top = laneTop() + 14;
+            return new Rectangle(cell.x, top, cell.width, 36);
+        }
+
+        private int columnIn(int x, int y, int top, int height) {
             for (int column = 0; column < columns; column++) {
-                Rectangle hit = new Rectangle(stepX(column), header + row * cellHeight, cellWidth, cellHeight);
+                Rectangle hit = new Rectangle(stepX(column), top, cellWidth, height);
                 if (hit.contains(x, y)) {
                     return column;
                 }
@@ -308,6 +474,42 @@ final class PatternPanel extends JPanel implements Scrollable {
         private Rectangle chip(int row, int x) {
             int y = header + row * cellHeight + Math.max(0, (cellHeight - 28) / 2);
             return new Rectangle(x, y, 28, 28);
+        }
+    }
+
+    private static final class Gesture {
+        final int row;
+        final int column;
+        final boolean lane;
+        final boolean selectOnly;
+        final boolean shift;
+        final int y;
+        final int startVelocity;
+        final char slot;
+        boolean dragging;
+
+        private Gesture(int row, int column, boolean lane, boolean selectOnly, boolean shift, int y, int startVelocity, char slot) {
+            this.row = row;
+            this.column = column;
+            this.lane = lane;
+            this.selectOnly = selectOnly;
+            this.shift = shift;
+            this.y = y;
+            this.startVelocity = startVelocity;
+            this.slot = slot;
+            this.dragging = lane;
+        }
+
+        static Gesture pad(int row, int column, boolean shift, int y, int startVelocity, char slot) {
+            return new Gesture(row, column, false, false, shift, y, startVelocity, slot);
+        }
+
+        static Gesture lane(int row, int column, char slot) {
+            return new Gesture(row, column, true, false, false, 0, 0, slot);
+        }
+
+        static Gesture selectOnly(int row, int column) {
+            return new Gesture(row, column, false, true, false, 0, 0, 'a');
         }
     }
 }

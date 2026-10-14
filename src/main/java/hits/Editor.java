@@ -169,6 +169,17 @@ public final class Editor {
         fire(false);
     }
 
+    /** Sets the play probability of the selected step. No-op when no step is selected. */
+    public void setStepProbability(int probability) {
+        int column = stepIndex;
+        if (column < 0 || column >= beat.stepCount()) {
+            return;
+        }
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].step(column).setProbability(probability));
+    }
+
     public void tap(int row, int column, boolean accent) {
         if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.stepCount()) {
             return;

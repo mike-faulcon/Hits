@@ -27,7 +27,7 @@ Branch from `master` and open pull requests into `master`. Michael Faulcon revie
 - `src/main/java/hits/ui/` is the Swing window. `HitsApp` is the entry point. `StudioFrame` builds the window and wires the pieces below. `PatternPanel` is the step grid. There is no menu bar.
   - `TransportBar` — play/stop, tempo, swing, A/B slots, copy, and the beat name.
   - `SongChainBar` — Pattern/Song and the chain row. `ChainEdits` and `ChainSelection` are the selection and edit rules. `ChainLabels` is the button and status text.
-  - `TrackInspector` — track name, sound, length, volume, loud hit, drum/note, step pitch, and 16/32 steps. `TrackReadout` is the slider and step-pitch text.
+  - `TrackInspector` — track name, sound, length, volume, chance, loud hit, drum/note, step pitch, and 16/32 steps. `TrackReadout` is the slider, chance, and step-pitch text. The grid's velocity lane and pad drag live in `PatternPanel`.
   - `BeatBrowser` — the beats list, Folder…, and the action buttons.
   - `FileCommands` — open, save, save as, new, kit replace, the unsaved-changes prompt, and the beats folder. `SaveSession` remembers the open file and the save-prompt wording.
   - `ExportCommands` — Export MIDI and Export WAV. `ExportPlan` maps the dialog onto `ExportOptions`, the file suffix, and the status summary.

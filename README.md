@@ -15,7 +15,7 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 ## Playing
 
 - **Space** plays and stops. That stays true when a button, slider, or the beat list has focus. Space still types a character while the cursor is in a text field (the beat name, a track name, or the BPM box).
-- Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch.
+- Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. Drag a pad up or down to set that step's velocity. The pad fills from the bottom to show it, and the **Velocity** lane under the grid does the same for the selected track. A new hit uses the track's normal or loud-hit velocity, so an older beat sounds the same. **Chance** is the percent chance the selected step plays. 100% always plays, which is the default. Each pass through the pattern, or through the song, rolls chance again. Hits prepares a long run of those rolls when playback starts; when the run ends, the same series repeats. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch. A number on a pad is its chance, when that chance is not 100%.
 - **⌘Z / Ctrl-Z** undoes. **⌘⇧Z / Ctrl-Shift-Z** redoes.
 - **⌘S / Ctrl-S** saves. **⌘⇧S / Ctrl-Shift-S** is Save As.
 
@@ -51,9 +51,11 @@ Export writes a Standard MIDI file of 16th notes. Swing is part of the note time
 
 The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note.
 
+A step's chance is rolled with a fixed seed. The seed is not stored in the beat. Exporting the same beat with the same options — all tracks or as heard, A then B, repeats, or Song — writes the same notes every time. Each repeat and each chain entry is rolled on its own. 100% always plays and 0% never does. Playback does not use that seed, so a performance can differ from the file and from the next time you press play.
+
 ## Export WAV
 
-**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: all tracks or as heard, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, and the chain when Song is selected.
+**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: all tracks or as heard, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, the chain when Song is selected, and the same fixed chance seed. A WAV export of a beat is reproducible in the same way as the MIDI file.
 
 Hits renders the file through the built-in Java synth, without playing it out loud, and usually faster than real time. The file keeps two seconds after the loop ends so a note and its reverb can ring instead of stopping dead. A longer export shows a progress bar. **Cancel**, or closing that window, leaves any file already at that name in place. If rendering fails, Hits shows the reason.
 
@@ -73,14 +75,15 @@ A SoundFont does not change an external output. Ableton, IAC, and hardware play 
 
 ## Files
 
-Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. The file is version 2 when any step has its own pitch or the chain is not empty. A step without `pitch` uses the track pitch. Saving a beat that uses neither still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
+Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`) and a play probability (`probability`, 0–100). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. The file is version 2 when any step has its own pitch, a probability other than 100, or the chain is not empty. A step without `pitch` uses the track pitch. A step without `probability` plays every time, and 100 is omitted when saving. Saving a beat that uses none of these still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
 
 ## Controls
 
 | Control | What it does |
 | --- | --- |
 | Length | How long each note holds, as a percent of the step. This used to be labeled Gate. |
-| Volume | How hard a hit is. Edits the selected step when that step is on. Otherwise it is the volume of new hits. |
+| Volume | How hard a hit is, from 1 to 127. Edits the selected step when that step is on. Otherwise it is the volume of new hits. Drag a pad or the velocity lane to set a step directly. |
+| Chance | Percent chance the selected step plays. 100% always plays. 0% never plays. Playback rolls each pass. MIDI and WAV export use a fixed seed. |
 | Loud hit | Volume used by shift-click. Bright pads are at least this loud. This used to be labeled Accent. |
 | Swing | 50% is straight. The readout says `50% straight`. |
 | − / + | Move the track note by one semitone. |
