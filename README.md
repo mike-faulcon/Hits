@@ -23,11 +23,13 @@ Until you dismiss the hint, Hits opens on the Boom bap pattern, not playing. Und
 
 ## Song
 
-**Pattern** loops the A or B pattern on screen. **Song** loops the chain. The chain is a short list, not a timeline. **+A** and **+B** add an entry, **Remove** deletes the selected one, and **Up** / **Down** reorder it. **×** is how many times that entry plays, from 1 to 32. The chain holds 32 entries. When they no longer fit, the entries scroll sideways and the chain buttons stay on the row. Build something like A, A, B, A, and give any entry its own repeat count.
+**Pattern** loops the pattern on screen. A beat has eight patterns, A through H. **Song** loops the chain. The chain is a short list, not a timeline. Pick a letter and **+** adds that pattern, **Remove** deletes the selected entry, and **Up** / **Down** reorder it. **×** is how many times that entry plays, from 1 to 32. The chain holds 32 entries. When they no longer fit, the entries scroll sideways and the chain buttons stay on the row. Build something like A, A, C, A, and give any entry its own repeat count.
 
 While a song plays, the grid shows the pattern you hear and the playhead sits on that grid. Click a step to edit the pattern on screen. The song keeps its place and picks up the edit. A slider stays on the pattern you started dragging, even if the song moves on, and follows again when you let go.
 
-Click **A** or **B** while a song plays to select that pattern and hold the grid on it. Click a chain entry to hold the grid on that entry's pattern. The playhead shows when the held pattern is the one sounding. Click **Song** again to follow the chain. Stop returns the grid to the selected pattern.
+Choose a pattern while a song plays to select it and hold the grid on it. Click a chain entry to hold the grid on that entry's pattern. The playhead shows when the held pattern is the one sounding. Click **Song** again to follow the chain. Stop returns the grid to the selected pattern.
+
+**Copy** replaces the pattern chosen next to it with the pattern on screen. The other patterns stay.
 
 Every entry uses the beat's tempo, swing, and length. Song mode itself is not saved. The chain is. An empty chain still plays the pattern on screen.
 
@@ -47,13 +49,13 @@ Export writes a Standard MIDI file of 16th notes. Swing is part of the note time
 - **As heard** leaves muted tracks out and respects solo, judged separately for each pattern.
 - **A then B** writes pattern A followed by pattern B. Each row keeps one MIDI track. A row whose name differs is labeled `Kick / Rim`. If the instrument changes between A and B, the file carries a program change where B starts.
 - **Repeats** writes that material again, from 1 to 32 times. With A then B, the pair repeats (A B A B).
-- **Song** writes the chain, including each entry's repeats. A then B and Repeats are not used for that export. All tracks or As heard still applies, judged separately for each entry. A row that plays under both A and B keeps one MIDI track, with the same `Kick / Rim` label and program change as A then B.
+- **Song** writes the chain, including each entry's repeats. An entry can name any pattern from A through H. A then B and Repeats are not used for that export. All tracks or As heard still applies, judged separately for each entry. A row that plays in more than one pattern keeps one MIDI track. Differing names are joined in pattern order, such as `Kick / Rim`. If the instrument changes, the file carries a program change where the new pattern starts.
 
 The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note.
 
 ## Export WAV
 
-**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: all tracks or as heard, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, and the chain when Song is selected.
+**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: all tracks or as heard, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, and the chain when Song is selected. Song can include any pattern from A through H.
 
 Hits renders the file through the built-in Java synth, without playing it out loud, and usually faster than real time. The file keeps two seconds after the loop ends so a note and its reverb can ring instead of stopping dead. A longer export shows a progress bar. **Cancel**, or closing that window, leaves any file already at that name in place. If rendering fails, Hits shows the reason.
 
@@ -73,7 +75,7 @@ A SoundFont does not change an external output. Ableton, IAC, and hardware play 
 
 ## Files
 
-Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. The file is version 2 when any step has its own pitch or the chain is not empty. A step without `pitch` uses the track pitch. Saving a beat that uses neither still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
+Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "c", "repeats": 2 }`. Patterns C through H are optional keys in `slots`, written only when that pattern differs from the empty kit. The file is version 2 when any step has its own pitch, the chain is not empty, or pattern C–H is selected or named in the chain. A step without `pitch` uses the track pitch. A beat that only uses A and B is written the same way as before, so a previous version of Hits can still open a version 1 file. Extra fields Hits does not know are ignored. Older `.btf` files still load.
 
 ## Controls
 
@@ -87,13 +89,14 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Oct − / Oct + | Move the track note by one octave. These used to say −8 / +8. |
 | Step pitch | Pitch of the selected step, when that step is on. Use track clears it. A step without its own pitch uses the track pitch. |
 | Drum / Note | Drum kit sounds, or one pitched instrument for the whole track. |
-| A / B | Two patterns in one beat. Copy replaces the other pattern. During a song, click one to hold the grid there. |
+| Pattern | Pattern on screen, A through H. During a song, choose one to hold the grid there. |
+| to / Copy | Copy replaces the chosen pattern with the one on screen. |
 | Pattern / Song | Pattern loops the pattern on screen. Song loops the chain. Click Song again to follow the pattern you hear. |
-| +A / +B | Add that pattern to the chain. |
+| + | Add the pattern chosen beside it to the chain. Any pattern A through H. |
 | Remove / Up / Down | Edit the selected chain entry. |
 | × | How many times the selected chain entry plays, from 1 to 32. |
 | 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
-| Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other pattern is kept. |
+| Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other patterns are kept. |
 
 ## Install
 

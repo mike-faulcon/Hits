@@ -2,12 +2,12 @@ package hits.ui;
 
 import hits.Chain;
 
-/** Text for chain buttons and the status line. Slot B is {@code B}; every other slot is {@code A}. */
+/** Text for chain buttons and the status line. Pattern letters are {@code A} through {@code H}. */
 final class ChainLabels {
     private ChainLabels() {}
 
     static String slotName(char slot) {
-        return slot == 'b' ? "B" : "A";
+        return hits.Beat.slotLabel(slot);
     }
 
     static String hold(char slot) {
@@ -41,6 +41,6 @@ final class ChainLabels {
     }
 
     static String needEntry() {
-        return "Add A or B to the chain";
+        return "Add a pattern to the chain";
     }
 }

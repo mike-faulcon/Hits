@@ -164,7 +164,7 @@ final class ExportCommands {
         song.setEnabled(hasChain);
         song.setToolTipText(hasChain
             ? "Write the chain. Each entry's repeats are included."
-            : "Add a chain with +A or +B first.");
+            : "Add a pattern to the chain first.");
         JSpinner repeats = new JSpinner(new SpinnerNumberModel(1, 1, ExportOptions.MAX_REPEATS, 1));
         repeats.setToolTipText("How many times to write that material, from 1 to " + ExportOptions.MAX_REPEATS + ".");
         song.addActionListener(event -> {

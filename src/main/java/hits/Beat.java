@@ -3,15 +3,17 @@ package hits;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A saved beat: tempo, swing, length, two pattern slots, and an optional song chain. */
+/** A saved beat: tempo, swing, length, eight pattern slots, and an optional song chain. */
 public final class Beat {
     public static final int VERSION = 1;
     /**
-     * Written when any step stores its own pitch, or the beat has a song chain.
-     * Version 1 files stay version 1.
+     * Written when any step stores its own pitch, the beat has a song chain,
+     * or a pattern C–H is in use. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
     public static final int TRACKS = 8;
+    /** Patterns A through H. */
+    public static final int SLOT_COUNT = 8;
 
     private static final String[] KIT_NAMES = {
         "Kick", "Snare", "Closed Hat", "Open Hat", "Clap", "Tom", "Crash", "Ride"
@@ -23,8 +25,7 @@ public final class Beat {
     private int swing;
     private int stepCount;
     private char active;
-    private final Track[] slotA = new Track[TRACKS];
-    private final Track[] slotB = new Track[TRACKS];
+    private final Track[][] slots = new Track[SLOT_COUNT][TRACKS];
     private List<Chain.Part> chain = List.of();
 
     private Beat(String name) {
@@ -33,13 +34,42 @@ public final class Beat {
         this.swing = 50;
         this.stepCount = 16;
         this.active = 'a';
+        for (Track[] slot : slots) {
+            fillKit(slot);
+        }
     }
 
     public static Beat drumKit(String name) {
-        Beat beat = new Beat(name);
-        fillKit(beat.slotA);
-        fillKit(beat.slotB);
-        return beat;
+        return new Beat(name);
+    }
+
+    /** {@code a} through {@code h}. Anything else is pattern A. */
+    public static char normalizeSlot(char slot) {
+        return slot >= 'a' && slot <= 'h' ? slot : 'a';
+    }
+
+    /** One letter, lowercase. Anything else is pattern A. */
+    public static char parseSlot(String text) {
+        if (text != null && text.length() == 1) {
+            return normalizeSlot(text.charAt(0));
+        }
+        return 'a';
+    }
+
+    public static int slotIndex(char slot) {
+        return normalizeSlot(slot) - 'a';
+    }
+
+    public static char slotLetter(int index) {
+        if (index < 0 || index >= SLOT_COUNT) {
+            return 'a';
+        }
+        return (char) ('a' + index);
+    }
+
+    /** Display letter, {@code A} through {@code H}. */
+    public static String slotLabel(char slot) {
+        return String.valueOf(Character.toUpperCase(normalizeSlot(slot)));
     }
 
     public Beat copy() {
@@ -49,8 +79,9 @@ public final class Beat {
         copy.stepCount = stepCount;
         copy.active = active;
         copy.chain = chain;
-        copyTracks(slotA, copy.slotA);
-        copyTracks(slotB, copy.slotB);
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            copyTracks(slots[i], copy.slots[i]);
+        }
         return copy;
     }
 
@@ -94,15 +125,15 @@ public final class Beat {
     }
 
     public void setActiveSlot(char slot) {
-        this.active = slot == 'b' ? 'b' : 'a';
+        this.active = normalizeSlot(slot);
     }
 
     public Track[] activeTracks() {
-        return active == 'b' ? slotB : slotA;
+        return slot(active);
     }
 
     public Track[] slot(char slot) {
-        return slot == 'b' ? slotB : slotA;
+        return slots[slotIndex(slot)];
     }
 
     public Track track(int index) {
@@ -145,23 +176,65 @@ public final class Beat {
         copySlotToOther(active);
     }
 
-    /** Copies {@code slot} onto the other pattern. The active slot stays put. */
+    /** Copies {@code slot} onto the other of A and B. The active slot stays put. */
     public void copySlotToOther(char slot) {
         char from = slot == 'b' ? 'b' : 'a';
-        Track[] source = this.slot(from);
-        Track[] target = from == 'a' ? slotB : slotA;
+        copySlot(from, from == 'a' ? 'b' : 'a');
+    }
+
+    /** Copies pattern {@code from} onto {@code to}. The active pattern stays put. */
+    public void copySlot(char from, char to) {
+        char source = normalizeSlot(from);
+        char dest = normalizeSlot(to);
+        if (source == dest) {
+            return;
+        }
+        Track[] tracks = slot(source);
+        Track[] target = slot(dest);
         for (int i = 0; i < TRACKS; i++) {
-            target[i] = source[i].copy();
+            target[i] = tracks[i].copy();
         }
     }
 
     public boolean hasStepPitch() {
-        return pitched(slotA) || pitched(slotB);
+        for (Track[] slot : slots) {
+            if (pitched(slot)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    /** True when a step has its own pitch or the song chain is not empty. */
+    /**
+     * True when a step has its own pitch, the song chain is not empty,
+     * or a pattern C–H is selected, named in the chain, or different from the empty kit.
+     */
     public boolean usesFormatV2() {
-        return hasStepPitch() || hasChain();
+        return hasStepPitch() || hasChain() || usesExtraSlots();
+    }
+
+    /** Pattern C–H is selected, named in the chain, or different from the empty kit. */
+    public boolean usesExtraSlots() {
+        if (active >= 'c' && active <= 'h') {
+            return true;
+        }
+        for (Chain.Part part : chain) {
+            if (part.slot() >= 'c') {
+                return true;
+            }
+        }
+        return !extraSlots().isEmpty();
+    }
+
+    /** Patterns C–H whose notes differ from the empty kit, in letter order. */
+    List<Character> extraSlots() {
+        List<Character> extra = new ArrayList<>();
+        for (char slot = 'c'; slot <= 'h'; slot++) {
+            if (!matchesKit(slot)) {
+                extra.add(slot);
+            }
+        }
+        return extra;
     }
 
     public List<Chain.Part> chain() {
@@ -222,6 +295,40 @@ public final class Beat {
         for (int i = 0; i < TRACKS; i++) {
             target[i] = tracks[i];
         }
+    }
+
+    private boolean matchesKit(char slot) {
+        Track[] kit = new Track[TRACKS];
+        fillKit(kit);
+        Track[] current = this.slot(slot);
+        for (int i = 0; i < TRACKS; i++) {
+            if (!sameTrack(current[i], kit[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameTrack(Track left, Track right) {
+        if (!left.name().equals(right.name())
+            || left.mode() != right.mode()
+            || left.program() != right.program()
+            || left.note() != right.note()
+            || left.mute() != right.mute()
+            || left.solo() != right.solo()
+            || left.gate() != right.gate()
+            || left.velocity() != right.velocity()
+            || left.accent() != right.accent()) {
+            return false;
+        }
+        for (int i = 0; i < Track.CAPACITY; i++) {
+            Step a = left.step(i);
+            Step b = right.step(i);
+            if (a.on() != b.on() || a.velocity() != b.velocity() || a.pitch() != b.pitch()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean pitched(Track[] tracks) {

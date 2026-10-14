@@ -7,6 +7,8 @@ import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Turns a beat into a MIDI sequence. A 16th note is {@code PPQ / 4} ticks. */
 public final class SequenceBuilder {
@@ -86,7 +88,7 @@ public final class SequenceBuilder {
     /**
      * File export. The default options write every track and ignore mute and solo.
      * Repeats append the same notes later in the file. Both slots play A, then B, and that pair repeats.
-     * Song writes the chain once; each entry already carries its own repeats.
+     * Song writes the chain once; each entry already carries its own repeats and can name any pattern A–H.
      */
     public static Sequence export(Beat beat, ExportOptions options) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.allTracks() : options;
@@ -99,7 +101,8 @@ public final class SequenceBuilder {
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
         tempo.add(new MidiEvent(marker("end"), sectionTicks * sections));
 
-        boolean span = song ? Chain.usesBoth(beat.chain()) : chosen.bothSlots();
+        List<Character> spanSlots = spanSlots(beat, chosen, song);
+        boolean span = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int section = 0; section < sections; section++) {
             char slot = song ? Chain.slotAt(beat.chain(), section) : chosen.slotAt(section, beat.activeSlot());
@@ -112,7 +115,7 @@ public final class SequenceBuilder {
                 }
                 if (midiTracks[i] == null) {
                     midiTracks[i] = sequence.createTrack();
-                    midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i, span)), 0));
+                    midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, span)), 0));
                 }
                 int channel = track.mode() == TrackMode.DRUM ? Gm.DRUM_CHANNEL : i;
                 if (track.mode() == TrackMode.NOTE) {
@@ -126,18 +129,33 @@ public final class SequenceBuilder {
         return sequence;
     }
 
-    private static String exportName(Beat beat, ExportOptions options, char slot, int row, boolean both) {
-        hits.Track current = beat.slot(slot)[row];
-        if (!both) {
-            return current.name();
+    private static List<Character> spanSlots(Beat beat, ExportOptions options, boolean song) {
+        if (song) {
+            return Chain.distinctSlots(beat.chain());
         }
-        char otherSlot = slot == 'b' ? 'a' : 'b';
-        hits.Track other = beat.slot(otherSlot)[row];
-        boolean otherIncluded = !options.asHeard() || Beat.audibleIn(beat.slot(otherSlot), other);
-        if (!otherIncluded || other.name().equals(current.name())) {
-            return current.name();
+        if (options.bothSlots()) {
+            return List.of('a', 'b');
         }
-        return beat.slot('a')[row].name() + " / " + beat.slot('b')[row].name();
+        return List.of(Beat.normalizeSlot(beat.activeSlot()));
+    }
+
+    /** One name, or the included pattern names joined in letter order. */
+    private static String exportName(Beat beat, ExportOptions options, List<Character> slots, int row, boolean span) {
+        if (!span) {
+            return beat.slot(slots.get(0))[row].name();
+        }
+        List<String> names = new ArrayList<>();
+        for (char slot : slots) {
+            hits.Track track = beat.slot(slot)[row];
+            boolean included = !options.asHeard() || Beat.audibleIn(beat.slot(slot), track);
+            if (included && !names.contains(track.name())) {
+                names.add(track.name());
+            }
+        }
+        if (names.size() <= 1) {
+            return names.isEmpty() ? beat.slot(slots.get(0))[row].name() : names.get(0);
+        }
+        return String.join(" / ", names);
     }
 
     private static void writeNotes(

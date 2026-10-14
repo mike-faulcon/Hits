@@ -1,5 +1,6 @@
 package hits.ui;
 
+import hits.Beat;
 import hits.Chain;
 import hits.Editor;
 import hits.ExportOptions;
@@ -10,6 +11,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -30,8 +32,8 @@ final class SongChainBar {
     private final JButton patternMode = Widgets.button("Pattern");
     private final JButton songMode = Widgets.button("Song");
     private final JPanel chainSlots = new JPanel();
-    private final JButton addChainA = Widgets.button("+A");
-    private final JButton addChainB = Widgets.button("+B");
+    private final JComboBox<String> addSlot = Widgets.patternSlots();
+    private final JButton addChain = Widgets.button("+");
     private final JButton removeChain = Widgets.button("Remove");
     private final JButton chainUp = Widgets.button("Up");
     private final JButton chainDown = Widgets.button("Down");
@@ -73,20 +75,20 @@ final class SongChainBar {
         chainScroll.setPreferredSize(new Dimension(180, 36));
         bar.add(chainScroll, BorderLayout.CENTER);
 
-        addChainA.setToolTipText("Add pattern A to the chain.");
-        addChainB.setToolTipText("Add pattern B to the chain.");
+        addSlot.setToolTipText("Pattern to add to the chain, A through H.");
+        addChain.setToolTipText("Add the chosen pattern to the chain.");
         removeChain.setToolTipText("Remove the selected chain entry.");
         chainUp.setToolTipText("Move the selected entry earlier.");
         chainDown.setToolTipText("Move the selected entry later.");
         chainRepeats.setToolTipText("How many times the selected entry plays, from 1 to " + ExportOptions.MAX_REPEATS + ".");
-        Widgets.fix(addChainA, 48, 32);
-        Widgets.fix(addChainB, 48, 32);
+        Widgets.fix(addSlot, 64, 32);
+        Widgets.fix(addChain, 40, 32);
         Widgets.fix(chainUp, 52, 32);
         Widgets.fix(chainDown, 64, 32);
         JLabel repeatsLabel = Widgets.label("×");
         repeatsLabel.setToolTipText("Repeats for the selected entry.");
         Widgets.fix(chainRepeats, 64, 32);
-        bar.add(Widgets.row(addChainA, addChainB, removeChain, chainUp, chainDown, repeatsLabel, chainRepeats), BorderLayout.EAST);
+        bar.add(Widgets.row(addSlot, addChain, removeChain, chainUp, chainDown, repeatsLabel, chainRepeats), BorderLayout.EAST);
         bar.setMinimumSize(new Dimension(720, 52));
         bar.setPreferredSize(new Dimension(960, 52));
         return bar;
@@ -95,8 +97,7 @@ final class SongChainBar {
     void wire() {
         patternMode.addActionListener(event -> chooseMode(false));
         songMode.addActionListener(event -> chooseMode(true));
-        addChainA.addActionListener(event -> appendChain('a'));
-        addChainB.addActionListener(event -> appendChain('b'));
+        addChain.addActionListener(event -> appendChain(Beat.slotLetter(Math.max(0, addSlot.getSelectedIndex()))));
         removeChain.addActionListener(event -> removeSelectedChain());
         chainUp.addActionListener(event -> moveSelectedChain(-1));
         chainDown.addActionListener(event -> moveSelectedChain(1));
@@ -138,8 +139,8 @@ final class SongChainBar {
             chainSlots.repaint();
         }
         boolean selected = edits.selected();
-        addChainA.setEnabled(edits.canAdd());
-        addChainB.setEnabled(edits.canAdd());
+        addSlot.setEnabled(edits.canAdd());
+        addChain.setEnabled(edits.canAdd());
         removeChain.setEnabled(selected);
         chainUp.setEnabled(edits.canMoveUp());
         chainDown.setEnabled(edits.canMoveDown());

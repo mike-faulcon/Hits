@@ -7,13 +7,15 @@ import java.util.Map;
 
 /**
  * Versioned beat document.
- * Version 1 is the original document. Version 2 adds an optional {@code pitch} on a step
- * and an optional {@code chain} of pattern entries. A beat that uses neither is still written as version 1.
+ * Version 1 is the original document. Version 2 adds an optional {@code pitch} on a step,
+ * an optional {@code chain} of pattern entries, and optional pattern slots {@code c} through {@code h}.
+ * A beat that uses none of those is still written as version 1. Slots C–H are omitted unless
+ * that pattern differs from the empty kit, so a beat that only uses A and B is unchanged.
  */
 public final class BeatJson {
     private BeatJson() {}
 
-    /** 1 unless a step has its own pitch or the beat has a song chain, in which case 2. */
+    /** 1 unless a step has its own pitch, the beat has a song chain, or pattern C–H is in use. */
     public static int documentVersion(Beat beat) {
         return beat.usesFormatV2() ? Beat.FORMAT_V2 : Beat.VERSION;
     }
@@ -26,10 +28,15 @@ public final class BeatJson {
         field(out, 1, "bpm", beat.bpm(), true);
         field(out, 1, "swing", beat.swing(), true);
         field(out, 1, "steps", beat.stepCount(), true);
-        field(out, 1, "active", beat.activeSlot() == 'b' ? "b" : "a", true);
+        field(out, 1, "active", String.valueOf(beat.activeSlot()), true);
+        List<Character> extra = beat.extraSlots();
         out.append("  \"slots\": {\n");
         writeSlot(out, "a", beat.slot('a'), true);
-        writeSlot(out, "b", beat.slot('b'), false);
+        writeSlot(out, "b", beat.slot('b'), !extra.isEmpty());
+        for (int i = 0; i < extra.size(); i++) {
+            char slot = extra.get(i);
+            writeSlot(out, String.valueOf(slot), beat.slot(slot), i + 1 < extra.size());
+        }
         out.append("  }");
         if (beat.hasChain()) {
             out.append(",\n");
@@ -52,10 +59,16 @@ public final class BeatJson {
         beat.setBpm(number(root.get("bpm")));
         beat.setSwing(number(root.get("swing")));
         beat.setStepCount(number(root.get("steps")));
-        beat.setActiveSlot(text(root.get("active")).equals("b") ? 'b' : 'a');
+        beat.setActiveSlot(Beat.parseSlot(text(root.get("active"))));
         Map<String, Object> slots = asMap(root.get("slots"));
         readSlot(beat, 'a', asMap(slots.get("a")));
         readSlot(beat, 'b', asMap(slots.get("b")));
+        for (char slot = 'c'; slot <= 'h'; slot++) {
+            Object value = slots.get(String.valueOf(slot));
+            if (value != null) {
+                readSlot(beat, slot, asMap(value));
+            }
+        }
         if (root.containsKey("chain") && root.get("chain") != null) {
             beat.setChain(readChain(root.get("chain")));
         }
@@ -78,7 +91,7 @@ public final class BeatJson {
         int count = Math.min(Chain.MAX_PARTS, list.size());
         for (int i = 0; i < count; i++) {
             Map<String, Object> part = asMap(list.get(i));
-            char slot = text(part.get("slot")).equals("b") ? 'b' : 'a';
+            char slot = Beat.parseSlot(text(part.get("slot")));
             parts.add(new Chain.Part(slot, number(part.get("repeats"))));
         }
         return parts;
