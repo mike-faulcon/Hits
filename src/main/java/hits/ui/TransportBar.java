@@ -1,7 +1,9 @@
 package hits.ui;
 
+import hits.Beat;
 import hits.Editor;
 import hits.Player;
+import hits.TapTempo;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -14,19 +16,27 @@ import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Font;
 import java.awt.Window;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.util.OptionalInt;
 
-/** Play/stop, tempo, swing, the A/B slots, and the beat name. */
+/** Play/stop, tempo, tap tempo, the metronome, swing, the A/B slots, and the beat name. */
 final class TransportBar {
     private final Editor editor;
     private final Player player;
     private final Sync sync;
     private final StatusLine status;
     private final JButton play = Widgets.button("Play");
-    private final JSpinner bpm = new JSpinner(new SpinnerNumberModel(96, 40, 240, 1));
+    private final JSpinner bpm = new JSpinner(new SpinnerNumberModel(96, Beat.MIN_BPM, Beat.MAX_BPM, 1));
+    private final JButton tap = Widgets.button("Tap");
+    private final JButton click = Widgets.button("Click");
+    private final TapTempo tapTempo = new TapTempo();
+    private boolean clickOn;
     private final JSlider swing = Widgets.slider(50, 75, 50);
     private final JLabel swingValue = Widgets.label("50%");
     private final JButton slotA = Widgets.button("A");
@@ -42,6 +52,8 @@ final class TransportBar {
         this.sync = sync;
         this.status = status;
         this.swingDrag = new SliderDrag(editor, sync);
+        this.clickOn = AppPreferences.metronome();
+        player.setMetronome(clickOn);
     }
 
     JPanel component() {
@@ -53,12 +65,19 @@ final class TransportBar {
         bar.add(play);
         bar.add(Box.createHorizontalStrut(16));
         JLabel bpmLabel = Widgets.label("BPM");
-        bpmLabel.setToolTipText("Tempo, from 40 to 240.");
-        bpm.setToolTipText("Tempo, from 40 to 240.");
+        String tempoTip = "Tempo, from " + Beat.MIN_BPM + " to " + Beat.MAX_BPM + ".";
+        bpmLabel.setToolTipText(tempoTip);
+        bpm.setToolTipText(tempoTip);
         bar.add(bpmLabel);
         bar.add(Box.createHorizontalStrut(6));
         Widgets.fix(bpm, 72, 32);
         bar.add(bpm);
+        bar.add(Box.createHorizontalStrut(8));
+        tap.setToolTipText("Tap tempo. T does this unless you are typing. A pause starts over.");
+        bar.add(tap);
+        bar.add(Box.createHorizontalStrut(4));
+        click.setToolTipText("Metronome while playing. Louder on beat 1 of each bar. Not included in exports.");
+        bar.add(click);
         bar.add(Box.createHorizontalStrut(16));
         JLabel swingLabel = Widgets.label("Swing");
         swingLabel.setToolTipText("50% is straight. Higher values delay every other 16th note.");
@@ -89,6 +108,8 @@ final class TransportBar {
 
     void wire(Window parent) {
         play.addActionListener(event -> togglePlay(parent));
+        tap.addActionListener(event -> tapTempo());
+        click.addActionListener(event -> toggleClick());
         bpm.addChangeListener(event -> {
             if (sync.on()) {
                 return;
@@ -125,6 +146,7 @@ final class TransportBar {
             documentName.setText(beat.name());
         }
         documentName.setToolTipText(SaveSession.nameTooltip(beat.name()));
+        Widgets.paintToggle(click, clickOn);
     }
 
     void commitDocumentName() {
@@ -143,6 +165,32 @@ final class TransportBar {
 
     void showDocumentName() {
         documentName.setText(editor.beat().name());
+    }
+
+    void tapTempo() {
+        // The BPM box takes focus on launch. Leave it so Ctrl+Z and T apply to the beat.
+        focusPattern();
+        OptionalInt next = tapTempo.tap(System.currentTimeMillis());
+        if (next.isEmpty()) {
+            status.set("Tap");
+            return;
+        }
+        int bpmValue = next.getAsInt();
+        if (bpmValue != editor.beat().bpm()) {
+            editor.edit(beat -> beat.setBpm(bpmValue));
+        }
+        status.set(bpmValue + " BPM");
+    }
+
+    void toggleClick() {
+        clickOn = !clickOn;
+        player.setMetronome(clickOn);
+        AppPreferences.setMetronome(clickOn);
+        Widgets.paintToggle(click, clickOn);
+        if (player.isPlaying()) {
+            player.update(editor.beat(), editor.songMode());
+        }
+        status.set(clickOn ? "Click on" : "Click off");
     }
 
     void togglePlay(Window parent) {
@@ -178,6 +226,32 @@ final class TransportBar {
         play.setText(playShown ? "Stop" : "Play");
         play.setBackground(playShown ? Theme.PLAY : Theme.PANEL);
         play.setForeground(playShown ? Theme.INK : Theme.TEXT);
+    }
+
+    private void focusPattern() {
+        Window window = SwingUtilities.getWindowAncestor(play);
+        if (window == null) {
+            return;
+        }
+        PatternPanel grid = findPattern(window);
+        if (grid != null) {
+            grid.requestFocusInWindow();
+        }
+    }
+
+    private static PatternPanel findPattern(Container container) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof PatternPanel panel) {
+                return panel;
+            }
+            if (child instanceof Container nested) {
+                PatternPanel found = findPattern(nested);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     private void switchSlot(char slot) {

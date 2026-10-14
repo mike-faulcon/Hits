@@ -12,6 +12,14 @@ import java.nio.charset.StandardCharsets;
 public final class SequenceBuilder {
     public static final int PPQ = 96;
     public static final int STEP_TICKS = PPQ / 4;
+    /** GM high wood block. Playback click on beat 1 of each bar. */
+    public static final int CLICK_ACCENT_NOTE = 76;
+    /** GM low wood block. Playback click on the other beats. */
+    public static final int CLICK_NOTE = 77;
+    public static final int CLICK_ACCENT_VELOCITY = 120;
+    public static final int CLICK_VELOCITY = 80;
+    /** Short enough that a click does not ring into the next beat. */
+    public static final int CLICK_TICKS = 6;
 
     private SequenceBuilder() {}
 
@@ -49,14 +57,35 @@ public final class SequenceBuilder {
 
     /** Playback of the song chain, as heard. An empty chain is the active pattern. */
     public static Sequence buildSong(Beat beat) throws InvalidMidiDataException {
+        return buildSong(beat, false);
+    }
+
+    /**
+     * Playback of the song chain. {@code metronome} adds a click on each beat,
+     * louder on beat 1 of each bar. An empty chain is the active pattern.
+     * Export does not use this path, so the click is never written to a file.
+     */
+    public static Sequence buildSong(Beat beat, boolean metronome) throws InvalidMidiDataException {
         if (!beat.hasChain()) {
-            return build(beat);
+            return build(beat, metronome);
         }
-        return export(beat, new ExportOptions(true, false, 1, true));
+        Sequence sequence = export(beat, new ExportOptions(true, false, 1, true));
+        if (metronome) {
+            addClicks(sequence, beat.stepCount(), Chain.sections(beat.chain()));
+        }
+        return sequence;
     }
 
     /** Playback sequence: the active slot, once, with mute and solo applied. */
     public static Sequence build(Beat beat) throws InvalidMidiDataException {
+        return build(beat, false);
+    }
+
+    /**
+     * Playback sequence: the active slot, once, with mute and solo applied.
+     * {@code metronome} adds clicks. {@link #export} never writes them.
+     */
+    public static Sequence build(Beat beat, boolean metronome) throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
         int steps = beat.stepCount();
@@ -79,6 +108,9 @@ public final class SequenceBuilder {
                 midi.add(new MidiEvent(program, 0));
             }
             writeNotes(midi, beat, track, channel, steps, 0, loop);
+        }
+        if (metronome) {
+            addClicks(sequence, steps, 1);
         }
         return sequence;
     }
@@ -190,6 +222,35 @@ public final class SequenceBuilder {
         MetaMessage message = new MetaMessage();
         message.setMessage(0x03, data, data.length);
         return message;
+    }
+
+    /**
+     * A click on every quarter note. Beat 1 of each bar is the accent.
+     * Quarter notes fall on even 16ths, which swing does not move, so the click stays on the beat.
+     */
+    private static void addClicks(Sequence sequence, int stepCount, int sections) throws InvalidMidiDataException {
+        if (sections <= 0 || stepCount < 4) {
+            return;
+        }
+        Track click = sequence.createTrack();
+        click.add(new MidiEvent(trackName("Click"), 0));
+        int quarters = stepCount / 4;
+        long bar = loopTicks(stepCount);
+        for (int section = 0; section < sections; section++) {
+            for (int quarter = 0; quarter < quarters; quarter++) {
+                int step = quarter * 4;
+                boolean downbeat = step % 16 == 0;
+                long start = section * bar + (long) step * STEP_TICKS;
+                int note = downbeat ? CLICK_ACCENT_NOTE : CLICK_NOTE;
+                int velocity = downbeat ? CLICK_ACCENT_VELOCITY : CLICK_VELOCITY;
+                ShortMessage on = new ShortMessage();
+                on.setMessage(ShortMessage.NOTE_ON, Gm.DRUM_CHANNEL, note, velocity);
+                click.add(new MidiEvent(on, start));
+                ShortMessage off = new ShortMessage();
+                off.setMessage(ShortMessage.NOTE_OFF, Gm.DRUM_CHANNEL, note, 0);
+                click.add(new MidiEvent(off, start + CLICK_TICKS));
+            }
+        }
     }
 
     private static MetaMessage marker(String text) throws InvalidMidiDataException {

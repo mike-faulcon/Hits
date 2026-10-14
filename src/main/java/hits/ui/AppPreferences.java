@@ -5,6 +5,7 @@ import java.util.prefs.Preferences;
 /** Preferences stored on the {@link HitsApp} node. Failures leave the in-memory choice in place. */
 final class AppPreferences {
     static final String COACH_DISMISSED = "coachDismissed";
+    static final String METRONOME = "metronome";
 
     private AppPreferences() {}
 
@@ -46,6 +47,23 @@ final class AppPreferences {
             Preferences.userNodeForPackage(HitsApp.class).putBoolean(COACH_DISMISSED, true);
         } catch (Exception ignored) {
             // The hint can come back next launch if preferences cannot be stored.
+        }
+    }
+
+    /** Metronome clicks during playback. Off when the preference cannot be read. */
+    static boolean metronome() {
+        try {
+            return Preferences.userNodeForPackage(HitsApp.class).getBoolean(METRONOME, false);
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    static void setMetronome(boolean on) {
+        try {
+            Preferences.userNodeForPackage(HitsApp.class).putBoolean(METRONOME, on);
+        } catch (Exception ignored) {
+            // The click still follows the button until the app closes.
         }
     }
 }

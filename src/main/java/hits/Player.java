@@ -30,6 +30,8 @@ public final class Player implements AutoCloseable {
     private Soundbank defaultBank;
     private Soundbank loadedBank;
     private boolean song;
+    /** Clicks on the beat while playing. Exports do not read this. */
+    private boolean metronome;
     private Path soundFont;
     private String soundFontName;
     private String soundFontNote;
@@ -154,6 +156,15 @@ public final class Player implements AutoCloseable {
 
     public boolean isPlaying() {
         return isOpen() && sequencer.isRunning();
+    }
+
+    /** Click on each beat during playback. The next play or update uses the new value. */
+    public void setMetronome(boolean metronome) {
+        this.metronome = metronome;
+    }
+
+    public boolean metronome() {
+        return metronome;
     }
 
     /** Starts pattern playback, or the song chain when {@code songMode} is set and the chain is not empty. */
@@ -363,7 +374,9 @@ public final class Player implements AutoCloseable {
     }
 
     private void load(Beat beat, long position) throws InvalidMidiDataException {
-        var sequence = song ? SequenceBuilder.buildSong(beat) : SequenceBuilder.build(beat);
+        var sequence = song
+            ? SequenceBuilder.buildSong(beat, metronome)
+            : SequenceBuilder.build(beat, metronome);
         sequencer.setSequence(sequence);
         long loop = song
             ? Chain.ticks(beat.chain(), beat.stepCount())
