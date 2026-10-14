@@ -61,6 +61,26 @@ A SoundFont loaded on the built-in synth is the sound in the file. Otherwise the
 
 The suggested `.wav` name uses the same file-safe spelling as Save.
 
+## Drag MIDI and Drag WAV
+
+**Drag MIDI** and **Drag WAV** sit above the load and save buttons. Drag a chip into a DAW or a file manager to drop a copy of the current pattern. With **Song** on and a chain in the beat, the drop is the song instead. An empty chain drags the active pattern, which is also what playback does.
+
+The file is written to a temporary folder first, using the same notes as Export. Until you change them, the choices are all tracks, the active pattern, and one repeat. **As heard**, **A then B**, and **Repeats** follow the last export. The export dialog opens with those choices, and **Song** starts checked when Song mode is on and the chain is not empty. A drag in Song mode writes the chain and does not use A then B or Repeats. Mute and solo still apply only when As heard is on.
+
+The file name uses the same spelling as Save, plus a short qualifier: `AlbumTrackv3-A.mid`, `AlbumTrackv3-B.wav`, `AlbumTrackv3-song.mid`, `AlbumTrackv3-A-then-B-x4.mid`, `AlbumTrackv3-song-as-heard.wav`. Dragging the same pattern again reuses that file. After the beat or the export choices change, the next file is `AlbumTrackv3-A-2.mid`, so a DAW that is still reading the first one is left alone.
+
+MIDI is written when the drag starts. WAV uses the same progress window as Export WAV, because the file has to exist before the drag can offer it. **Cancel** leaves nothing on the pointer. The progress window takes the mouse, so a move made while it is up is not part of the drag. When it closes, drag the chip again if the file did not land. Hits keeps that rendered file until the beat or the export choices change, and the second drag does not render again.
+
+Hits deletes the temporary folder when the window closes. Drop the file where you want to keep it. A program that only remembers the path will not find it after Hits exits. The beat you have open is not moved or changed.
+
+The drag is a copy. Swing offers the temp file as a file list (`DataFlavor.javaFileListFlavor`). It is not a promise of a file that appears later, which is why WAV finishes rendering first.
+
+- **macOS.** Finder accepts the drop. Some DAWs accept a WAV or MIDI file dropped on the arrangement, and some only accept a drag that started in Finder. If the drop does nothing, drag the chip onto the Desktop and then into the DAW.
+- **Windows.** File Explorer accepts the drop. Most DAWs accept a WAV dropped on the arrangement. MIDI depends on the DAW. If another program still has the file open when Hits exits, Windows may leave it in the temp folder until that program lets go.
+- **Linux.** On X11, file managers that understand a URI list usually accept the drop, because the JDK presents the file list that way. A Wayland window often does not see a drag that started in Java, since Swing still speaks X11. Drop the chip on a folder that does see it, or use Export MIDI / Export WAV.
+
+A dragged WAV is the built-in synth, including a loaded SoundFont. It is not the external MIDI output. Same as Export WAV.
+
 ## MIDI out
 
 **MIDI out** is at the bottom of the window. **Built-in synth** is the Java instrument and the fallback. Choose another output to send notes to Ableton, an IAC bus, or a hardware port. Hits remembers the choice. If that device is not connected the next time you open Hits, playback uses the built-in synth and the saved choice is kept until the device is back.
@@ -94,6 +114,8 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | × | How many times the selected chain entry plays, from 1 to 32. |
 | 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
 | Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other pattern is kept. |
+| Drag MIDI | Drag the current pattern, or the song, into a DAW or a folder. |
+| Drag WAV | The same notes as a WAV file. A progress window shows while it renders. |
 
 ## Install
 

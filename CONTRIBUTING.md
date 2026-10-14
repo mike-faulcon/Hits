@@ -30,7 +30,7 @@ Branch from `master` and open pull requests into `master`. Michael Faulcon revie
   - `TrackInspector` — track name, sound, length, volume, loud hit, drum/note, step pitch, and 16/32 steps. `TrackReadout` is the slider and step-pitch text.
   - `BeatBrowser` — the beats list, Folder…, and the action buttons.
   - `FileCommands` — open, save, save as, new, kit replace, the unsaved-changes prompt, and the beats folder. `SaveSession` remembers the open file and the save-prompt wording.
-  - `ExportCommands` — Export MIDI and Export WAV. `ExportPlan` maps the dialog onto `ExportOptions`, the file suffix, and the status summary.
+  - `ExportCommands` — Export MIDI, Export WAV, and the Drag MIDI / Drag WAV chips. `ExportPlan` maps the dialog and a drag onto `ExportOptions`, the file suffix, the drag file name, and the status summary. `DragFiles` is the temp folder, removed when the window closes. `FileDrag` is the Swing file-list drag.
   - `OutputBar` — MIDI out and SoundFont.
   - `KeyboardShortcuts` — undo, redo, save, save as, and space for play/stop.
   - `CoachBanner` — the first-run hint.

@@ -20,7 +20,7 @@ import java.awt.event.WindowEvent;
 
 /**
  * Studio window. Builds the desk and connects the panels.
- * Transport, the chain, the inspector, files, export, and MIDI output live in their own classes.
+ * Transport, the chain, the inspector, files, export, drag-out, and MIDI output live in their own classes.
  */
 final class StudioFrame extends JFrame {
     private final Editor editor;
@@ -68,6 +68,7 @@ final class StudioFrame extends JFrame {
             this::updateTitle
         );
         this.exports = new ExportCommands(this, editor, player, beatsFolder, status);
+        browser.dragHandles(exports.midiChip(), exports.wavChip());
         browser.onLoad(files::loadSelected);
         browser.onSave(() -> files.save());
         browser.onSaveAs(() -> files.saveAs());
@@ -180,6 +181,7 @@ final class StudioFrame extends JFrame {
     }
 
     private void changed(boolean musical) {
+        exports.noteChange(musical);
         refresh();
         if (musical && player.isPlaying()) {
             player.update(editor.beat(), editor.songMode());
@@ -238,6 +240,7 @@ final class StudioFrame extends JFrame {
             keys = null;
         }
         playhead.stop();
+        exports.close();
         super.dispose();
     }
 }

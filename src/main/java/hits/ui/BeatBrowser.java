@@ -6,6 +6,7 @@ import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -36,6 +37,8 @@ final class BeatBrowser {
     private Runnable boomBap = () -> {};
     private Runnable reggae = () -> {};
     private Runnable chooseFolder = () -> {};
+    private JComponent dragMidi;
+    private JComponent dragWav;
 
     BeatBrowser(BeatsFolder beatsFolder, StatusLine status) {
         this.beatsFolder = beatsFolder;
@@ -80,6 +83,12 @@ final class BeatBrowser {
         chooseFolder = action;
     }
 
+    /** Chips placed above the action buttons. Call this before {@link #component()}. */
+    void dragHandles(JComponent midi, JComponent wav) {
+        dragMidi = midi;
+        dragWav = wav;
+    }
+
     BeatFiles.Entry selected() {
         return beatList.getSelectedValue();
     }
@@ -113,7 +122,7 @@ final class BeatBrowser {
         JPanel panel = new JPanel(new BorderLayout(0, 6));
         panel.setBackground(Theme.PANEL);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        panel.setPreferredSize(new Dimension(200, 210));
+        panel.setPreferredSize(new Dimension(200, 248));
         JPanel heading = new JPanel(new BorderLayout());
         heading.setOpaque(false);
         JButton folder = Widgets.button("Folder…");
@@ -150,6 +159,15 @@ final class BeatBrowser {
         JScrollPane listScroll = new JScrollPane(beatList);
         listScroll.setBorder(BorderFactory.createEmptyBorder());
         panel.add(listScroll, BorderLayout.CENTER);
+        JPanel south = new JPanel(new BorderLayout(0, 6));
+        south.setOpaque(false);
+        if (dragMidi != null && dragWav != null) {
+            JPanel dragRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+            dragRow.setOpaque(false);
+            dragRow.add(dragMidi);
+            dragRow.add(dragWav);
+            south.add(dragRow, BorderLayout.NORTH);
+        }
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.setOpaque(false);
         JButton loadButton = Widgets.button("Load");
@@ -184,7 +202,8 @@ final class BeatBrowser {
         actions.add(freshButton);
         actions.add(boom);
         actions.add(reggaeButton);
-        panel.add(actions, BorderLayout.SOUTH);
+        south.add(actions, BorderLayout.SOUTH);
+        panel.add(south, BorderLayout.SOUTH);
         return panel;
     }
 }

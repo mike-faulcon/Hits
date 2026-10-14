@@ -13,6 +13,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -22,6 +23,7 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -32,18 +34,24 @@ import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 
-/** Export MIDI and Export WAV, including the shared options dialog and the WAV progress window. */
+/** Export MIDI and Export WAV, plus the drag chips that reuse the same options and renderer. */
 final class ExportCommands {
     private final JFrame frame;
     private final Editor editor;
     private final Player player;
     private final BeatsFolder beatsFolder;
     private final StatusLine status;
+    private final DragFiles dragFiles;
+    private final FileDrag midiDrag = new FileDrag();
+    private final FileDrag wavDrag = new FileDrag();
+    private final ExportMemory memory = new ExportMemory();
+    private boolean songMode;
 
     ExportCommands(JFrame frame, Editor editor, Player player, BeatsFolder beatsFolder, StatusLine status) {
         this.frame = frame;
@@ -51,6 +59,48 @@ final class ExportCommands {
         this.player = player;
         this.beatsFolder = beatsFolder;
         this.status = status;
+        this.songMode = editor.songMode();
+        try {
+            this.dragFiles = DragFiles.open();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not create a folder for dragged files", exception);
+        }
+    }
+
+    JComponent midiChip() {
+        JComponent chip = FileDrag.chip("Drag MIDI");
+        chip.setName("dragMidi");
+        chip.setToolTipText("Drag the current pattern into a DAW or a folder. Song mode drags the chain. Uses the current export choices.");
+        midiDrag.install(chip, () -> prepare("mid"), () ->
+            status.set("MIDI is ready. Drag the chip into a DAW or a folder."));
+        return chip;
+    }
+
+    JComponent wavChip() {
+        JComponent chip = FileDrag.chip("Drag WAV");
+        chip.setName("dragWav");
+        chip.setToolTipText("Drag a WAV of the same notes. A progress window shows while it renders. Uses the built-in synth, and a loaded SoundFont when one is active.");
+        wavDrag.install(chip, () -> prepare("wav"), () ->
+            status.set("WAV is ready. Drag the chip into a DAW or a folder."));
+        return chip;
+    }
+
+    /** Forgets a WAV that was rendered for an older pattern, song, or export choice. */
+    void noteChange(boolean musical) {
+        boolean song = editor.songMode();
+        if (musical || song != songMode) {
+            disarmDrag();
+        }
+        songMode = song;
+    }
+
+    void disarmDrag() {
+        midiDrag.disarm();
+        wavDrag.disarm();
+    }
+
+    void close() {
+        dragFiles.close();
     }
 
     void exportMidi() {
@@ -71,9 +121,43 @@ final class ExportCommands {
         if (choice == null) {
             return;
         }
+        if (renderWav(editor.beat().copy(), choice.path(), choice.options(), "Export WAV")) {
+            status.set("Exported " + choice.path().getFileName() + ExportPlan.summary(choice.options()));
+        }
+    }
+
+    /**
+     * Writes the temp file for a drag. Null when the user cancels the WAV render or the write fails.
+     * Called on the event thread, before the native drag starts.
+     */
+    private Path prepare(String extension) {
         Beat beat = editor.beat().copy();
+        ExportOptions options = memory.forDrag(editor.songMode(), beat.hasChain());
+        String name = ExportPlan.dragFileName(beat.name(), options, beat.activeSlot(), extension);
+        try {
+            Path path = dragFiles.place(name);
+            if ("wav".equals(extension)) {
+                if (!renderWav(beat, path, options, "Drag WAV")) {
+                    return null;
+                }
+            } else {
+                BeatFiles.exportMidi(beat, path, options);
+            }
+            if (!Files.isRegularFile(path)) {
+                return null;
+            }
+            status.set("Dragging " + path.getFileName() + ExportPlan.summary(options));
+            return path;
+        } catch (RuntimeException | IOException | javax.sound.midi.InvalidMidiDataException exception) {
+            JOptionPane.showMessageDialog(frame, Widgets.message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
+            return null;
+        }
+    }
+
+    /** Renders a WAV while a progress dialog is up. False when the user cancels or rendering fails. */
+    private boolean renderWav(Beat beat, Path path, ExportOptions options, String title) {
         Path soundFont = player.soundFont();
-        JDialog dialog = new JDialog(frame, "Export WAV", Dialog.ModalityType.APPLICATION_MODAL);
+        JDialog dialog = new JDialog(frame, title, Dialog.ModalityType.APPLICATION_MODAL);
         JProgressBar bar = new JProgressBar(0, 100);
         bar.setStringPainted(true);
         bar.setString("Rendering…");
@@ -83,7 +167,7 @@ final class ExportCommands {
         south.add(cancel);
         JPanel body = new JPanel(new BorderLayout(0, 8));
         body.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        body.add(new JLabel("Rendering " + choice.path().getFileName()), BorderLayout.NORTH);
+        body.add(new JLabel("Rendering " + path.getFileName()), BorderLayout.NORTH);
         body.add(bar, BorderLayout.CENTER);
         body.add(south, BorderLayout.SOUTH);
         dialog.getContentPane().add(body);
@@ -97,8 +181,8 @@ final class ExportCommands {
                 javax.sound.midi.Soundbank bank = soundFont == null ? null : SoundFonts.read(soundFont);
                 BeatFiles.exportWav(
                     beat,
-                    choice.path(),
-                    choice.options(),
+                    path,
+                    options,
                     bank,
                     this::publishPercent,
                     this::isCancelled
@@ -129,11 +213,13 @@ final class ExportCommands {
                 worker.cancel(false);
             }
         });
-        worker.execute();
+        // Start the render only after the dialog is on screen. A fast file otherwise
+        // finishes, and done() closes the dialog, before setVisible paints it.
+        SwingUtilities.invokeLater(worker::execute);
         dialog.setVisible(true);
         try {
             worker.get();
-            status.set("Exported " + choice.path().getFileName() + ExportPlan.summary(choice.options()));
+            return true;
         } catch (CancellationException exception) {
             status.set("Export cancelled");
         } catch (InterruptedException exception) {
@@ -143,10 +229,11 @@ final class ExportCommands {
             Throwable cause = exception.getCause() == null ? exception : exception.getCause();
             if (cause instanceof WavRenderer.Cancelled) {
                 status.set("Export cancelled");
-                return;
+                return false;
             }
             JOptionPane.showMessageDialog(frame, Widgets.message(cause), "Hits", JOptionPane.ERROR_MESSAGE);
         }
+        return false;
     }
 
     /** Save dialog shared by MIDI and WAV. Null when the user cancels. */
@@ -181,6 +268,16 @@ final class ExportCommands {
                 repeats.setEnabled(true);
             }
         });
+        asHeard.setSelected(memory.asHeard());
+        repeats.setValue(memory.repeats());
+        boolean songOn = editor.songMode() && hasChain;
+        if (songOn) {
+            song.setSelected(true);
+            both.setEnabled(false);
+            repeats.setEnabled(false);
+        } else {
+            both.setSelected(memory.bothSlots());
+        }
         JPanel accessory = new JPanel();
         accessory.setLayout(new BoxLayout(accessory, BoxLayout.Y_AXIS));
         accessory.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
@@ -200,11 +297,15 @@ final class ExportCommands {
         if (chooser.showSaveDialog(frame) != JFileChooser.APPROVE_OPTION) {
             return null;
         }
+        boolean pair = song.isSelected() ? memory.bothSlots() : both.isSelected();
+        int times = (Integer) repeats.getValue();
+        memory.remember(asHeard.isSelected(), pair, times);
+        disarmDrag();
         Path path = ExportPlan.withExtension(chooser.getSelectedFile().toPath(), extension);
         ExportOptions options = ExportPlan.options(
             asHeard.isSelected(),
             both.isSelected(),
-            (Integer) repeats.getValue(),
+            times,
             song.isSelected(),
             hasChain
         );
@@ -212,4 +313,36 @@ final class ExportCommands {
     }
 
     private record ExportChoice(Path path, ExportOptions options) {}
+
+    /**
+     * The export dialog's choices, kept for the next export and for a drag.
+     * Song mode decides pattern versus song at the moment of the drag.
+     */
+    static final class ExportMemory {
+        private boolean asHeard;
+        private boolean bothSlots;
+        private int repeats = 1;
+
+        void remember(boolean asHeard, boolean bothSlots, int repeats) {
+            this.asHeard = asHeard;
+            this.bothSlots = bothSlots;
+            this.repeats = Math.max(1, Math.min(ExportOptions.MAX_REPEATS, repeats));
+        }
+
+        boolean asHeard() {
+            return asHeard;
+        }
+
+        boolean bothSlots() {
+            return bothSlots;
+        }
+
+        int repeats() {
+            return repeats;
+        }
+
+        ExportOptions forDrag(boolean songMode, boolean hasChain) {
+            return ExportPlan.dragOptions(asHeard, bothSlots, repeats, songMode, hasChain);
+        }
+    }
 }

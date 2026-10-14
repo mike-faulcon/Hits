@@ -6,7 +6,7 @@ import hits.ExportOptions;
 import java.nio.file.Path;
 import java.util.Locale;
 
-/** How the export dialog's checkboxes and file name become an {@link ExportOptions} and a path. */
+/** How export choices become an {@link ExportOptions}, a path, and a drag file name. */
 final class ExportPlan {
     private ExportPlan() {}
 
@@ -42,5 +42,42 @@ final class ExportPlan {
         String span = options.bothSlots() ? ", A then B" : "";
         String times = options.repeats() == 1 ? "" : ", " + options.repeats() + " times";
         return " (" + heard + span + times + ")";
+    }
+
+    /**
+     * What a drag writes. Song mode with a chain writes the song, so A then B and repeats do not apply.
+     * Otherwise the active pattern uses the current export choices. A song choice with no chain is ignored.
+     */
+    static ExportOptions dragOptions(boolean asHeard, boolean bothSlots, int repeats, boolean songMode, boolean hasChain) {
+        if (songMode && hasChain) {
+            return new ExportOptions(asHeard, false, 1, true);
+        }
+        return options(asHeard, bothSlots, repeats, false, hasChain);
+    }
+
+    /**
+     * File name for a drag. The stem matches Save. A qualifier says which material is in the file:
+     * {@code -A} or {@code -B}, {@code -song}, {@code -A-then-B}, {@code -x3}, and {@code -as-heard}.
+     */
+    static String dragFileName(String displayName, ExportOptions options, char activeSlot, String extension) {
+        StringBuilder name = new StringBuilder(suggestedStem(displayName));
+        if (options.song()) {
+            name.append("-song");
+        } else if (options.bothSlots()) {
+            name.append("-A-then-B");
+        } else {
+            name.append('-').append(activeSlot == 'b' ? 'B' : 'A');
+        }
+        if (!options.song() && options.repeats() > 1) {
+            name.append("-x").append(options.repeats());
+        }
+        if (options.asHeard()) {
+            name.append("-as-heard");
+        }
+        String suffix = extension == null ? "" : extension.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        if (!suffix.isEmpty()) {
+            name.append('.').append(suffix);
+        }
+        return name.toString();
     }
 }
