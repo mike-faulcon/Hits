@@ -51,6 +51,7 @@ final class StudioFrame extends JFrame {
     private final Timer playhead;
     private KeyEventDispatcher keys;
     private KeyEventDispatcher tapKeys;
+    private KeyEventDispatcher nudgeKeys;
 
     StudioFrame(Editor editor, Player player) {
         super("Hits");
@@ -208,9 +209,11 @@ final class StudioFrame extends JFrame {
         );
         keys = KeyboardShortcuts.spacePlay(this, () -> transport.togglePlay(this));
         tapKeys = KeyboardShortcuts.tapTempo(this, transport::tapTempo);
+        nudgeKeys = KeyboardShortcuts.nudge(this, () -> editor.bumpStepNudge(-1), () -> editor.bumpStepNudge(1));
         KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
         manager.addKeyEventDispatcher(keys);
         manager.addKeyEventDispatcher(tapKeys);
+        manager.addKeyEventDispatcher(nudgeKeys);
     }
 
     private void changed(boolean musical) {
@@ -300,6 +303,10 @@ final class StudioFrame extends JFrame {
         if (tapKeys != null) {
             manager.removeKeyEventDispatcher(tapKeys);
             tapKeys = null;
+        }
+        if (nudgeKeys != null) {
+            manager.removeKeyEventDispatcher(nudgeKeys);
+            nudgeKeys = null;
         }
         playhead.stop();
         exports.close();

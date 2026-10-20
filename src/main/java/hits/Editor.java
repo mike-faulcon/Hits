@@ -180,6 +180,56 @@ public final class Editor {
         edit(current -> current.slot(slot)[row].step(column).setProbability(probability));
     }
 
+    /** Sets how many steps the selected hit lasts. No-op when no step is selected. */
+    public void setStepLength(int length) {
+        int column = stepIndex;
+        if (column < 0 || column >= beat.stepCount()) {
+            return;
+        }
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].step(column).setLength(length));
+    }
+
+    /** Moves the selected step off the grid by one percent. No-op when no step is selected. */
+    public void bumpStepNudge(int delta) {
+        int column = stepIndex;
+        if (column < 0 || column >= beat.stepCount()) {
+            return;
+        }
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> {
+            Step step = current.slot(slot)[row].step(column);
+            step.setNudge(step.nudge() + delta);
+        });
+    }
+
+    /** Sets the selected step's nudge in percent of a step. No-op when no step is selected. */
+    public void setStepNudge(int nudge) {
+        int column = stepIndex;
+        if (column < 0 || column >= beat.stepCount()) {
+            return;
+        }
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].step(column).setNudge(nudge));
+    }
+
+    /** Note-track legato for the row on screen. One undo step. */
+    public void setLegato(boolean legato) {
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].setLegato(legato));
+    }
+
+    /** Track shift, in percent of a step, for the row on screen. One undo step. */
+    public void setShift(int shift) {
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].setShift(shift));
+    }
+
     public void tap(int row, int column, boolean accent) {
         if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.stepCount()) {
             return;

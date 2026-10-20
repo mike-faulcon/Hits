@@ -1,16 +1,30 @@
 package hits;
 
 /**
- * One cell in a track. Velocity and play probability are kept when the cell is turned off.
+ * One cell in a track. Velocity, play probability, note length, and nudge are kept when the cell is turned off.
  * Pitch is optional. A new hit takes the track's normal or loud-hit velocity; probability starts at 100.
+ * Length starts at one step. Nudge starts on the grid.
  */
 public final class Step {
+    /** One step. Omitted from the beat file. */
+    public static final int MIN_LENGTH = 1;
+    /** A note can cover the whole stored pattern. */
+    public static final int MAX_LENGTH = Track.CAPACITY;
+    /** Half a step early. */
+    public static final int MIN_NUDGE = -50;
+    /** Half a step late. */
+    public static final int MAX_NUDGE = 50;
+
     private boolean on;
     private int velocity;
     /** 0 never plays. 100 always plays. */
     private int probability = 100;
     /** {@code -1} plays the track note. Any other value is a MIDI note for this step only. */
     private int pitch = -1;
+    /** How many steps this hit lasts. 1 is a single step. */
+    private int length = MIN_LENGTH;
+    /** Timing offset as a percent of one straight step, from {@link #MIN_NUDGE} to {@link #MAX_NUDGE}. */
+    private int nudge;
 
     public Step() {
         this(false, 100);
@@ -25,6 +39,8 @@ public final class Step {
         Step copy = new Step(on, velocity);
         copy.pitch = pitch;
         copy.probability = probability;
+        copy.length = length;
+        copy.nudge = nudge;
         return copy;
     }
 
@@ -33,6 +49,8 @@ public final class Step {
         this.velocity = other.velocity;
         this.pitch = other.pitch;
         this.probability = other.probability;
+        this.length = other.length;
+        this.nudge = other.nudge;
     }
 
     public boolean on() {
@@ -81,6 +99,37 @@ public final class Step {
         this.pitch = -1;
     }
 
+    /** Steps this hit holds. 1 is the grid default. */
+    public int length() {
+        return length;
+    }
+
+    public void setLength(int length) {
+        this.length = clampLength(length);
+    }
+
+    /** True when the hit is stored longer than one step. */
+    public boolean extended() {
+        return length > MIN_LENGTH;
+    }
+
+    /**
+     * Percent of one straight step, negative early and positive late.
+     * 0 sits on the grid.
+     */
+    public int nudge() {
+        return nudge;
+    }
+
+    public void setNudge(int nudge) {
+        this.nudge = clampNudge(nudge);
+    }
+
+    /** True when this step is stored off the grid. */
+    public boolean nudged() {
+        return nudge != 0;
+    }
+
     /**
      * Every stored field. Pattern C–H is omitted from the file when each track
      * {@linkplain Track#sameAs(Track) matches} the empty kit, so a new field belongs here.
@@ -90,7 +139,9 @@ public final class Step {
             && on == other.on
             && velocity == other.velocity
             && probability == other.probability
-            && pitch == other.pitch;
+            && pitch == other.pitch
+            && length == other.length
+            && nudge == other.nudge;
     }
 
     public int soundingNote(int trackNote) {
@@ -124,5 +175,15 @@ public final class Step {
 
     private static int clampProbability(int probability) {
         return Math.max(0, Math.min(100, probability));
+    }
+
+    /** Package-visible so the track shift can share the same limit. */
+    public static int clampLength(int length) {
+        return Math.max(MIN_LENGTH, Math.min(MAX_LENGTH, length));
+    }
+
+    /** Package-visible so a track shift uses the same half-step limit. */
+    public static int clampNudge(int nudge) {
+        return Math.max(MIN_NUDGE, Math.min(MAX_NUDGE, nudge));
     }
 }
