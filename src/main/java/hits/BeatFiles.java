@@ -105,7 +105,7 @@ public final class BeatFiles {
     }
 
     public static void exportMidi(Beat beat, Path path) throws IOException, InvalidMidiDataException {
-        exportMidi(beat, path, ExportOptions.allTracks());
+        exportMidi(beat, path, ExportOptions.matchingPlayback());
     }
 
     public static void exportMidi(Beat beat, Path path, ExportOptions options) throws IOException, InvalidMidiDataException {

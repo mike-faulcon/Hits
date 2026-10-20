@@ -27,6 +27,14 @@ final class ExportPlan {
     }
 
     /**
+     * The ignore box is unchecked by default, so the file matches playback.
+     * Song wins over A then B. A song checkbox with no chain is ignored, so A then B still applies.
+     */
+    static ExportOptions fromDialog(boolean ignoreMuteSolo, boolean bothSlots, int repeats, boolean songSelected, boolean hasChain) {
+        return options(!ignoreMuteSolo, bothSlots, repeats, songSelected, hasChain);
+    }
+
+    /**
      * Song wins over A then B. A song checkbox with no chain is ignored, so A then B still applies.
      */
     static ExportOptions options(boolean asHeard, boolean bothSlots, int repeats, boolean songSelected, boolean hasChain) {

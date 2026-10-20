@@ -101,13 +101,7 @@ public final class SequenceBuilder {
             }
             Track midi = sequence.createTrack();
             midi.add(new MidiEvent(trackName(track.name()), 0));
-            int channel = track.mode() == TrackMode.DRUM ? Gm.DRUM_CHANNEL : i;
-            if (track.mode() == TrackMode.NOTE) {
-                ShortMessage program = new ShortMessage();
-                program.setMessage(ShortMessage.PROGRAM_CHANGE, channel, track.program(), 0);
-                midi.add(new MidiEvent(program, 0));
-            }
-            writeNotes(midi, beat, track, channel, steps, 0, loop);
+            writeTrack(midi, beat, track, i, steps, 0, loop, false);
         }
         if (metronome) {
             addClicks(sequence, steps, 1);
@@ -116,12 +110,14 @@ public final class SequenceBuilder {
     }
 
     /**
-     * File export. The default options write every track and ignore mute and solo.
+     * File export. The default options match playback: muted tracks are left out and solo is respected.
+     * {@link ExportOptions#allTracks()} writes every track and ignores mute and solo.
+     * Pan and mixer levels are part of the file either way.
      * Repeats append the same notes later in the file. Both slots play A, then B, and that pair repeats.
      * Song writes the chain once; each entry already carries its own repeats.
      */
     public static Sequence export(Beat beat, ExportOptions options) throws InvalidMidiDataException {
-        ExportOptions chosen = options == null ? ExportOptions.allTracks() : options;
+        ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
         boolean song = chosen.song() && beat.hasChain();
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
@@ -146,13 +142,7 @@ public final class SequenceBuilder {
                     midiTracks[i] = sequence.createTrack();
                     midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i, span)), 0));
                 }
-                int channel = track.mode() == TrackMode.DRUM ? Gm.DRUM_CHANNEL : i;
-                if (track.mode() == TrackMode.NOTE) {
-                    ShortMessage program = new ShortMessage();
-                    program.setMessage(ShortMessage.PROGRAM_CHANGE, channel, track.program(), 0);
-                    midiTracks[i].add(new MidiEvent(program, offset));
-                }
-                writeNotes(midiTracks[i], beat, track, channel, steps, offset, sectionTicks);
+                writeTrack(midiTracks[i], beat, track, i, steps, offset, sectionTicks, resetDrumBank(beat, chosen, song, i, section));
             }
         }
         return sequence;
@@ -170,6 +160,61 @@ public final class SequenceBuilder {
             return current.name();
         }
         return beat.slot('a')[row].name() + " / " + beat.slot('b')[row].name();
+    }
+
+    /** An earlier section put this row's channel on the drum bank, and this section is a pitched instrument. */
+    private static boolean resetDrumBank(Beat beat, ExportOptions options, boolean song, int row, int section) {
+        char slot = song ? Chain.slotAt(beat.chain(), section) : options.slotAt(section, beat.activeSlot());
+        if (beat.slot(slot)[row].mode() != TrackMode.NOTE) {
+            return false;
+        }
+        for (int earlier = 0; earlier < section; earlier++) {
+            char earlierSlot = song ? Chain.slotAt(beat.chain(), earlier) : options.slotAt(earlier, beat.activeSlot());
+            if (Mix.usesDrumBank(beat.slot(earlierSlot)[row])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void writeTrack(
+        Track midi,
+        Beat beat,
+        hits.Track track,
+        int row,
+        int steps,
+        long offset,
+        long sectionTicks,
+        boolean resetBank
+    ) throws InvalidMidiDataException {
+        int channel = Mix.channel(track, row);
+        if (Mix.usesDrumBank(track)) {
+            control(midi, channel, offset, 0, Gm.DRUM_BANK);
+            control(midi, channel, offset, 32, 0);
+            program(midi, channel, offset, 0);
+        } else if (track.mode() == TrackMode.NOTE) {
+            if (resetBank) {
+                control(midi, channel, offset, 0, 0);
+                control(midi, channel, offset, 32, 0);
+            }
+            program(midi, channel, offset, track.program());
+        }
+        if (track.pan() != hits.Track.PAN_CENTER) {
+            control(midi, channel, offset, 10, track.pan());
+        }
+        writeNotes(midi, beat, track, channel, steps, offset, sectionTicks);
+    }
+
+    private static void control(Track midi, int channel, long tick, int controller, int value) throws InvalidMidiDataException {
+        ShortMessage message = new ShortMessage();
+        message.setMessage(ShortMessage.CONTROL_CHANGE, channel, controller, value);
+        midi.add(new MidiEvent(message, tick));
+    }
+
+    private static void program(Track midi, int channel, long tick, int program) throws InvalidMidiDataException {
+        ShortMessage message = new ShortMessage();
+        message.setMessage(ShortMessage.PROGRAM_CHANGE, channel, program, 0);
+        midi.add(new MidiEvent(message, tick));
     }
 
     private static void writeNotes(
@@ -196,8 +241,12 @@ public final class SequenceBuilder {
                 length = Math.max(1, end - start);
             }
             int note = cell.soundingNote(track.note());
+            int velocity = Mix.velocity(cell.velocity(), track.level(), beat.master());
+            if (velocity <= 0) {
+                continue;
+            }
             ShortMessage on = new ShortMessage();
-            on.setMessage(ShortMessage.NOTE_ON, channel, note, cell.velocity());
+            on.setMessage(ShortMessage.NOTE_ON, channel, note, velocity);
             midi.add(new MidiEvent(on, start));
             ShortMessage off = new ShortMessage();
             off.setMessage(ShortMessage.NOTE_OFF, channel, note, 0);

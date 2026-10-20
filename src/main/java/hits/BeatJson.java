@@ -7,13 +7,14 @@ import java.util.Map;
 
 /**
  * Versioned beat document.
- * Version 1 is the original document. Version 2 adds an optional {@code pitch} on a step
- * and an optional {@code chain} of pattern entries. A beat that uses neither is still written as version 1.
+ * Version 1 is the original document. Version 2 adds optional fields: {@code pitch} on a step,
+ * a {@code chain} of pattern entries, a track {@code pan} or mixer {@code level}, and a beat {@code master}.
+ * Mute and solo are original track fields. A beat that uses none of the version 2 fields is still written as version 1.
  */
 public final class BeatJson {
     private BeatJson() {}
 
-    /** 1 unless a step has its own pitch or the beat has a song chain, in which case 2. */
+    /** 1 unless a step has its own pitch, the beat has a song chain, or the mixer is not at its defaults. */
     public static int documentVersion(Beat beat) {
         return beat.usesFormatV2() ? Beat.FORMAT_V2 : Beat.VERSION;
     }
@@ -27,6 +28,9 @@ public final class BeatJson {
         field(out, 1, "swing", beat.swing(), true);
         field(out, 1, "steps", beat.stepCount(), true);
         field(out, 1, "active", beat.activeSlot() == 'b' ? "b" : "a", true);
+        if (beat.master() != Beat.MASTER) {
+            field(out, 1, "master", beat.master(), true);
+        }
         out.append("  \"slots\": {\n");
         writeSlot(out, "a", beat.slot('a'), true);
         writeSlot(out, "b", beat.slot('b'), false);
@@ -53,6 +57,9 @@ public final class BeatJson {
         beat.setSwing(number(root.get("swing")));
         beat.setStepCount(number(root.get("steps")));
         beat.setActiveSlot(text(root.get("active")).equals("b") ? 'b' : 'a');
+        if (root.containsKey("master") && root.get("master") != null) {
+            beat.setMaster(number(root.get("master")));
+        }
         Map<String, Object> slots = asMap(root.get("slots"));
         readSlot(beat, 'a', asMap(slots.get("a")));
         readSlot(beat, 'b', asMap(slots.get("b")));
@@ -106,6 +113,12 @@ public final class BeatJson {
         field(out, 5, "gate", track.gate(), true);
         field(out, 5, "velocity", track.velocity(), true);
         field(out, 5, "accent", track.accent(), true);
+        if (track.pan() != Track.PAN_CENTER) {
+            field(out, 5, "pan", track.pan(), true);
+        }
+        if (track.level() != Track.LEVEL) {
+            field(out, 5, "level", track.level(), true);
+        }
         out.append("          \"steps\": [");
         for (int i = 0; i < Track.CAPACITY; i++) {
             if (i > 0) {
@@ -182,6 +195,12 @@ public final class BeatJson {
         );
         track.setMute(bool(object.get("mute")));
         track.setSolo(bool(object.get("solo")));
+        if (object.containsKey("pan") && object.get("pan") != null) {
+            track.setPan(number(object.get("pan")));
+        }
+        if (object.containsKey("level") && object.get("level") != null) {
+            track.setLevel(number(object.get("level")));
+        }
         track.setGate(number(object.get("gate")));
         track.setVelocity(number(object.get("velocity")));
         track.setAccent(number(object.get("accent")));

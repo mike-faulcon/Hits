@@ -242,8 +242,8 @@ final class ExportCommands {
         chooser.setDialogTitle(title);
         chooser.setSelectedFile(new java.io.File(ExportPlan.suggestedStem(editor.beat().name()) + "." + extension));
         chooser.setFileFilter(new FileNameExtensionFilter(description, extension));
-        JCheckBox asHeard = new JCheckBox("As heard (mute and solo)");
-        asHeard.setToolTipText("Off writes every track. On leaves muted tracks out and respects solo.");
+        JCheckBox ignoreMuteSolo = new JCheckBox("Ignore mute and solo");
+        ignoreMuteSolo.setToolTipText("Off matches playback. On writes every track, including muted ones, and ignores solo.");
         JCheckBox both = new JCheckBox("A then B");
         both.setToolTipText("Write pattern A followed by pattern B.");
         JCheckBox song = new JCheckBox("Song");
@@ -282,10 +282,10 @@ final class ExportCommands {
         accessory.setLayout(new BoxLayout(accessory, BoxLayout.Y_AXIS));
         accessory.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 0));
         JLabel exportLabel = new JLabel("Export");
-        exportLabel.setToolTipText("All tracks is the default. Mute and solo are ignored unless As heard is checked.");
+        exportLabel.setToolTipText("Mute and solo match playback unless Ignore mute and solo is checked. Pan and levels stay either way.");
         accessory.add(exportLabel);
         accessory.add(Box.createVerticalStrut(6));
-        accessory.add(asHeard);
+        accessory.add(ignoreMuteSolo);
         accessory.add(both);
         accessory.add(song);
         accessory.add(Box.createVerticalStrut(6));
@@ -302,8 +302,8 @@ final class ExportCommands {
         memory.remember(asHeard.isSelected(), pair, times);
         disarmDrag();
         Path path = ExportPlan.withExtension(chooser.getSelectedFile().toPath(), extension);
-        ExportOptions options = ExportPlan.options(
-            asHeard.isSelected(),
+        ExportOptions options = ExportPlan.fromDialog(
+            ignoreMuteSolo.isSelected(),
             both.isSelected(),
             times,
             song.isSelected(),

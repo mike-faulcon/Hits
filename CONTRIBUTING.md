@@ -28,6 +28,7 @@ Branch from `master` and open pull requests into `master`. Michael Faulcon revie
   - `TransportBar` — play/stop, tempo, tap tempo, the metronome, swing, A/B slots, copy, and the beat name.
   - `SongChainBar` — Pattern/Song and the chain row. `ChainEdits` and `ChainSelection` are the selection and edit rules. `ChainLabels` is the button and status text.
   - `TrackInspector` — track name, sound, length, volume, loud hit, drum/note, step pitch, and 16/32 steps. `TrackReadout` is the slider and step-pitch text.
+  - `MixerPanel` — per-track mute, solo, level, and pan, plus the master fader. `Mix` is the level, pan, and channel math. Steps and Mixer switch the grid.
   - `BeatBrowser` — the beats list, Folder…, and the action buttons.
   - `FileCommands` — open, save, save as, new, kit replace, the unsaved-changes prompt, and the beats folder. `SaveSession` remembers the open file and the save-prompt wording.
   - `ExportCommands` — Export MIDI, Export WAV, and the Drag MIDI / Drag WAV chips. `ExportPlan` maps the dialog and a drag onto `ExportOptions`, the file suffix, the drag file name, and the status summary. `DragFiles` is the temp folder, removed when the window closes. `FileDrag` is the Swing file-list drag.

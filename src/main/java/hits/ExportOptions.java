@@ -3,6 +3,7 @@ package hits;
 /**
  * What an exported MIDI or WAV file contains. Playback does not use this,
  * except song playback, which renders the chain as heard.
+ * The dialog defaults to matching playback. {@link #allTracks()} is the option that ignores mute and solo.
  */
 public record ExportOptions(boolean asHeard, boolean bothSlots, int repeats, boolean song) {
     public static final int MAX_REPEATS = 32;
@@ -15,12 +16,12 @@ public record ExportOptions(boolean asHeard, boolean bothSlots, int repeats, boo
         this(asHeard, bothSlots, repeats, false);
     }
 
-    /** Every track, active pattern, once. Mute and solo are ignored. */
+    /** Every track, active pattern, once. Mute and solo are ignored. Pan and levels stay. */
     public static ExportOptions allTracks() {
         return new ExportOptions(false, false, 1, false);
     }
 
-    /** Active pattern as it plays: muted tracks dropped, solo respected. */
+    /** Active pattern as it plays: muted tracks dropped, solo respected. This is the export default. */
     public static ExportOptions matchingPlayback() {
         return new ExportOptions(true, false, 1, false);
     }

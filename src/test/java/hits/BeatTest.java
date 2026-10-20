@@ -328,7 +328,13 @@ class BeatTest {
         beat.track(0).setMute(true);
         beat.track(1).tap(0, true);
         BeatFiles.exportMidi(beat, midi);
-        assertFalse(noteOns(MidiSystem.getSequence(midi.toFile())).isEmpty());
+        List<ShortMessage> exported = noteOns(MidiSystem.getSequence(midi.toFile()));
+        assertTrue(exported.stream().noneMatch(message -> message.getData1() == 36));
+        assertFalse(exported.isEmpty());
+        Path ignored = directory.resolve("ignored.mid");
+        BeatFiles.exportMidi(beat, ignored, ExportOptions.allTracks());
+        List<ShortMessage> ignoredNotes = noteOns(MidiSystem.getSequence(ignored.toFile()));
+        assertTrue(ignoredNotes.stream().anyMatch(message -> message.getData1() == 36));
         Path heardFile = directory.resolve("heard.mid");
         BeatFiles.exportMidi(beat, heardFile, ExportOptions.matchingPlayback());
         List<ShortMessage> heardFileNotes = noteOns(MidiSystem.getSequence(heardFile.toFile()));
@@ -450,6 +456,9 @@ class BeatTest {
     void version1DocumentMigratesAndStepPitchWritesVersion2() {
         Beat legacy = BeatJson.read(minimalBeat(1, "", ""));
         assertEquals(1, BeatJson.documentVersion(legacy));
+        assertEquals(Track.PAN_CENTER, legacy.track(0).pan());
+        assertEquals(Track.LEVEL, legacy.track(0).level());
+        assertEquals(Beat.MASTER, legacy.master());
         assertEquals("old", legacy.name());
         assertEquals(90, legacy.bpm());
         assertEquals(52, legacy.swing());
@@ -469,8 +478,11 @@ class BeatTest {
 
         Beat version2 = BeatJson.read(minimalBeat(2, "", ",\"pan\": 64"));
         assertFalse(version2.hasStepPitch());
+        assertEquals(Track.PAN_CENTER, version2.track(0).pan());
+        assertEquals(Track.PAN_CENTER, version2.track(7).pan());
         assertEquals(1, BeatJson.documentVersion(version2));
         assertTrue(BeatJson.write(version2).contains("\"version\": 1"));
+        assertFalse(BeatJson.write(version2).contains("\"pan\""));
         assertFalse(BeatJson.write(Beat.drumKit("plain")).contains("pitch"));
 
         Beat pitched = Beat.drumKit("t");

@@ -184,7 +184,7 @@ final class PatternPanel extends JPanel implements Scrollable {
             return "Mute this track";
         }
         if (row >= 0 && metrics.solo(row).contains(event.getPoint())) {
-            return "Solo this track. Other tracks go quiet.";
+            return "Solo this track. While any solo is on, only soloed tracks play.";
         }
         int column = row >= 0 ? metrics.columnAt(event.getX(), event.getY()) : -1;
         if (column >= 0) {

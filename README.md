@@ -18,6 +18,8 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 - **T** sets the tempo from your taps, unless you are typing. Hits averages the last few gaps, starts over when you pause for more than two seconds, and keeps the tempo between 40 and 240. **Tap** does the same. Each change can be undone.
 - **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on.
 - Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch.
+- **M** mutes that track. **S** solos it. While any solo is on, only soloed tracks play. A muted track stays silent, including when it is also soloed. The same buttons are on the **Mixer**.
+- **Mixer** shows every track's level and pan, plus **Master**. Level **100** leaves each hit as programmed. **0** is silent. Pan **C** is center. Playback uses them. A drum that is not centered gets its own MIDI channel so its pan is not stuck to the rest of the kit. Drums at center stay on the General MIDI drum channel.
 - **⌘Z / Ctrl-Z** undoes. **⌘⇧Z / Ctrl-Shift-Z** redoes.
 - **⌘S / Ctrl-S** saves. **⌘⇧S / Ctrl-Shift-S** is Save As.
 
@@ -43,19 +45,19 @@ Save asks before replacing an existing file that is not the one you have open. A
 
 ## Export MIDI
 
-Export writes a Standard MIDI file of 16th notes. Swing is part of the note times. **50% swing is straight**; higher values delay every other 16th. Playback still follows mute and solo. The file does not, unless you ask it to.
+Export writes a Standard MIDI file of 16th notes. Swing is part of the note times. **50% swing is straight**; higher values delay every other 16th. Playback follows mute, solo, pan, and the mixer levels. The file does too, unless you ask it to ignore mute and solo. Pan and levels stay in the file either way.
 
-- **All tracks** is the default. Mute and solo are ignored, so a part you muted while listening is still in the file.
-- **As heard** leaves muted tracks out and respects solo, judged separately for each pattern.
+- The default matches playback. Muted tracks are left out, and solo is respected, judged separately for each pattern.
+- **Ignore mute and solo** writes every track, so a part you muted while listening is still in the file.
 - **A then B** writes pattern A followed by pattern B. Each row keeps one MIDI track. A row whose name differs is labeled `Kick / Rim`. If the instrument changes between A and B, the file carries a program change where B starts.
 - **Repeats** writes that material again, from 1 to 32 times. With A then B, the pair repeats (A B A B).
-- **Song** writes the chain, including each entry's repeats. A then B and Repeats are not used for that export. All tracks or As heard still applies, judged separately for each entry. A row that plays under both A and B keeps one MIDI track, with the same `Kick / Rim` label and program change as A then B.
+- **Song** writes the chain, including each entry's repeats. A then B and Repeats are not used for that export. Mute and solo still apply unless you ignore them, judged separately for each entry. A row that plays under both A and B keeps one MIDI track, with the same `Kick / Rim` label and program change as A then B.
 
 The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note. The metronome is playback only and is not in the file.
 
 ## Export WAV
 
-**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: all tracks or as heard, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, and the chain when Song is selected.
+**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: mute and solo unless you ignore them, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, pan, mixer levels, and the chain when Song is selected.
 
 Hits renders the file through the built-in Java synth, without playing it out loud, and usually faster than real time. The file keeps two seconds after the loop ends so a note and its reverb can ring instead of stopping dead. A longer export shows a progress bar. **Cancel**, or closing that window, leaves any file already at that name in place. If rendering fails, Hits shows the reason.
 
@@ -95,7 +97,7 @@ A SoundFont does not change an external output. Ableton, IAC, and hardware play 
 
 ## Files
 
-Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. The file is version 2 when any step has its own pitch or the chain is not empty. A step without `pitch` uses the track pitch. Saving a beat that uses neither still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
+Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. A track can store a mixer `pan` (0–127, 64 is center) and a mixer `level` (0–127, 100 leaves the hits as programmed). A beat can store `master` (0–127, 127 is full). Mute and solo are stored on every track, as they always have been. The file is version 2 when any step has its own pitch, the chain is not empty, or pan, level, or master is not at those defaults. A step without `pitch` uses the track pitch. Saving a beat that uses none of the version 2 fields still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
 
 ## Controls
 
@@ -110,7 +112,13 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | − / + | Move the track note by one semitone. |
 | Oct − / Oct + | Move the track note by one octave. These used to say −8 / +8. |
 | Step pitch | Pitch of the selected step, when that step is on. Use track clears it. A step without its own pitch uses the track pitch. |
+| M / S | Mute this track, or solo it. While any solo is on, only soloed tracks play. A muted track stays silent. |
+| Mixer | Level and pan for every track, plus Master. Level 100 is unity. Pan C is center. |
+| Level | How loud the track is in the mix. This is separate from Volume, which is how hard a hit is. |
+| Pan | Left, center, or right. A drum off center uses its own MIDI channel. |
+| Master | Turns every track down together. 127 is full. |
 | Drum / Note | Drum kit sounds, or one pitched instrument for the whole track. |
+| Ignore mute and solo | Export option. Off matches playback. On writes every track. Pan and levels stay either way. |
 | A / B | Two patterns in one beat. Copy replaces the other pattern. During a song, click one to hold the grid there. |
 | Pattern / Song | Pattern loops the pattern on screen. Song loops the chain. Click Song again to follow the pattern you hear. |
 | +A / +B | Add that pattern to the chain. |

@@ -3,6 +3,10 @@ package hits;
 /** One row: a drum voice or a single pitched instrument, 32 steps stored. */
 public final class Track {
     public static final int CAPACITY = 32;
+    /** Mixer fader at unity. Hit velocity is unchanged. */
+    public static final int LEVEL = 100;
+    /** MIDI pan center. */
+    public static final int PAN_CENTER = 64;
 
     private String name;
     private TrackMode mode;
@@ -10,6 +14,8 @@ public final class Track {
     private int note;
     private boolean mute;
     private boolean solo;
+    private int level = LEVEL;
+    private int pan = PAN_CENTER;
     private int gate;
     private int velocity;
     private int accent;
@@ -32,6 +38,8 @@ public final class Track {
         Track copy = new Track(name, mode, program, note);
         copy.mute = mute;
         copy.solo = solo;
+        copy.level = level;
+        copy.pan = pan;
         copy.gate = gate;
         copy.velocity = velocity;
         copy.accent = accent;
@@ -89,6 +97,24 @@ public final class Track {
 
     public void setSolo(boolean solo) {
         this.solo = solo;
+    }
+
+    /** Mixer level, 0 to 127. {@link #LEVEL} leaves hit velocity as programmed. */
+    public int level() {
+        return level;
+    }
+
+    public void setLevel(int level) {
+        this.level = Math.max(0, Math.min(127, level));
+    }
+
+    /** MIDI pan, 0 to 127. {@link #PAN_CENTER} is the middle. */
+    public int pan() {
+        return pan;
+    }
+
+    public void setPan(int pan) {
+        this.pan = Math.max(0, Math.min(127, pan));
     }
 
     public int gate() {
