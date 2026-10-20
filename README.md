@@ -25,6 +25,12 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 
 Until you dismiss the hint, Hits opens on the Boom bap pattern, not playing. Undo once to clear it back to an empty kit. After you dismiss the hint, later launches start from an empty kit.
 
+## Make me a beat
+
+**Make me a beat** writes a starter groove on the pattern on screen. Pick boom bap, trap, house, rock, or reggaeton, or **Surprise me**. The kick and snare stay on the beats that make that style, and the hats change a little each time. Tempo and swing follow the style. A 32-step pattern keeps those beats in the second bar. Sounds, names, chance, and the other patterns stay. The new hits play every time.
+
+If that pattern already has hits, the style picker says so. Cancel leaves it alone. **Shuffle**, on the track inspector, writes a new rhythm on the selected track only. A snare that you moved to another row still shuffles as a snare. Both buttons are one undo.
+
 ## Song
 
 **Pattern** loops the pattern on screen. A beat has eight patterns, A through H. **Song** loops the chain. The chain is a short list, not a timeline. Pick a letter and **+** adds that pattern, **Remove** deletes the selected entry, and **Up** / **Down** reorder it. **×** is how many times that entry plays, from 1 to 32. The chain holds 32 entries. When they no longer fit, the entries scroll sideways and the chain buttons stay on the row. Build something like A, A, C, A, and give any entry its own repeat count.
@@ -131,6 +137,8 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Remove / Up / Down | Edit the selected chain entry. |
 | × | How many times the selected chain entry plays, from 1 to 32. |
 | 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
+| Make me a beat | Starter groove from a style. Asks first when the pattern on screen has hits. The other patterns stay. |
+| Shuffle | New rhythm on the selected track. The sound, tempo, and other tracks stay. |
 | Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other patterns are kept. |
 | Drag MIDI | Drag the current pattern, or the song, into a DAW or a folder. |
 | Drag WAV | The same notes as a WAV file. A progress window shows while it renders. |
