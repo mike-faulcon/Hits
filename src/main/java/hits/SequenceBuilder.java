@@ -7,6 +7,8 @@ import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 /** Turns a beat into a MIDI sequence. A 16th note is {@code PPQ / 4} ticks. */
@@ -137,16 +139,12 @@ public final class SequenceBuilder {
 
     private static boolean usesChance(Beat beat, boolean song) {
         if (song && beat.hasChain()) {
-            boolean slotA = false;
-            boolean slotB = false;
-            for (Chain.Part part : beat.chain()) {
-                if (part.slot() == 'b') {
-                    slotB = true;
-                } else {
-                    slotA = true;
+            for (char slot : Chain.distinctSlots(beat.chain())) {
+                if (beat.playingChance(slot)) {
+                    return true;
                 }
             }
-            return (slotA && beat.playingChance('a')) || (slotB && beat.playingChance('b'));
+            return false;
         }
         return beat.playingChance(beat.activeSlot());
     }
@@ -190,7 +188,7 @@ public final class SequenceBuilder {
      * {@link ExportOptions#allTracks()} writes every track and ignores mute and solo.
      * Pan and mixer levels are part of the file either way.
      * Repeats append the same notes later in the file. Both slots play A, then B, and that pair repeats.
-     * Song writes the chain once; each entry already carries its own repeats.
+     * Song writes the chain once; each entry already carries its own repeats and can name any pattern A–H.
      * Probability uses {@link Chance#EXPORT_SEED}, so the same beat and options write the same notes.
      * Each section is rolled on its own. 100% always plays and 0% never does.
      * The metronome is never written.
@@ -217,7 +215,8 @@ public final class SequenceBuilder {
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
         tempo.add(new MidiEvent(marker("end"), sectionTicks * sections * times));
 
-        boolean span = song ? Chain.usesBoth(beat.chain()) : chosen.bothSlots();
+        List<Character> spanSlots = spanSlots(beat, chosen, song);
+        boolean span = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int pass = 0; pass < times; pass++) {
             for (int section = 0; section < sections; section++) {
@@ -231,7 +230,7 @@ public final class SequenceBuilder {
                     }
                     if (midiTracks[i] == null) {
                         midiTracks[i] = sequence.createTrack();
-                        midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i, span)), 0));
+                        midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, span)), 0));
                     }
                     writeSetup(midiTracks[i], track, i, offset, resetDrumBank(beat, chosen, song, i, section));
                     writeNotes(midiTracks[i], beat, track, i, steps, offset, sectionTicks, random);
@@ -244,18 +243,33 @@ public final class SequenceBuilder {
         return sequence;
     }
 
-    private static String exportName(Beat beat, ExportOptions options, char slot, int row, boolean both) {
-        hits.Track current = beat.slot(slot)[row];
-        if (!both) {
-            return current.name();
+    private static List<Character> spanSlots(Beat beat, ExportOptions options, boolean song) {
+        if (song) {
+            return Chain.distinctSlots(beat.chain());
         }
-        char otherSlot = slot == 'b' ? 'a' : 'b';
-        hits.Track other = beat.slot(otherSlot)[row];
-        boolean otherIncluded = !options.asHeard() || Beat.audibleIn(beat.slot(otherSlot), other);
-        if (!otherIncluded || other.name().equals(current.name())) {
-            return current.name();
+        if (options.bothSlots()) {
+            return List.of('a', 'b');
         }
-        return beat.slot('a')[row].name() + " / " + beat.slot('b')[row].name();
+        return List.of(Beat.normalizeSlot(beat.activeSlot()));
+    }
+
+    /** One name, or the included pattern names joined in letter order. */
+    private static String exportName(Beat beat, ExportOptions options, List<Character> slots, int row, boolean span) {
+        if (!span) {
+            return beat.slot(slots.get(0))[row].name();
+        }
+        List<String> names = new ArrayList<>();
+        for (char slot : slots) {
+            hits.Track track = beat.slot(slot)[row];
+            boolean included = !options.asHeard() || Beat.audibleIn(beat.slot(slot), track);
+            if (included && !names.contains(track.name())) {
+                names.add(track.name());
+            }
+        }
+        if (names.size() <= 1) {
+            return names.isEmpty() ? beat.slot(slots.get(0))[row].name() : names.get(0);
+        }
+        return String.join(" / ", names);
     }
 
     /** An earlier section put this row's channel on the drum bank, and this section is a pitched instrument. */

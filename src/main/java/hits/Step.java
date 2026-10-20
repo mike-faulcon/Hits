@@ -81,6 +81,18 @@ public final class Step {
         this.pitch = -1;
     }
 
+    /**
+     * Every stored field. Pattern C–H is omitted from the file when each track
+     * {@linkplain Track#sameAs(Track) matches} the empty kit, so a new field belongs here.
+     */
+    public boolean sameAs(Step other) {
+        return other != null
+            && on == other.on
+            && velocity == other.velocity
+            && probability == other.probability
+            && pitch == other.pitch;
+    }
+
     public int soundingNote(int trackNote) {
         return pitch >= 0 ? pitch : Notes.clamp(trackNote);
     }

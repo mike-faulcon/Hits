@@ -93,6 +93,8 @@ class ExportPlanTest {
         ExportOptions pattern = ExportPlan.dragOptions(false, false, 1, false, false);
         assertEquals("AlbumTrackv3-A.mid", ExportPlan.dragFileName("Album Track – v3", pattern, 'a', "MID"));
         assertEquals("AlbumTrackv3-B.wav", ExportPlan.dragFileName("Album Track – v3", pattern, 'b', "wav"));
+        assertEquals("AlbumTrackv3-C.mid", ExportPlan.dragFileName("Album Track – v3", pattern, 'c', "mid"));
+        assertEquals("AlbumTrackv3-H.wav", ExportPlan.dragFileName("Album Track – v3", pattern, 'h', "wav"));
         assertEquals("untitled-A.mid", ExportPlan.dragFileName("???", pattern, 'a', "mid"));
 
         ExportOptions song = ExportPlan.dragOptions(true, true, 4, true, true);

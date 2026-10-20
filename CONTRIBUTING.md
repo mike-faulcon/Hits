@@ -25,8 +25,8 @@ Branch from `master` and open pull requests into `master`. Michael Faulcon revie
 
 - `src/main/java/hits/` is the core: the beat model, JSON and legacy `.btf` files, MIDI sequence building, WAV rendering, MIDI output selection, SoundFont loading, playback (`Player`), play probability (`Chance`), mixer math (`Mix`), and tap tempo (`TapTempo`).
 - `src/main/java/hits/ui/` is the Swing window. `HitsApp` is the entry point. `StudioFrame` builds the window and wires the pieces below. `PatternPanel` is the step grid. There is no menu bar.
-  - `TransportBar` — play/stop, tempo, tap tempo, the metronome, swing, A/B slots, copy, and the beat name.
-  - `SongChainBar` — Pattern/Song and the chain row. `ChainEdits` and `ChainSelection` are the selection and edit rules. `ChainLabels` is the button and status text.
+  - `TransportBar` — play/stop, tempo, tap tempo, the metronome, swing, pattern slots A–H, copy, and the beat name.
+  - `SongChainBar` — Pattern/Song and the chain row. Entries can name any pattern A–H. `ChainEdits` and `ChainSelection` are the selection and edit rules. `ChainLabels` is the button and status text.
   - `TrackInspector` — track name, sound, length, volume, chance, loud hit, drum/note, step pitch, and 16/32 steps. `TrackReadout` is the slider, chance, and step-pitch text. The grid's velocity lane and pad drag live in `PatternPanel`.
   - `MixerPanel` — per-track mute, solo, level, and pan, plus the master fader. `Mix` is the level, pan, and channel math. Steps and Mixer switch the grid.
   - `BeatBrowser` — the beats list, Folder…, and the action buttons.

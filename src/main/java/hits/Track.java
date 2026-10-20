@@ -34,6 +34,33 @@ public final class Track {
         }
     }
 
+    /**
+     * Every field on the row, including each step. A pattern C–H that differs only
+     * in one of these is still written. Add a comparison here when adding a field.
+     */
+    public boolean sameAs(Track other) {
+        if (other == null
+            || !name.equals(other.name)
+            || mode != other.mode
+            || program != other.program
+            || note != other.note
+            || mute != other.mute
+            || solo != other.solo
+            || level != other.level
+            || pan != other.pan
+            || gate != other.gate
+            || velocity != other.velocity
+            || accent != other.accent) {
+            return false;
+        }
+        for (int i = 0; i < CAPACITY; i++) {
+            if (!steps[i].sameAs(other.steps[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public Track copy() {
         Track copy = new Track(name, mode, program, note);
         copy.mute = mute;

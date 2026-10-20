@@ -1,6 +1,9 @@
 package hits.ui;
 
+import hits.Beat;
+
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -23,6 +26,16 @@ final class Widgets {
         slider.setBackground(Theme.PANEL);
         slider.setForeground(Theme.STEP_ON);
         return slider;
+    }
+
+    /** Letters A through H, for picking a pattern. */
+    static JComboBox<String> patternSlots() {
+        JComboBox<String> box = new JComboBox<>();
+        for (int i = 0; i < Beat.SLOT_COUNT; i++) {
+            box.addItem(Beat.slotLabel(Beat.slotLetter(i)));
+        }
+        box.setMaximumRowCount(Beat.SLOT_COUNT);
+        return box;
     }
 
     static JButton button(String text) {

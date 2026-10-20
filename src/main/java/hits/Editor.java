@@ -106,7 +106,7 @@ public final class Editor {
     public void holdSlot(char slot) {
         holding = true;
         playingKnown = true;
-        playingSlot = slot == 'b' ? 'b' : 'a';
+        playingSlot = Beat.normalizeSlot(slot);
         fire(false);
     }
 
@@ -118,7 +118,7 @@ public final class Editor {
         if (!songMode || holding) {
             return;
         }
-        char next = slot == 'b' ? 'b' : 'a';
+        char next = Beat.normalizeSlot(slot);
         if (playingKnown && playingSlot == next) {
             return;
         }
