@@ -12,6 +12,10 @@ public final class Beat {
      */
     public static final int FORMAT_V2 = 2;
     public static final int TRACKS = 8;
+    /** Slowest tempo the spinner, tap tempo, and saved beats can store. */
+    public static final int MIN_BPM = 40;
+    /** Fastest tempo the spinner, tap tempo, and saved beats can store. */
+    public static final int MAX_BPM = 240;
 
     private static final String[] KIT_NAMES = {
         "Kick", "Snare", "Closed Hat", "Open Hat", "Clap", "Tom", "Crash", "Ride"
@@ -69,7 +73,11 @@ public final class Beat {
     }
 
     public void setBpm(int bpm) {
-        this.bpm = Math.max(40, Math.min(240, bpm));
+        this.bpm = clampBpm(bpm);
+    }
+
+    public static int clampBpm(int bpm) {
+        return Math.max(MIN_BPM, Math.min(MAX_BPM, bpm));
     }
 
     /** 50 is straight. 75 is a hard shuffle. Applies to every other 16th. */

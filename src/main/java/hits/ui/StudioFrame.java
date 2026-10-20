@@ -10,6 +10,7 @@ import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -41,6 +42,7 @@ final class StudioFrame extends JFrame {
     private final CoachBanner coach;
     private final Timer playhead;
     private KeyEventDispatcher keys;
+    private KeyEventDispatcher tapKeys;
 
     StudioFrame(Editor editor, Player player) {
         super("Hits");
@@ -86,8 +88,8 @@ final class StudioFrame extends JFrame {
         getContentPane().add(body(), BorderLayout.CENTER);
         getContentPane().add(footer(), BorderLayout.SOUTH);
         wire();
-        setSize(1180, 800);
-        setMinimumSize(new Dimension(960, 680));
+        setSize(1240, 800);
+        setMinimumSize(new Dimension(1100, 680));
         setLocationByPlatform(true);
         editor.addListener(this::changed);
         browser.reload(null);
@@ -109,6 +111,8 @@ final class StudioFrame extends JFrame {
             }
         });
         output.applySaved();
+        // The BPM field would otherwise take the first focus and swallow T and undo.
+        SwingUtilities.invokeLater(pattern::requestFocusInWindow);
     }
 
     private JPanel buildHeader() {
@@ -176,7 +180,10 @@ final class StudioFrame extends JFrame {
             () -> files.saveAs()
         );
         keys = KeyboardShortcuts.spacePlay(this, () -> transport.togglePlay(this));
-        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keys);
+        tapKeys = KeyboardShortcuts.tapTempo(this, transport::tapTempo);
+        KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+        manager.addKeyEventDispatcher(keys);
+        manager.addKeyEventDispatcher(tapKeys);
     }
 
     private void changed(boolean musical) {
@@ -233,9 +240,14 @@ final class StudioFrame extends JFrame {
 
     @Override
     public void dispose() {
+        KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
         if (keys != null) {
-            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(keys);
+            manager.removeKeyEventDispatcher(keys);
             keys = null;
+        }
+        if (tapKeys != null) {
+            manager.removeKeyEventDispatcher(tapKeys);
+            tapKeys = null;
         }
         playhead.stop();
         super.dispose();

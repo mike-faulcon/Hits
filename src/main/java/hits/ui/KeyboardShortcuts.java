@@ -18,7 +18,7 @@ import java.awt.event.KeyEvent;
 import java.util.function.Consumer;
 
 /**
- * Undo, redo, save, and save as, plus space for play/stop.
+ * Undo, redo, save, and save as, plus space for play/stop and T for tap tempo.
  * There is no menu bar. Shortcuts are installed on the window.
  */
 final class KeyboardShortcuts {
@@ -44,6 +44,14 @@ final class KeyboardShortcuts {
      */
     static KeyEventDispatcher spacePlay(Window window, Runnable togglePlay) {
         return new SpacePlay(window, togglePlay);
+    }
+
+    /**
+     * T taps the tempo. A held key does not count as more taps.
+     * A text field still receives the character.
+     */
+    static KeyEventDispatcher tapTempo(Window window, Runnable tap) {
+        return new TapKey(window, tap);
     }
 
     static boolean typing() {
@@ -90,6 +98,42 @@ final class KeyboardShortcuts {
             if (event.getID() == KeyEvent.KEY_PRESSED && !spaceDown) {
                 spaceDown = true;
                 SwingUtilities.invokeLater(togglePlay);
+            }
+            return true;
+        }
+    }
+
+    private static final class TapKey implements KeyEventDispatcher {
+        private final Window window;
+        private final Runnable tap;
+        private boolean down;
+
+        private TapKey(Window window, Runnable tap) {
+            this.window = window;
+            this.tap = tap;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent event) {
+            boolean tee = event.getKeyCode() == KeyEvent.VK_T
+                || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && (event.getKeyChar() == 't' || event.getKeyChar() == 'T'));
+            if (!tee) {
+                return false;
+            }
+            if (event.getID() == KeyEvent.KEY_RELEASED) {
+                down = false;
+            }
+            if (event.getModifiersEx() != 0 || typing()) {
+                return false;
+            }
+            Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+            if (focused != window) {
+                down = false;
+                return focused != null && focused.getOwner() == window;
+            }
+            if (event.getID() == KeyEvent.KEY_PRESSED && !down) {
+                down = true;
+                SwingUtilities.invokeLater(tap);
             }
             return true;
         }

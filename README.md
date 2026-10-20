@@ -15,6 +15,8 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 ## Playing
 
 - **Space** plays and stops. That stays true when a button, slider, or the beat list has focus. Space still types a character while the cursor is in a text field (the beat name, a track name, or the BPM box).
+- **T** sets the tempo from your taps, unless you are typing. Hits averages the last few gaps, starts over when you pause for more than two seconds, and keeps the tempo between 40 and 240. **Tap** does the same. Each change can be undone.
+- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on.
 - Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch.
 - **⌘Z / Ctrl-Z** undoes. **⌘⇧Z / Ctrl-Shift-Z** redoes.
 - **⌘S / Ctrl-S** saves. **⌘⇧S / Ctrl-Shift-S** is Save As.
@@ -49,7 +51,7 @@ Export writes a Standard MIDI file of 16th notes. Swing is part of the note time
 - **Repeats** writes that material again, from 1 to 32 times. With A then B, the pair repeats (A B A B).
 - **Song** writes the chain, including each entry's repeats. A then B and Repeats are not used for that export. All tracks or As heard still applies, judged separately for each entry. A row that plays under both A and B keeps one MIDI track, with the same `Kick / Rim` label and program change as A then B.
 
-The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note.
+The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note. The metronome is playback only and is not in the file.
 
 ## Export WAV
 
@@ -83,6 +85,8 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Volume | How hard a hit is. Edits the selected step when that step is on. Otherwise it is the volume of new hits. |
 | Loud hit | Volume used by shift-click. Bright pads are at least this loud. This used to be labeled Accent. |
 | Swing | 50% is straight. The readout says `50% straight`. |
+| Tap | Set the tempo by tapping. T does this unless you are typing. A pause of more than two seconds starts over. |
+| Click | Metronome during playback. Louder on beat 1 of each bar. Left out of exports. The choice is remembered. |
 | − / + | Move the track note by one semitone. |
 | Oct − / Oct + | Move the track note by one octave. These used to say −8 / +8. |
 | Step pitch | Pitch of the selected step, when that step is on. Use track clears it. A step without its own pitch uses the track pitch. |
