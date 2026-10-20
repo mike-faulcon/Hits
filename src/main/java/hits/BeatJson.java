@@ -8,13 +8,14 @@ import java.util.Map;
 /**
  * Versioned beat document.
  * Version 1 is the original document. Version 2 adds optional fields: {@code pitch} on a step,
- * a {@code chain} of pattern entries, a track {@code pan} or mixer {@code level}, and a beat {@code master}.
+ * {@code probability} on a step (0–100, omitted when it is 100), a {@code chain} of pattern entries,
+ * a track {@code pan} or mixer {@code level}, and a beat {@code master}.
  * Mute and solo are original track fields. A beat that uses none of the version 2 fields is still written as version 1.
  */
 public final class BeatJson {
     private BeatJson() {}
 
-    /** 1 unless a step has its own pitch, the beat has a song chain, or the mixer is not at its defaults. */
+    /** 1 unless a step has its own pitch or a probability other than 100, the beat has a song chain, or the mixer is not at its defaults. */
     public static int documentVersion(Beat beat) {
         return beat.usesFormatV2() ? Beat.FORMAT_V2 : Beat.VERSION;
     }
@@ -129,6 +130,9 @@ public final class BeatJson {
             if (step.hasPitch()) {
                 out.append(",\"pitch\":").append(step.pitch());
             }
+            if (step.probability() != 100) {
+                out.append(",\"probability\":").append(step.probability());
+            }
             out.append("}");
         }
         out.append("]\n");
@@ -212,6 +216,9 @@ public final class BeatJson {
             track.step(i).setVelocity(number(step.get("velocity")));
             if (step.containsKey("pitch") && step.get("pitch") != null) {
                 track.step(i).setPitch(number(step.get("pitch")));
+            }
+            if (step.containsKey("probability") && step.get("probability") != null) {
+                track.step(i).setProbability(number(step.get("probability")));
             }
         }
         return track;

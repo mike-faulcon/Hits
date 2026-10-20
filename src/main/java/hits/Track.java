@@ -181,6 +181,7 @@ public final class Track {
         for (Step step : steps) {
             step.setOn(false);
             step.setVelocity(velocity);
+            step.setProbability(100);
         }
     }
 

@@ -16,8 +16,8 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 
 - **Space** plays and stops. That stays true when a button, slider, or the beat list has focus. Space still types a character while the cursor is in a text field (the beat name, a track name, or the BPM box).
 - **T** sets the tempo from your taps, unless you are typing. Hits averages the last few gaps, starts over when you pause for more than two seconds, and keeps the tempo between 40 and 240. **Tap** does the same. Each change can be undone.
-- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on.
-- Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch.
+- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on. When a step can miss, playback rolls chance across several passes, and the click is on every pass.
+- Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. Drag a pad up or down to set that step's velocity. The pad fills from the bottom to show it, and the **Velocity** lane under the grid does the same for the selected track. A new hit uses the track's normal or loud-hit velocity, so an older beat sounds the same. **Chance** is the percent chance the selected step plays. 100% always plays, which is the default. Each pass through the pattern, or through the song, rolls chance again. Hits prepares a long run of those rolls when playback starts; when the run ends, the same series repeats. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch. A number on a pad is its chance, when that chance is not 100%.
 - **M** mutes that track. **S** solos it. While any solo is on, only soloed tracks play. A muted track stays silent, including when it is also soloed. The same buttons are on the **Mixer**.
 - **Mixer** shows every track's level and pan, plus **Master**. Level **100** leaves each hit as programmed. **0** is silent. Pan **C** is center. Playback uses them. A drum that is not centered gets its own MIDI channel so its pan is not stuck to the rest of the kit. Drums at center stay on the General MIDI drum channel.
 - **⌘Z / Ctrl-Z** undoes. **⌘⇧Z / Ctrl-Shift-Z** redoes.
@@ -55,9 +55,11 @@ Export writes a Standard MIDI file of 16th notes. Swing is part of the note time
 
 The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note. The metronome is playback only and is not in the file.
 
+A step's chance is rolled with a fixed seed. The seed is not stored in the beat. Exporting the same beat with the same options — all tracks or as heard, A then B, repeats, or Song — writes the same notes every time. Each repeat and each chain entry is rolled on its own. 100% always plays and 0% never does. Playback does not use that seed, so a performance can differ from the file and from the next time you press play.
+
 ## Export WAV
 
-**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: mute and solo unless you ignore them, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, pan, mixer levels, and the chain when Song is selected.
+**Export WAV** sits next to Export MIDI and writes a 44.1 kHz, 16-bit stereo file. It uses the same choices: mute and solo unless you ignore them, A then B, repeats from 1 to 32, and Song. The notes are the ones Export MIDI would write for those choices, including swing, a step's own pitch, pan, mixer levels, the chain when Song is selected, and the same fixed chance seed. A WAV export of a beat is reproducible in the same way as the MIDI file.
 
 Hits renders the file through the built-in Java synth, without playing it out loud, and usually faster than real time. The file keeps two seconds after the loop ends so a note and its reverb can ring instead of stopping dead. A longer export shows a progress bar. **Cancel**, or closing that window, leaves any file already at that name in place. If rendering fails, Hits shows the reason.
 
@@ -69,9 +71,9 @@ The suggested `.wav` name uses the same file-safe spelling as Save.
 
 **Drag MIDI** and **Drag WAV** sit above the load and save buttons. Drag a chip into a DAW or a file manager to drop a copy of the current pattern. With **Song** on and a chain in the beat, the drop is the song instead. An empty chain drags the active pattern, which is also what playback does.
 
-The file is written to a temporary folder first, using the same notes as Export. Until you change them, the choices are all tracks, the active pattern, and one repeat. **As heard**, **A then B**, and **Repeats** follow the last export. The export dialog opens with those choices, and **Song** starts checked when Song mode is on and the chain is not empty. A drag in Song mode writes the chain and does not use A then B or Repeats. Mute and solo still apply only when As heard is on.
+The file is written to a temporary folder first, using the same notes as Export. Until you change them, a drag matches playback: muted tracks are left out, solo is respected, and the active pattern is written once. **Ignore mute and solo**, **A then B**, and **Repeats** follow the last export. The export dialog opens with those choices, and **Song** starts checked when Song mode is on and the chain is not empty. A drag in Song mode writes the chain and does not use A then B or Repeats. Mute and solo apply unless the last export ignored them.
 
-The file name uses the same spelling as Save, plus a short qualifier: `AlbumTrackv3-A.mid`, `AlbumTrackv3-B.wav`, `AlbumTrackv3-song.mid`, `AlbumTrackv3-A-then-B-x4.mid`, `AlbumTrackv3-song-as-heard.wav`. Dragging the same pattern again reuses that file. After the beat or the export choices change, the next file is `AlbumTrackv3-A-2.mid`, so a DAW that is still reading the first one is left alone.
+The file name uses the same spelling as Save, plus a short qualifier: `AlbumTrackv3-A-as-heard.mid`, `AlbumTrackv3-B-as-heard.wav`, `AlbumTrackv3-song-as-heard.mid`, `AlbumTrackv3-A-then-B-x4-as-heard.mid`, `AlbumTrackv3-song.mid` when mute and solo are ignored. Dragging the same pattern again reuses that file. After the beat or the export choices change, the next file is `AlbumTrackv3-A-as-heard-2.mid`, so a DAW that is still reading the first one is left alone.
 
 MIDI is written when the drag starts. WAV uses the same progress window as Export WAV, because the file has to exist before the drag can offer it. **Cancel** leaves nothing on the pointer. The progress window takes the mouse, so a move made while it is up is not part of the drag. When it closes, drag the chip again if the file did not land. Hits keeps that rendered file until the beat or the export choices change, and the second drag does not render again.
 
@@ -97,14 +99,15 @@ A SoundFont does not change an external output. Ableton, IAC, and hardware play 
 
 ## Files
 
-Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. A track can store a mixer `pan` (0–127, 64 is center) and a mixer `level` (0–127, 100 leaves the hits as programmed). A beat can store `master` (0–127, 127 is full). Mute and solo are stored on every track, as they always have been. The file is version 2 when any step has its own pitch, the chain is not empty, or pan, level, or master is not at those defaults. A step without `pitch` uses the track pitch. Saving a beat that uses none of the version 2 fields still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
+Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`) and a play probability (`probability`, 0–100). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "a", "repeats": 2 }`. A track can store a mixer `pan` (0–127, 64 is center) and a mixer `level` (0–127, 100 leaves the hits as programmed). A beat can store `master` (0–127, 127 is full). Mute and solo are stored on every track, as they always have been. The file is version 2 when any step has its own pitch, a probability other than 100, the chain is not empty, or pan, level, or master is not at those defaults. A step without `pitch` uses the track pitch. A step without `probability` plays every time, and 100 is omitted when saving. Saving a beat that uses none of the version 2 fields still writes version 1, so a previous version of Hits can open it. Extra fields Hits does not know are ignored. Older `.btf` files still load.
 
 ## Controls
 
 | Control | What it does |
 | --- | --- |
 | Length | How long each note holds, as a percent of the step. This used to be labeled Gate. |
-| Volume | How hard a hit is. Edits the selected step when that step is on. Otherwise it is the volume of new hits. |
+| Volume | How hard a hit is, from 1 to 127. Edits the selected step when that step is on. Otherwise it is the volume of new hits. Drag a pad or the velocity lane to set a step directly. |
+| Chance | Percent chance the selected step plays. 100% always plays. 0% never plays. Playback rolls each pass. MIDI and WAV export use a fixed seed. |
 | Loud hit | Volume used by shift-click. Bright pads are at least this loud. This used to be labeled Accent. |
 | Swing | 50% is straight. The readout says `50% straight`. |
 | Tap | Set the tempo by tapping. T does this unless you are typing. A pause of more than two seconds starts over. |

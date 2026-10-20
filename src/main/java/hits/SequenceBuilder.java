@@ -7,6 +7,7 @@ import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
 import java.nio.charset.StandardCharsets;
+import java.util.Random;
 
 /** Turns a beat into a MIDI sequence. A 16th note is {@code PPQ / 4} ticks. */
 public final class SequenceBuilder {
@@ -55,7 +56,7 @@ public final class SequenceBuilder {
         return found;
     }
 
-    /** Playback of the song chain, as heard. An empty chain is the active pattern. */
+    /** Playback of the song chain, as heard, one pass, without rolling probability. An empty chain is the active pattern. */
     public static Sequence buildSong(Beat beat) throws InvalidMidiDataException {
         return buildSong(beat, false);
     }
@@ -69,14 +70,13 @@ public final class SequenceBuilder {
         if (!beat.hasChain()) {
             return build(beat, metronome);
         }
-        Sequence sequence = export(beat, new ExportOptions(true, false, 1, true));
-        if (metronome) {
-            addClicks(sequence, beat.stepCount(), Chain.sections(beat.chain()));
-        }
-        return sequence;
+        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome);
     }
 
-    /** Playback sequence: the active slot, once, with mute and solo applied. */
+    /**
+     * One pass of the active slot, with mute and solo applied.
+     * A step at 0% is silent. Other probabilities play; the roll happens in {@link #playback}.
+     */
     public static Sequence build(Beat beat) throws InvalidMidiDataException {
         return build(beat, false);
     }
@@ -86,25 +86,101 @@ public final class SequenceBuilder {
      * {@code metronome} adds clicks. {@link #export} never writes them.
      */
     public static Sequence build(Beat beat, boolean metronome) throws InvalidMidiDataException {
+        return pattern(beat, null, 1, metronome);
+    }
+
+    /**
+     * What the sequencer loops. Each pass through the pattern, or through the song, rolls
+     * probability again. A beat whose sounding steps are all certain is one pass, same as {@link #build}.
+     * {@code random} supplies the draws when a roll is needed. Null starts an unseeded roll.
+     * The metronome is off. {@link Player} uses {@link #playback(Beat, boolean, Random, boolean)}.
+     */
+    public static Sequence playback(Beat beat, boolean song, Random random) throws InvalidMidiDataException {
+        return playback(beat, song, random, false);
+    }
+
+    public static Sequence playback(Beat beat, boolean song) throws InvalidMidiDataException {
+        return playback(beat, song, null, false);
+    }
+
+    /**
+     * Playback, including every pre-rolled pass. {@code metronome} adds a click on each beat of
+     * every pass. Export never calls this, so the click is not written to a file.
+     */
+    public static Sequence playback(Beat beat, boolean song, Random random, boolean metronome) throws InvalidMidiDataException {
+        boolean chance = usesChance(beat, song);
+        int passes = playbackPasses(beat, song);
+        Random roll = chance ? (random != null ? random : new Random()) : null;
+        if (song && beat.hasChain()) {
+            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome);
+        }
+        return pattern(beat, roll, passes, metronome);
+    }
+
+    /** Tick length of {@link #playback}, including every pre-rolled pass. */
+    public static long playbackTicks(Beat beat, boolean song) {
+        long one = song && beat.hasChain()
+            ? Chain.ticks(beat.chain(), beat.stepCount())
+            : loopTicks(beat.stepCount());
+        return one * playbackPasses(beat, song);
+    }
+
+    /** 1 when nothing sounding can miss. Otherwise several pre-rolled passes, capped for long chains. */
+    public static int playbackPasses(Beat beat, boolean song) {
+        if (!usesChance(beat, song)) {
+            return 1;
+        }
+        int sections = song && beat.hasChain() ? Math.max(1, Chain.sections(beat.chain())) : 1;
+        int room = Math.max(1, Chance.MAX_PLAYBACK_SECTIONS / sections);
+        return Math.max(1, Math.min(Chance.PLAYBACK_PASSES, room));
+    }
+
+    private static boolean usesChance(Beat beat, boolean song) {
+        if (song && beat.hasChain()) {
+            boolean slotA = false;
+            boolean slotB = false;
+            for (Chain.Part part : beat.chain()) {
+                if (part.slot() == 'b') {
+                    slotB = true;
+                } else {
+                    slotA = true;
+                }
+            }
+            return (slotA && beat.playingChance('a')) || (slotB && beat.playingChance('b'));
+        }
+        return beat.playingChance(beat.activeSlot());
+    }
+
+    private static Sequence pattern(Beat beat, Random random, int passes, boolean metronome) throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
         int steps = beat.stepCount();
+        int times = Math.max(1, passes);
         long loop = loopTicks(steps);
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
-        tempo.add(new MidiEvent(marker("end"), loop));
+        tempo.add(new MidiEvent(marker("end"), loop * times));
 
         hits.Track[] tracks = beat.activeTracks();
+        Track[] midiTracks = new Track[tracks.length];
         for (int i = 0; i < tracks.length; i++) {
             hits.Track track = tracks[i];
             if (!beat.audible(track)) {
                 continue;
             }
-            Track midi = sequence.createTrack();
-            midi.add(new MidiEvent(trackName(track.name()), 0));
-            writeTrack(midi, beat, track, i, steps, 0, loop, false);
+            midiTracks[i] = sequence.createTrack();
+            midiTracks[i].add(new MidiEvent(trackName(track.name()), 0));
+            writeSetup(midiTracks[i], track, i, 0, false);
+        }
+        for (int pass = 0; pass < times; pass++) {
+            for (int i = 0; i < tracks.length; i++) {
+                if (midiTracks[i] == null) {
+                    continue;
+                }
+                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random);
+            }
         }
         if (metronome) {
-            addClicks(sequence, steps, 1);
+            addClicks(sequence, steps, times);
         }
         return sequence;
     }
@@ -115,8 +191,21 @@ public final class SequenceBuilder {
      * Pan and mixer levels are part of the file either way.
      * Repeats append the same notes later in the file. Both slots play A, then B, and that pair repeats.
      * Song writes the chain once; each entry already carries its own repeats.
+     * Probability uses {@link Chance#EXPORT_SEED}, so the same beat and options write the same notes.
+     * Each section is rolled on its own. 100% always plays and 0% never does.
+     * The metronome is never written.
      */
     public static Sequence export(Beat beat, ExportOptions options) throws InvalidMidiDataException {
+        return arrangement(beat, options == null ? ExportOptions.matchingPlayback() : options, Chance.exportRandom(), 1, false);
+    }
+
+    private static Sequence arrangement(
+        Beat beat,
+        ExportOptions options,
+        Random random,
+        int passes,
+        boolean metronome
+    ) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
         boolean song = chosen.song() && beat.hasChain();
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
@@ -124,26 +213,33 @@ public final class SequenceBuilder {
         int steps = beat.stepCount();
         long sectionTicks = loopTicks(steps);
         int sections = song ? Chain.sections(beat.chain()) : chosen.sections();
+        int times = Math.max(1, passes);
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
-        tempo.add(new MidiEvent(marker("end"), sectionTicks * sections));
+        tempo.add(new MidiEvent(marker("end"), sectionTicks * sections * times));
 
         boolean span = song ? Chain.usesBoth(beat.chain()) : chosen.bothSlots();
         Track[] midiTracks = new Track[Beat.TRACKS];
-        for (int section = 0; section < sections; section++) {
-            char slot = song ? Chain.slotAt(beat.chain(), section) : chosen.slotAt(section, beat.activeSlot());
-            hits.Track[] tracks = beat.slot(slot);
-            long offset = section * sectionTicks;
-            for (int i = 0; i < tracks.length; i++) {
-                hits.Track track = tracks[i];
-                if (chosen.asHeard() && !Beat.audibleIn(tracks, track)) {
-                    continue;
+        for (int pass = 0; pass < times; pass++) {
+            for (int section = 0; section < sections; section++) {
+                char slot = song ? Chain.slotAt(beat.chain(), section) : chosen.slotAt(section, beat.activeSlot());
+                hits.Track[] tracks = beat.slot(slot);
+                long offset = ((long) pass * sections + section) * sectionTicks;
+                for (int i = 0; i < tracks.length; i++) {
+                    hits.Track track = tracks[i];
+                    if (chosen.asHeard() && !Beat.audibleIn(tracks, track)) {
+                        continue;
+                    }
+                    if (midiTracks[i] == null) {
+                        midiTracks[i] = sequence.createTrack();
+                        midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i, span)), 0));
+                    }
+                    writeSetup(midiTracks[i], track, i, offset, resetDrumBank(beat, chosen, song, i, section));
+                    writeNotes(midiTracks[i], beat, track, i, steps, offset, sectionTicks, random);
                 }
-                if (midiTracks[i] == null) {
-                    midiTracks[i] = sequence.createTrack();
-                    midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, slot, i, span)), 0));
-                }
-                writeTrack(midiTracks[i], beat, track, i, steps, offset, sectionTicks, resetDrumBank(beat, chosen, song, i, section));
             }
+        }
+        if (metronome) {
+            addClicks(sequence, steps, sections * times);
         }
         return sequence;
     }
@@ -177,14 +273,11 @@ public final class SequenceBuilder {
         return false;
     }
 
-    private static void writeTrack(
+    private static void writeSetup(
         Track midi,
-        Beat beat,
         hits.Track track,
         int row,
-        int steps,
         long offset,
-        long sectionTicks,
         boolean resetBank
     ) throws InvalidMidiDataException {
         int channel = Mix.channel(track, row);
@@ -202,7 +295,6 @@ public final class SequenceBuilder {
         if (track.pan() != hits.Track.PAN_CENTER) {
             control(midi, channel, offset, 10, track.pan());
         }
-        writeNotes(midi, beat, track, channel, steps, offset, sectionTicks);
     }
 
     private static void control(Track midi, int channel, long tick, int controller, int value) throws InvalidMidiDataException {
@@ -221,14 +313,16 @@ public final class SequenceBuilder {
         Track midi,
         Beat beat,
         hits.Track track,
-        int channel,
+        int row,
         int steps,
         long offset,
-        long sectionTicks
+        long sectionTicks,
+        Random random
     ) throws InvalidMidiDataException {
+        int channel = Mix.channel(track, row);
         for (int step = 0; step < steps; step++) {
             Step cell = track.step(step);
-            if (!cell.on()) {
+            if (!cell.on() || !Chance.plays(cell.probability(), random)) {
                 continue;
             }
             long start = offset + tickForStep(step, beat.swing());
@@ -274,18 +368,19 @@ public final class SequenceBuilder {
     }
 
     /**
-     * A click on every quarter note. Beat 1 of each bar is the accent.
+     * A click on every quarter note of every bar in the sequence. Beat 1 of each bar is the accent.
+     * {@code bars} is pattern sections times playback passes, so a later pass still clicks.
      * Quarter notes fall on even 16ths, which swing does not move, so the click stays on the beat.
      */
-    private static void addClicks(Sequence sequence, int stepCount, int sections) throws InvalidMidiDataException {
-        if (sections <= 0 || stepCount < 4) {
+    private static void addClicks(Sequence sequence, int stepCount, int bars) throws InvalidMidiDataException {
+        if (bars <= 0 || stepCount < 4) {
             return;
         }
         Track click = sequence.createTrack();
         click.add(new MidiEvent(trackName("Click"), 0));
         int quarters = stepCount / 4;
         long bar = loopTicks(stepCount);
-        for (int section = 0; section < sections; section++) {
+        for (int section = 0; section < bars; section++) {
             for (int quarter = 0; quarter < quarters; quarter++) {
                 int step = quarter * 4;
                 boolean downbeat = step % 16 == 0;
