@@ -16,10 +16,10 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 
 - **Space** plays and stops. That stays true when a button, slider, or the beat list has focus. Space still types a character while the cursor is in a text field (the beat name, a track name, or the BPM box).
 - **T** sets the tempo from your taps, unless you are typing. Hits averages the last few gaps, starts over when you pause for more than two seconds, and keeps the tempo between 40 and 240. **Tap** does the same. Each change can be undone.
-- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on. When a step can miss, playback rolls chance across several passes, and the click is on every pass.
+- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. Beat 1 is claves (GM note 75) and the other beats are an open triangle (note 81). Those are not the high and low wood blocks (notes 76 and 77), and they are not in the kit list, so a wood-block track stays separate from the click. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on. When a step can miss, playback rolls chance across several passes, and the click is on every pass.
 - Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. Drag a pad up or down to set that step's velocity. The pad fills from the bottom to show it, and the **Velocity** lane under the grid does the same for the selected track. A new hit uses the track's normal or loud-hit velocity, so an older beat sounds the same. **Chance** is the percent chance the selected step plays. 100% always plays, which is the default. Each pass through the pattern, or through the song, rolls chance again. Hits prepares a long run of those rolls when playback starts; when the run ends, the same series repeats. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch. A number on a pad is its chance, when that chance is not 100%.
 - **M** mutes that track. **S** solos it. While any solo is on, only soloed tracks play. A muted track stays silent, including when it is also soloed. The same buttons are on the **Mixer**.
-- **Mixer** shows every track's level and pan, plus **Master**. Level **100** leaves each hit as programmed. **0** is silent. Pan **C** is center. Playback uses them. A drum that is not centered gets its own MIDI channel so its pan is not stuck to the rest of the kit. Drums at center stay on the General MIDI drum channel.
+- **Mixer** shows every track's level and pan, plus **Master**. Level **100** leaves each hit as programmed. **0** is silent. Pan **C** is center. Playback uses them. A drum that is not centered gets its own MIDI channel so its pan is not stuck to the rest of the kit. Drums at center stay on the General MIDI drum channel. **All patterns** starts on, so a level or pan change is written to every pattern. Turn it off to edit only the pattern on screen. Mute and solo always stay on the pattern on screen. The choice is not stored in the file. Each pattern still keeps its own level and pan.
 - **⌘Z / Ctrl-Z** undoes. **⌘⇧Z / Ctrl-Shift-Z** redoes.
 - **⌘S / Ctrl-S** saves. **⌘⇧S / Ctrl-Shift-S** is Save As.
 
@@ -27,7 +27,7 @@ Until you dismiss the hint, Hits opens on the Boom bap pattern, not playing. Und
 
 ## Make me a beat
 
-**Make me a beat** writes a starter groove on the pattern on screen. Pick boom bap, trap, house, rock, or reggaeton, or **Surprise me**. The kick and snare stay on the beats that make that style, and the hats change a little each time. Tempo and swing follow the style. A 32-step pattern keeps those beats in the second bar. Sounds, names, chance, and the other patterns stay. The new hits play every time.
+**Make me a beat** writes a starter groove on the pattern on screen. Pick boom bap, trap, house, rock, or reggaeton, or **Surprise me**. The kick and snare stay on the beats that make that style, and the hats change a little each time. Tempo and swing follow the style and change for the whole beat, not only the pattern on screen. The style picker says so. A 32-step pattern keeps those beats in the second bar. Sounds, names, chance, and the other patterns' hits stay. The new hits play every time.
 
 If that pattern already has hits, the style picker says so. Cancel leaves it alone. **Shuffle**, on the track inspector, writes a new rhythm on the selected track only. A snare that you moved to another row still shuffles as a snare. Both buttons are one undo.
 
@@ -119,12 +119,12 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Loud hit | Volume used by shift-click. Bright pads are at least this loud. This used to be labeled Accent. |
 | Swing | 50% is straight. The readout says `50% straight`. |
 | Tap | Set the tempo by tapping. T does this unless you are typing. A pause of more than two seconds starts over. |
-| Click | Metronome during playback. Louder on beat 1 of each bar. Left out of exports. The choice is remembered. |
+| Click | Metronome during playback. Louder on beat 1 of each bar (claves, then an open triangle). Not the wood blocks. Left out of exports. The choice is remembered. |
 | − / + | Move the track note by one semitone. |
 | Oct − / Oct + | Move the track note by one octave. These used to say −8 / +8. |
 | Step pitch | Pitch of the selected step, when that step is on. Use track clears it. A step without its own pitch uses the track pitch. |
 | M / S | Mute this track, or solo it. While any solo is on, only soloed tracks play. A muted track stays silent. |
-| Mixer | Level and pan for every track, plus Master. Level 100 is unity. Pan C is center. |
+| Mixer | Level and pan for every track, plus Master. Level 100 is unity. Pan C is center. All patterns applies level and pan to every pattern. |
 | Level | How loud the track is in the mix. This is separate from Volume, which is how hard a hit is. |
 | Pan | Left, center, or right. A drum off center uses its own MIDI channel. |
 | Master | Turns every track down together. 127 is full. |
@@ -137,7 +137,7 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Remove / Up / Down | Edit the selected chain entry. |
 | × | How many times the selected chain entry plays, from 1 to 32. |
 | 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
-| Make me a beat | Starter groove from a style. Asks first when the pattern on screen has hits. The other patterns stay. |
+| Make me a beat | Starter groove from a style. Asks first when the pattern on screen has hits. Tempo and swing change for the whole beat. The other patterns' hits stay. |
 | Shuffle | New rhythm on the selected track. The sound, tempo, and other tracks stay. |
 | Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other patterns are kept. |
 | Drag MIDI | Drag the current pattern, or the song, into a DAW or a folder. |

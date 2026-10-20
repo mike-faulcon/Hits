@@ -45,7 +45,7 @@ class MixTest {
         assertFalse(json.contains("\"pan\""));
         assertFalse(json.contains("\"level\""));
         assertFalse(json.contains("\"master\""));
-        assertEquals(0, controls(SequenceBuilder.build(beat)).size());
+        assertCentredDrumPan(SequenceBuilder.build(beat));
 
         beat.track(0).setMute(false);
         beat.track(1).setSolo(false);
@@ -53,7 +53,7 @@ class MixTest {
         ShortMessage note = noteOns(sequence).get(0);
         assertEquals(Gm.DRUM_CHANNEL, note.getChannel());
         assertEquals(100, note.getData2());
-        assertEquals(0, controls(sequence).size());
+        assertCentredDrumPan(sequence);
     }
 
     @Test
@@ -136,8 +136,12 @@ class MixTest {
         assertEquals(0, control(sequence, 0, 32));
         assertTrue(programs(sequence, 0).contains(0));
         assertEquals(90, control(sequence, 6, 10));
+        assertEquals(0, control(sequence, 6, 0));
+        assertEquals(0, control(sequence, 6, 32));
         assertTrue(programs(sequence, 6).contains(33));
-        assertTrue(controls(sequence).stream().noneMatch(message -> message.getChannel() == Gm.DRUM_CHANNEL));
+        assertTrue(controls(sequence).stream()
+            .filter(message -> message.getChannel() == Gm.DRUM_CHANNEL)
+            .allMatch(message -> message.getData1() == 10 && message.getData2() == Track.PAN_CENTER));
 
         beat.track(0).setMute(true);
         assertTrue(noteOns(SequenceBuilder.build(beat)).stream().noneMatch(message -> message.getData1() == 36));
@@ -200,6 +204,154 @@ class MixTest {
     }
 
     @Test
+    void centredPanIsSentAtTheNextPatternBoundary() throws Exception {
+        Beat beat = Beat.drumKit("pan");
+        beat.track(7).setMode(TrackMode.NOTE);
+        beat.track(7).setProgram(38);
+        beat.track(7).setNote(36);
+        beat.track(7).tap(0, false);
+        beat.track(7).setPan(0);
+        beat.track(7).setLevel(40);
+        beat.setActiveSlot('b');
+        beat.track(7).setMode(TrackMode.NOTE);
+        beat.track(7).setProgram(38);
+        beat.track(7).setNote(40);
+        beat.track(7).tap(0, false);
+        beat.track(7).setPan(Track.PAN_CENTER);
+        beat.track(7).setLevel(Track.LEVEL);
+        beat.setActiveSlot('a');
+        beat.addChain('a');
+        beat.addChain('b');
+
+        long bar = SequenceBuilder.loopTicks(beat.stepCount());
+        Sequence exported = SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true));
+        assertEquals(0, controlAt(exported, 0, 7, 10));
+        assertEquals(Track.PAN_CENTER, controlAt(exported, bar, 7, 10));
+        assertEquals(40, velocityAt(exported, 0, 36));
+        assertEquals(100, velocityAt(exported, bar, 40));
+
+        Sequence played = SequenceBuilder.playback(beat, true);
+        assertEquals(Track.PAN_CENTER, controlAt(played, bar, 7, 10));
+        assertEquals(100, velocityAt(played, bar, 40));
+    }
+
+    @Test
+    void aNoteTrackResetsTheBankOnALaterPlaybackPass() throws Exception {
+        Beat beat = Beat.drumKit("bank");
+        beat.track(7).setMode(TrackMode.NOTE);
+        beat.track(7).setProgram(81);
+        beat.track(7).setNote(60);
+        beat.track(7).tap(0, false);
+        beat.track(7).step(4).setOn(true);
+        beat.track(7).step(4).setProbability(50);
+        beat.setActiveSlot('b');
+        beat.track(7).setMode(TrackMode.DRUM);
+        beat.track(7).setNote(37);
+        beat.track(7).tap(0, false);
+        beat.track(7).setPan(20);
+        beat.setActiveSlot('a');
+        beat.addChain('a');
+        beat.addChain('b');
+
+        assertTrue(SequenceBuilder.playbackPasses(beat, true) > 1);
+        Sequence played = SequenceBuilder.playback(beat, true, new java.util.Random(1), false);
+        long bar = SequenceBuilder.loopTicks(beat.stepCount());
+        long pass2 = bar * Chain.sections(beat.chain());
+        assertEquals(Gm.DRUM_BANK, controlAt(played, bar, 7, 0));
+        assertBankBeforeProgram(played, pass2, 7, 81);
+        assertEquals(Track.PAN_CENTER, controlAt(played, pass2, 7, 10));
+    }
+
+    @Test
+    void liveChannelStateSendsCentrePanAndANoteBank() throws Exception {
+        Beat beat = Beat.drumKit("live");
+        beat.track(7).setMode(TrackMode.NOTE);
+        beat.track(7).setProgram(81);
+        beat.track(7).setNote(60);
+        beat.track(7).tap(0, false);
+        beat.setActiveSlot('b');
+        beat.track(7).setMode(TrackMode.DRUM);
+        beat.track(7).setNote(37);
+        beat.track(7).tap(0, false);
+        beat.track(7).setPan(20);
+        beat.setActiveSlot('a');
+        beat.addChain('a');
+        beat.addChain('b');
+
+        long bar = SequenceBuilder.loopTicks(beat.stepCount());
+        java.util.List<ShortMessage> sent = new java.util.ArrayList<>();
+        javax.sound.midi.Receiver receiver = new javax.sound.midi.Receiver() {
+            @Override
+            public void send(javax.sound.midi.MidiMessage message, long timeStamp) {
+                if (message instanceof ShortMessage shortMessage) {
+                    sent.add(shortMessage);
+                }
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        SequenceBuilder.playChannelState(receiver, beat, true, bar);
+        assertEquals(20, controlValue(sent, 7, 10));
+        assertEquals(Gm.DRUM_BANK, controlValue(sent, 7, 0));
+
+        sent.clear();
+        beat.slot('b')[7].setMode(TrackMode.NOTE);
+        beat.slot('b')[7].setProgram(81);
+        beat.slot('b')[7].setPan(Track.PAN_CENTER);
+        SequenceBuilder.playChannelState(receiver, beat, true, bar);
+        assertEquals(0, controlValue(sent, 7, 0));
+        assertEquals(0, controlValue(sent, 7, 32));
+        assertEquals(Track.PAN_CENTER, controlValue(sent, 7, 10));
+        assertTrue(sent.stream().anyMatch(message ->
+            message.getCommand() == ShortMessage.PROGRAM_CHANGE && message.getChannel() == 7 && message.getData1() == 81));
+        int programAt = indexOfProgram(sent, 7, 81);
+        assertTrue(indexOfControl(sent, 7, 0) < programAt);
+        assertTrue(indexOfControl(sent, 7, 32) < programAt);
+    }
+
+    @Test
+    void levelAndPanCanApplyToEveryPatternAndStillUndo() {
+        Beat beat = Beat.drumKit("all");
+        Mix.setPan(beat, 'a', 1, 20, true);
+        Mix.setLevel(beat, 'a', 1, 80, true);
+        for (int i = 0; i < Beat.SLOT_COUNT; i++) {
+            Track track = beat.slot(Beat.slotLetter(i))[1];
+            assertEquals(20, track.pan());
+            assertEquals(80, track.level());
+        }
+        Mix.setPan(beat, 'c', 1, 100, false);
+        Mix.setLevel(beat, 'c', 1, 40, false);
+        assertEquals(100, beat.slot('c')[1].pan());
+        assertEquals(40, beat.slot('c')[1].level());
+        assertEquals(20, beat.slot('a')[1].pan());
+        assertEquals(80, beat.slot('b')[1].level());
+        assertEquals(20, beat.slot('h')[1].pan());
+
+        Editor editor = new Editor(beat);
+        editor.edit(current -> {
+            Mix.setPan(current, 'a', 1, 12, true);
+            Mix.setLevel(current, 'a', 1, 50, true);
+        });
+        assertEquals(12, editor.beat().slot('e')[1].pan());
+        editor.undo();
+        assertEquals(20, editor.beat().slot('e')[1].pan());
+        assertEquals(80, editor.beat().slot('e')[1].level());
+        assertEquals(100, editor.beat().slot('c')[1].pan());
+        editor.redo();
+        assertEquals(12, editor.beat().slot('h')[1].pan());
+        assertEquals(50, editor.beat().slot('d')[1].level());
+
+        String json = BeatJson.write(editor.beat());
+        assertFalse(json.contains("allPatterns"));
+        assertTrue(json.contains("\"pan\""));
+        Beat plain = Beat.drumKit("plain");
+        assertEquals(1, BeatJson.documentVersion(plain));
+        assertFalse(BeatJson.write(plain).contains("\"pan\""));
+    }
+
+    @Test
     void mixerEditsUndo() {
         Editor editor = new Editor(Beat.drumKit("t"));
         editor.edit(beat -> {
@@ -239,6 +391,96 @@ class MixTest {
             }
         }
         throw new AssertionError("missing note " + note);
+    }
+
+    private static void assertCentredDrumPan(Sequence sequence) {
+        List<ShortMessage> messages = controls(sequence);
+        assertFalse(messages.isEmpty());
+        for (ShortMessage message : messages) {
+            assertEquals(Gm.DRUM_CHANNEL, message.getChannel());
+            assertEquals(10, message.getData1());
+            assertEquals(Track.PAN_CENTER, message.getData2());
+        }
+    }
+
+    private static int velocityAt(Sequence sequence, long tick, int note) {
+        List<Integer> values = new ArrayList<>();
+        for (MidiEvent event : noteOnEvents(sequence)) {
+            ShortMessage message = (ShortMessage) event.getMessage();
+            if (event.getTick() == tick && message.getData1() == note) {
+                values.add(message.getData2());
+            }
+        }
+        assertEquals(1, values.size());
+        return values.get(0);
+    }
+
+    private static void assertBankBeforeProgram(Sequence sequence, long tick, int channel, int program) {
+        boolean bankMsb = false;
+        boolean bankLsb = false;
+        boolean programSeen = false;
+        for (javax.sound.midi.Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                MidiEvent event = track.get(i);
+                if (event.getTick() != tick || !(event.getMessage() instanceof ShortMessage message)) {
+                    continue;
+                }
+                if (message.getChannel() != channel) {
+                    continue;
+                }
+                if (message.getCommand() == ShortMessage.CONTROL_CHANGE && message.getData1() == 0) {
+                    assertFalse(programSeen);
+                    assertEquals(0, message.getData2());
+                    bankMsb = true;
+                } else if (message.getCommand() == ShortMessage.CONTROL_CHANGE && message.getData1() == 32) {
+                    assertFalse(programSeen);
+                    assertEquals(0, message.getData2());
+                    bankLsb = true;
+                } else if (message.getCommand() == ShortMessage.PROGRAM_CHANGE && message.getData1() == program) {
+                    programSeen = true;
+                }
+            }
+        }
+        assertTrue(bankMsb);
+        assertTrue(bankLsb);
+        assertTrue(programSeen);
+    }
+
+    private static int controlValue(List<ShortMessage> messages, int channel, int controller) {
+        List<Integer> values = new ArrayList<>();
+        for (ShortMessage message : messages) {
+            if (message.getCommand() == ShortMessage.CONTROL_CHANGE
+                && message.getChannel() == channel
+                && message.getData1() == controller) {
+                values.add(message.getData2());
+            }
+        }
+        assertEquals(1, values.size());
+        return values.get(0);
+    }
+
+    private static int indexOfControl(List<ShortMessage> messages, int channel, int controller) {
+        for (int i = 0; i < messages.size(); i++) {
+            ShortMessage message = messages.get(i);
+            if (message.getCommand() == ShortMessage.CONTROL_CHANGE
+                && message.getChannel() == channel
+                && message.getData1() == controller) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int indexOfProgram(List<ShortMessage> messages, int channel, int program) {
+        for (int i = 0; i < messages.size(); i++) {
+            ShortMessage message = messages.get(i);
+            if (message.getCommand() == ShortMessage.PROGRAM_CHANGE
+                && message.getChannel() == channel
+                && message.getData1() == program) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static int control(Sequence sequence, int channel, int controller) throws InvalidMidiDataException {

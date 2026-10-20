@@ -8,14 +8,17 @@ import hits.Track;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
+import javax.swing.UIDefaults;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Insets;
 
 /** Per-track level, pan, mute, and solo, plus the master fader. */
 final class MixerPanel {
@@ -24,6 +27,7 @@ final class MixerPanel {
     private final JPanel panel;
     private final JSlider master = Widgets.slider(0, 127, Beat.MASTER);
     private final JLabel masterValue = Widgets.label(Integer.toString(Beat.MASTER));
+    private final JCheckBox allPatterns = new JCheckBox("All patterns", true);
     private final SliderDrag masterDrag;
     private final JLabel[] names = new JLabel[Beat.TRACKS];
     private final JButton[] mutes = new JButton[Beat.TRACKS];
@@ -53,14 +57,17 @@ final class MixerPanel {
     void wire() {
         master.setToolTipText("Master volume. 127 is full. This turns every track down together.");
         masterDrag.wire(master, beat -> beat.setMaster(master.getValue()));
+        allPatterns.setToolTipText("Level and pan apply to every pattern. Turn this off to edit only the pattern on screen. Mute and solo stay on this pattern.");
         for (int row = 0; row < Beat.TRACKS; row++) {
             int index = row;
             levels[row].setToolTipText("Track level. 100 leaves each hit as programmed. 0 is silent.");
             pans[row].setToolTipText("Pan. C is center. L is left, R is right.");
             mutes[row].setToolTipText("Mute this track.");
             solos[row].setToolTipText("Solo this track. While any solo is on, only soloed tracks play.");
-            levelDrags[row].wire(levels[row], beat -> beat.slot(editor.viewSlot())[index].setLevel(levels[index].getValue()));
-            panDrags[row].wire(pans[row], beat -> beat.slot(editor.viewSlot())[index].setPan(pans[index].getValue()));
+            levelDrags[row].wire(levels[row], beat -> Mix.setLevel(
+                beat, editor.viewSlot(), index, levels[index].getValue(), allPatterns.isSelected()));
+            panDrags[row].wire(pans[row], beat -> Mix.setPan(
+                beat, editor.viewSlot(), index, pans[index].getValue(), allPatterns.isSelected()));
             mutes[row].addActionListener(event -> editor.toggleMute(index));
             solos[row].addActionListener(event -> editor.toggleSolo(index));
         }
@@ -98,7 +105,15 @@ final class MixerPanel {
         JLabel hint = Widgets.label("Mute silences a track. While any solo is on, only soloed tracks play.");
         hint.setForeground(Theme.MUTED);
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
+        allPatterns.setOpaque(false);
+        allPatterns.setForeground(Theme.TEXT);
+        allPatterns.setFocusable(false);
+        allPatterns.setAlignmentX(Component.LEFT_ALIGNMENT);
+        Dimension allPatternsSize = allPatterns.getPreferredSize();
+        allPatterns.setMaximumSize(new Dimension(Integer.MAX_VALUE, allPatternsSize.height));
         body.add(hint);
+        body.add(Box.createVerticalStrut(6));
+        body.add(allPatterns);
         body.add(Box.createVerticalStrut(10));
         body.add(masterRow());
         body.add(Box.createVerticalStrut(12));
@@ -127,8 +142,8 @@ final class MixerPanel {
     private JPanel trackRow(int row) {
         names[row] = Widgets.label((row + 1) + "");
         names[row].setFont(names[row].getFont().deriveFont(Font.BOLD));
-        mutes[row] = Widgets.button("M");
-        solos[row] = Widgets.button("S");
+        mutes[row] = mixChip("M");
+        solos[row] = mixChip("S");
         levels[row] = Widgets.slider(0, 127, Track.LEVEL);
         levelValues[row] = Widgets.label(Integer.toString(Track.LEVEL));
         pans[row] = Widgets.slider(0, 127, Track.PAN_CENTER);
@@ -136,8 +151,8 @@ final class MixerPanel {
         JLabel level = Widgets.label("Level");
         JLabel pan = Widgets.label("Pan");
         pin(names[row], 128, 32);
-        pin(mutes[row], 36, 32);
-        pin(solos[row], 36, 32);
+        pin(mutes[row], 44, 32);
+        pin(solos[row], 44, 32);
         pin(level, 44, 32);
         pin(pan, 36, 32);
         pin(levelValues[row], 36, 32);
@@ -178,6 +193,20 @@ final class MixerPanel {
         slider.setPreferredSize(new Dimension(140, 32));
         slider.setMaximumSize(new Dimension(Short.MAX_VALUE, 32));
         slider.setAlignmentY(Component.CENTER_ALIGNMENT);
+    }
+
+    /**
+     * Nimbus insets are wide enough that a 36px "M" is drawn as an ellipsis.
+     * A slightly wider chip and tighter content margins keep the letter.
+     */
+    private static JButton mixChip(String letter) {
+        JButton button = Widgets.button(letter);
+        UIDefaults overrides = new UIDefaults();
+        overrides.put("Button.contentMargins", new Insets(2, 6, 2, 6));
+        button.putClientProperty("Nimbus.Overrides", overrides);
+        button.putClientProperty("Nimbus.Overrides.InheritDefaults", Boolean.TRUE);
+        button.updateUI();
+        return button;
     }
 
     private static void paintChip(JButton button, boolean on, Color color) {

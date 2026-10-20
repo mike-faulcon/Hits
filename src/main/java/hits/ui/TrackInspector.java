@@ -17,6 +17,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
 import javax.swing.JTextField;
+import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
@@ -25,6 +26,7 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 
@@ -84,7 +86,7 @@ final class TrackInspector {
         for (int program = 0; program < 128; program++) {
             programs.addItem(Gm.programName(program));
         }
-        JPanel panel = new JPanel(new GridBagLayout());
+        JPanel panel = new InspectorBody();
         panel.setBackground(Theme.PANEL);
         panel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
         GridBagConstraints constraints = new GridBagConstraints();
@@ -336,6 +338,43 @@ final class TrackInspector {
             track.setNote(track.note() + delta);
         });
         player.audition(editor.selectedTrack());
+    }
+
+    /**
+     * Stays as wide as the inspector column. The step grid scrolls sideways instead of
+     * squeezing Chance, Volume, and the sound picker down to a sliver.
+     */
+    private static final class InspectorBody extends JPanel implements Scrollable {
+        private static final int PREFERRED_WIDTH = 320;
+
+        private InspectorBody() {
+            super(new GridBagLayout());
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return new Dimension(PREFERRED_WIDTH, getPreferredSize().height);
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return 24;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return 120;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 
     private static void addRow(JPanel panel, GridBagConstraints constraints, JComponent component) {
