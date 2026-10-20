@@ -11,12 +11,15 @@ import hits.TrackMode;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
+import javax.swing.JSpinner;
 import javax.swing.JTextField;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
@@ -30,7 +33,7 @@ import java.awt.Rectangle;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 
-/** Track name, sound, length, volume, chance, loud hit, mode, step pitch, and pattern length. */
+/** Track name, sound, length, hold, nudge, volume, chance, loud hit, mode, step pitch, and pattern length. */
 final class TrackInspector {
     private final Editor editor;
     private final Player player;
@@ -58,6 +61,13 @@ final class TrackInspector {
     private final JButton stepPitchDown = Widgets.button("−");
     private final JButton stepPitchUp = Widgets.button("+");
     private final JButton stepPitchTrack = Widgets.button("Use track");
+    private final JSpinner hold = new JSpinner(new SpinnerNumberModel(Step.MIN_LENGTH, Step.MIN_LENGTH, Step.MAX_LENGTH, 1));
+    private final JLabel holdUnit = Widgets.label("steps");
+    private final JSpinner nudge = new JSpinner(new SpinnerNumberModel(0, Step.MIN_NUDGE, Step.MAX_NUDGE, 1));
+    private final JLabel nudgeUnit = Widgets.label("%");
+    private final JCheckBox legato = new JCheckBox("Legato");
+    private final JSpinner shift = new JSpinner(new SpinnerNumberModel(0, Step.MIN_NUDGE, Step.MAX_NUDGE, 1));
+    private final JLabel shiftUnit = Widgets.label("%");
     private final SliderDrag gateDrag;
     private final SliderDrag velocityDrag;
     private final SliderDrag chanceDrag;
@@ -117,6 +127,17 @@ final class TrackInspector {
         stepPitch.setToolTipText("Pitch of the selected step. A step without its own pitch uses the track pitch.");
         addRow(panel, constraints, Widgets.label("Step pitch"));
         addRow(panel, constraints, stepPitch);
+        String holdTip = "How many steps the selected hit lasts. 1 is a single step and is left out of the file. Drag a lit pad sideways to stretch it. Length, below, shortens only the last step.";
+        addRow(panel, constraints, spun("Hold", holdTip, hold, holdUnit));
+        String nudgeTip = "Moves the selected hit off the grid, as a percent of one step. −50 is half a step early, +50 is half a step late. Comma and period nudge it. 0 is left out of the file.";
+        addRow(panel, constraints, spun("Nudge", nudgeTip, nudge, nudgeUnit));
+        legato.setOpaque(false);
+        legato.setForeground(Theme.TEXT);
+        legato.setFocusable(false);
+        legato.setToolTipText("Note tracks only. Each hit holds until the next hit on this row. Drum tracks keep Hold instead.");
+        addRow(panel, constraints, legato);
+        String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. 0 is left out of the file.";
+        addRow(panel, constraints, spun("Shift", shiftTip, shift, shiftUnit));
         addRow(panel, constraints, Widgets.label("Sound"));
         drums.setToolTipText("Drum sound for this track.");
         programs.setToolTipText("Instrument for this track. One pitch for every step.");
@@ -124,7 +145,7 @@ final class TrackInspector {
         soundPicker.add(drums, "drum");
         soundPicker.add(programs, "note");
         addRow(panel, constraints, soundPicker);
-        addRow(panel, constraints, labeled("Length", "How long each note holds, as a percent of the step.", gate, gateValue));
+        addRow(panel, constraints, labeled("Length", "How long the last step of a hit holds, as a percent of that step. A one-step hit uses the whole step this way.", gate, gateValue));
         addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
         addRow(panel, constraints, labeled("Chance", "Percent chance the selected step plays. 100% always plays. Playback rolls each pass. Export uses a fixed seed.", chance, chanceValue));
         addRow(panel, constraints, labeled("Loud hit", "Shift-click uses this volume. Pads at least this loud use the bright color.", accent, accentValue));
@@ -201,6 +222,51 @@ final class TrackInspector {
         stepPitchDown.addActionListener(event -> nudgeStepPitch(-1));
         stepPitchUp.addActionListener(event -> nudgeStepPitch(1));
         stepPitchTrack.addActionListener(event -> clearStepPitch());
+        hold.addChangeListener(event -> {
+            if (sync.on() || !hold.isEnabled()) {
+                return;
+            }
+            int length = ((Number) hold.getValue()).intValue();
+            if (selectedStep() == null || selectedStep().length() == length) {
+                return;
+            }
+            editor.setStepLength(length);
+        });
+        nudge.addChangeListener(event -> {
+            if (sync.on() || !nudge.isEnabled()) {
+                return;
+            }
+            int percent = ((Number) nudge.getValue()).intValue();
+            if (selectedStep() == null || selectedStep().nudge() == percent) {
+                return;
+            }
+            editor.setStepNudge(percent);
+        });
+        legato.addActionListener(event -> {
+            if (sync.on() || editor.selectedTrack().legato() == legato.isSelected()) {
+                return;
+            }
+            editor.setLegato(legato.isSelected());
+        });
+        shift.addChangeListener(event -> {
+            if (sync.on()) {
+                return;
+            }
+            int percent = ((Number) shift.getValue()).intValue();
+            if (editor.selectedTrack().shift() == percent) {
+                return;
+            }
+            editor.setShift(percent);
+        });
+    }
+
+    private Step selectedStep() {
+        int column = editor.stepIndex();
+        Track track = editor.selectedTrack();
+        if (column < 0 || column >= editor.beat().stepCount()) {
+            return null;
+        }
+        return track.step(column);
     }
 
     void refresh() {
@@ -244,6 +310,36 @@ final class TrackInspector {
         stepPitchTrack.setEnabled(pitch.clearEnabled());
         stepPitchValue.setText(pitch.text());
         stepPitchValue.setToolTipText(pitch.tip());
+        Step selected = selectedStep();
+        boolean stepChosen = selected != null;
+        hold.setEnabled(stepChosen);
+        nudge.setEnabled(stepChosen);
+        if (stepChosen) {
+            hold.setValue(selected.length());
+            nudge.setValue(selected.nudge());
+            holdUnit.setText(selected.length() == 1 ? "step" : "steps");
+            nudgeUnit.setText(signedPercent(selected.nudge()));
+        } else {
+            hold.setValue(Step.MIN_LENGTH);
+            nudge.setValue(0);
+            holdUnit.setText("steps");
+            nudgeUnit.setText("—");
+        }
+        boolean noteTrack = track.mode() == TrackMode.NOTE;
+        legato.setEnabled(noteTrack);
+        legato.setSelected(track.legato());
+        shift.setValue(track.shift());
+        shiftUnit.setText(signedPercent(track.shift()));
+    }
+
+    private static String signedPercent(int value) {
+        if (value > 0) {
+            return "+" + value + "%";
+        }
+        if (value < 0) {
+            return "−" + Math.abs(value) + "%";
+        }
+        return "0%";
     }
 
     void commitTrackName() {
@@ -381,6 +477,29 @@ final class TrackInspector {
         panel.add(component, constraints);
         constraints.gridy++;
         constraints.weighty = 0;
+    }
+
+    /**
+     * A spinner row that stays inside the 300px inspector. The label and unit have floors
+     * so a narrow window does not collapse the number field.
+     */
+    private static JPanel spun(String name, String tip, JSpinner spinner, JLabel unit) {
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        JLabel title = Widgets.label(name);
+        title.setToolTipText(tip);
+        title.setPreferredSize(new Dimension(72, 32));
+        title.setMinimumSize(new Dimension(56, 28));
+        panel.add(title, BorderLayout.WEST);
+        spinner.setToolTipText(tip);
+        spinner.setPreferredSize(new Dimension(88, 32));
+        spinner.setMinimumSize(new Dimension(64, 28));
+        panel.add(spinner, BorderLayout.CENTER);
+        unit.setToolTipText(tip);
+        unit.setPreferredSize(new Dimension(52, 32));
+        unit.setMinimumSize(new Dimension(36, 28));
+        panel.add(unit, BorderLayout.EAST);
+        return panel;
     }
 
     private static JPanel labeled(String name, String tip, JSlider slider, JLabel value) {

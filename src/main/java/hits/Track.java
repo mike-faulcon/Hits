@@ -19,6 +19,10 @@ public final class Track {
     private int gate;
     private int velocity;
     private int accent;
+    /** Note tracks: each sounding hit holds until the next hit. */
+    private boolean legato;
+    /** Added to every step's nudge, as a percent of one straight step. */
+    private int shift;
     private final Step[] steps = new Step[CAPACITY];
 
     public Track(String name, TrackMode mode, int program, int note) {
@@ -50,7 +54,9 @@ public final class Track {
             || pan != other.pan
             || gate != other.gate
             || velocity != other.velocity
-            || accent != other.accent) {
+            || accent != other.accent
+            || legato != other.legato
+            || shift != other.shift) {
             return false;
         }
         for (int i = 0; i < CAPACITY; i++) {
@@ -70,6 +76,8 @@ public final class Track {
         copy.gate = gate;
         copy.velocity = velocity;
         copy.accent = accent;
+        copy.legato = legato;
+        copy.shift = shift;
         for (int i = 0; i < steps.length; i++) {
             copy.steps[i] = steps[i].copy();
         }
@@ -168,6 +176,35 @@ public final class Track {
         this.accent = Math.max(1, Math.min(127, accent));
     }
 
+    /**
+     * When this is a note track, each hit holds until the next hit on the row.
+     * Drum tracks remember the flag and ignore it while they stay drums.
+     */
+    public boolean legato() {
+        return legato;
+    }
+
+    public void setLegato(boolean legato) {
+        this.legato = legato;
+    }
+
+    /** Percent of a step added to every step nudge. 0 leaves each step where it is. */
+    public int shift() {
+        return shift;
+    }
+
+    public void setShift(int shift) {
+        this.shift = Step.clampNudge(shift);
+    }
+
+    /**
+     * The offset that playback uses. Step nudge and track shift add together,
+     * then stay inside half a step so a hit cannot move onto the next grid point.
+     */
+    public int playedNudge(int index) {
+        return Step.clampNudge(steps[index].nudge() + shift);
+    }
+
     public Step step(int index) {
         return steps[index];
     }
@@ -209,6 +246,8 @@ public final class Track {
             step.setOn(false);
             step.setVelocity(velocity);
             step.setProbability(100);
+            step.setLength(Step.MIN_LENGTH);
+            step.setNudge(0);
         }
     }
 

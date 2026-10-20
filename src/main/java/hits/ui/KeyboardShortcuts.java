@@ -54,6 +54,14 @@ final class KeyboardShortcuts {
         return new TapKey(window, tap);
     }
 
+    /**
+     * Comma nudges the selected step earlier. Period nudges it later.
+     * Repeats while the key is held. A text field still receives the character.
+     */
+    static KeyEventDispatcher nudge(Window window, Runnable earlier, Runnable later) {
+        return new NudgeKeys(window, earlier, later);
+    }
+
     static boolean typing() {
         return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner() instanceof JTextComponent;
     }
@@ -136,6 +144,47 @@ final class KeyboardShortcuts {
                 SwingUtilities.invokeLater(tap);
             }
             return true;
+        }
+    }
+
+    private static final class NudgeKeys implements KeyEventDispatcher {
+        private final Window window;
+        private final Runnable earlier;
+        private final Runnable later;
+
+        private NudgeKeys(Window window, Runnable earlier, Runnable later) {
+            this.window = window;
+            this.earlier = earlier;
+            this.later = later;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent event) {
+            Boolean laterKey = nudgeKey(event);
+            if (laterKey == null) {
+                return false;
+            }
+            if (event.getID() != KeyEvent.KEY_PRESSED || event.getModifiersEx() != 0 || typing()) {
+                return false;
+            }
+            Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+            if (focused != window) {
+                return focused != null && focused.getOwner() == window;
+            }
+            SwingUtilities.invokeLater(laterKey ? later : earlier);
+            return true;
+        }
+
+        private static Boolean nudgeKey(KeyEvent event) {
+            int code = event.getKeyCode();
+            char typed = event.getKeyChar();
+            if (code == KeyEvent.VK_COMMA || typed == ',') {
+                return Boolean.FALSE;
+            }
+            if (code == KeyEvent.VK_PERIOD || typed == '.') {
+                return Boolean.TRUE;
+            }
+            return null;
         }
     }
 }
