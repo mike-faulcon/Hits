@@ -11,7 +11,8 @@ public final class Beat {
      * other than 100, the beat has a song chain, the mixer is off its defaults,
      * a pattern C–H is in use, a pattern's length differs from the root {@code steps},
      * a step is longer than one step, a note track is legato, a step is nudged
-     * off the grid, or a track shift is set. Version 1 files stay version 1.
+     * off the grid, a track shift is set, or a track chooses a bank, a drum kit,
+     * or a pitched preset. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
     /** Master fader at full. Track levels are not turned down any further. */
@@ -312,7 +313,20 @@ public final class Beat {
             || usesExtraSlots()
             || hasCustomLengths()
             || hasNoteLength()
-            || hasNudge();
+            || hasNudge()
+            || hasSoundChoice();
+    }
+
+    /** A bank, a drum kit, or a pitched preset, in any pattern. */
+    public boolean hasSoundChoice() {
+        for (Track[] slot : slots) {
+            for (Track track : slot) {
+                if (track.bank() != 0 || track.kit() != 0 || track.preset() != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** A step longer than one step, or a legato note track, in any pattern. */

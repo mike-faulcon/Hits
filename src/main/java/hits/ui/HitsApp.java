@@ -42,7 +42,7 @@ public final class HitsApp {
         frame.setVisible(true);
     }
 
-    private static void installTheme() {
+    static void installTheme() {
         UIManager.put("control", Theme.PANEL);
         UIManager.put("info", Theme.PANEL);
         UIManager.put("nimbusBase", new Color(0x181A1E));

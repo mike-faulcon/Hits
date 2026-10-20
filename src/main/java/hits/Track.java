@@ -23,6 +23,12 @@ public final class Track {
     private boolean legato;
     /** Added to every step's nudge, as a percent of one straight step. */
     private int shift;
+    /** MSB×128+LSB. Zero is the General MIDI bank and is left out of the file. */
+    private int bank;
+    /** Drum kit program. Zero is the current kit and is left out of the file. */
+    private int kit;
+    /** Pitched percussion on a drum row. Null keeps the drum key. */
+    private PitchedPreset preset;
     private final Step[] steps = new Step[CAPACITY];
 
     public Track(String name, TrackMode mode, int program, int note) {
@@ -56,7 +62,10 @@ public final class Track {
             || velocity != other.velocity
             || accent != other.accent
             || legato != other.legato
-            || shift != other.shift) {
+            || shift != other.shift
+            || bank != other.bank
+            || kit != other.kit
+            || preset != other.preset) {
             return false;
         }
         for (int i = 0; i < CAPACITY; i++) {
@@ -78,6 +87,9 @@ public final class Track {
         copy.accent = accent;
         copy.legato = legato;
         copy.shift = shift;
+        copy.bank = bank;
+        copy.kit = kit;
+        copy.preset = preset;
         for (int i = 0; i < steps.length; i++) {
             copy.steps[i] = steps[i].copy();
         }
@@ -197,6 +209,44 @@ public final class Track {
         this.shift = Step.clampNudge(shift);
     }
 
+    /** Soundbank bank, MSB×128+LSB. 0 is General MIDI. */
+    public int bank() {
+        return bank;
+    }
+
+    public void setBank(int bank) {
+        this.bank = Math.max(0, Math.min(16383, bank));
+    }
+
+    /** Drum kit program. 0 is the kit already on the channel. */
+    public int kit() {
+        return kit;
+    }
+
+    public void setKit(int kit) {
+        this.kit = Math.max(0, Math.min(127, kit));
+    }
+
+    /** Pitched percussion preset, or null when this row plays its drum key. */
+    public PitchedPreset preset() {
+        return preset;
+    }
+
+    public void setPreset(PitchedPreset preset) {
+        this.preset = preset;
+    }
+
+    /**
+     * The pitch a hit uses when the step has none of its own.
+     * A pitched preset supplies that pitch. A step pitch still replaces it.
+     */
+    public int playedNote() {
+        if (mode == TrackMode.DRUM && preset != null) {
+            return preset.note();
+        }
+        return note;
+    }
+
     /**
      * The offset that playback uses. Step nudge and track shift add together,
      * then stay inside half a step. Swing is applied as well, and the sounding tick
@@ -212,7 +262,14 @@ public final class Track {
 
     public String soundName() {
         if (mode == TrackMode.DRUM) {
-            return Gm.drumName(note);
+            if (preset != null) {
+                return preset.label();
+            }
+            String drum = Gm.drumName(note);
+            if (kit != 0) {
+                return drum + ", kit " + kit;
+            }
+            return drum;
         }
         return Gm.programName(program);
     }

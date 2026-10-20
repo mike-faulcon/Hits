@@ -1,10 +1,13 @@
 package hits.ui;
 
 import hits.Beat;
+import hits.ChannelPlan;
 import hits.Editor;
 import hits.Gm;
 import hits.Notes;
+import hits.PitchedPreset;
 import hits.Player;
+import hits.SoundCatalog;
 import hits.Step;
 import hits.Track;
 import hits.TrackMode;
@@ -22,6 +25,7 @@ import javax.swing.JTextField;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
+import javax.sound.midi.Soundbank;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
@@ -32,6 +36,8 @@ import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Track name, sound, length, hold, nudge, volume, chance, loud hit, mode, step pitch, and pattern length. */
 final class TrackInspector {
@@ -41,7 +47,15 @@ final class TrackInspector {
     private final JTextField trackName = new JTextField();
     private final JLabel noteValue = new JLabel("C1", SwingConstants.LEFT);
     private final JComboBox<String> drums = new JComboBox<>();
+    private final JComboBox<String> kits = new JComboBox<>();
     private final JComboBox<String> programs = new JComboBox<>();
+    private final JLabel channelNote = Widgets.label("Out of channels.");
+    private final List<DrumPick> drumPicks = new ArrayList<>();
+    private final List<Integer> kitPrograms = new ArrayList<>();
+    private List<SoundCatalog.Voice> voices = List.of();
+    private Soundbank programBank;
+    private boolean programsReady;
+    private final List<JButton> noteButtons = new ArrayList<>();
     private final JPanel soundPicker = new JPanel(new CardLayout());
     private final JSlider gate = Widgets.slider(5, 100, 45);
     private final JLabel gateValue = Widgets.label("45%");
@@ -91,11 +105,21 @@ final class TrackInspector {
     JPanel component() {
         noteValue.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
         noteValue.setForeground(Theme.TEXT);
+        drums.setName("drum-sound");
+        kits.setName("drum-kit");
+        programs.setName("note-program");
+        drums.setMaximumRowCount(16);
+        kits.setMaximumRowCount(8);
+        programs.setMaximumRowCount(14);
         for (int note : Gm.DRUM_NOTES) {
             drums.addItem(Gm.drumChoice(note));
         }
+        for (PitchedPreset preset : PitchedPreset.values()) {
+            drums.addItem(preset.label());
+        }
+        kits.addItem("0  Standard");
         for (int program = 0; program < 128; program++) {
-            programs.addItem(Gm.programName(program));
+            programs.addItem("0:" + program + "  " + Gm.programName(program));
         }
         JPanel panel = new InspectorBody();
         panel.setBackground(Theme.PANEL);
@@ -149,12 +173,18 @@ final class TrackInspector {
         String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. Swing cannot push that onto the next step. 0 is left out of the file.";
         addRow(panel, constraints, spun("Shift", shiftTip, shift, shiftUnit));
         addRow(panel, constraints, Widgets.label("Sound"));
-        drums.setToolTipText("Drum sound for this track.");
-        programs.setToolTipText("Instrument for this track. One pitch for every step.");
+        drums.setToolTipText("Drum key, or a pitched percussion preset. A preset plays a melodic instrument at its own pitch, on this row's channel.");
+        kits.setToolTipText("Drum kit on this row. Standard is the kit in the loaded bank. Another kit uses its own channel. A pitched preset replaces the kit.");
+        programs.setToolTipText("Instrument from the loaded soundbank. The numbers are bank and program.");
+        channelNote.setForeground(Theme.MUTED);
+        channelNote.setVisible(false);
+        channelNote.setToolTipText("Every other channel is in use, so this drum shares the drum channel.");
         soundPicker.setOpaque(false);
         soundPicker.add(drums, "drum");
         soundPicker.add(programs, "note");
         addRow(panel, constraints, soundPicker);
+        addRow(panel, constraints, kits);
+        addRow(panel, constraints, channelNote);
         addRow(panel, constraints, labeled("Length", "How long the last step of a hit holds, as a percent of that step. A one-step hit uses the whole step this way.", gate, gateValue));
         addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
         addRow(panel, constraints, labeled("Chance", "Percent chance the selected step plays. 100% always plays. Playback rolls each pass. Export uses a fixed seed.", chance, chanceValue));
@@ -196,26 +226,65 @@ final class TrackInspector {
             setPatternLength((Integer) patternSteps.getValue());
         });
         drums.addActionListener(event -> {
-            if (sync.on() || drums.getSelectedIndex() < 0) {
+            if (sync.on() || drums.getSelectedIndex() < 0 || drums.getSelectedIndex() >= drumPicks.size()) {
                 return;
             }
-            int note = Gm.DRUM_NOTES[drums.getSelectedIndex()];
-            if (note == editor.selectedTrack().note()) {
+            DrumPick pick = drumPicks.get(drums.getSelectedIndex());
+            Track current = editor.selectedTrack();
+            if (pick instanceof DrumKey key) {
+                if (current.preset() == null && current.note() == key.note()) {
+                    return;
+                }
+                editor.edit(beat -> {
+                    Track track = onScreen(beat);
+                    track.setPreset(null);
+                    track.setNote(key.note());
+                });
+            } else if (pick instanceof DrumPreset chosen) {
+                if (current.preset() == chosen.preset()) {
+                    return;
+                }
+                editor.edit(beat -> onScreen(beat).setPreset(chosen.preset()));
+            }
+            auditionRow();
+        });
+        kits.addActionListener(event -> {
+            if (sync.on() || kits.getSelectedIndex() < 0 || kits.getSelectedIndex() >= kitPrograms.size()) {
                 return;
             }
-            editor.edit(beat -> onScreen(beat).setNote(note));
-            player.audition(editor.selectedTrack());
+            int kit = kitPrograms.get(kits.getSelectedIndex());
+            Track current = editor.selectedTrack();
+            if (kit == current.kit() && (kit == 0 || current.preset() == null)) {
+                return;
+            }
+            editor.edit(beat -> {
+                Track track = onScreen(beat);
+                track.setKit(kit);
+                if (kit != 0) {
+                    track.setPreset(null);
+                }
+            });
+            auditionRow();
         });
         programs.addActionListener(event -> {
             if (sync.on() || programs.getSelectedIndex() < 0) {
                 return;
             }
-            int program = programs.getSelectedIndex();
-            if (program == editor.selectedTrack().program()) {
+            int index = programs.getSelectedIndex();
+            if (index >= voices.size()) {
                 return;
             }
-            editor.edit(beat -> onScreen(beat).setProgram(program));
-            player.audition(editor.selectedTrack());
+            SoundCatalog.Voice voice = voices.get(index);
+            Track current = editor.selectedTrack();
+            if (voice.bank() == current.bank() && voice.program() == current.program()) {
+                return;
+            }
+            editor.edit(beat -> {
+                Track track = onScreen(beat);
+                track.setBank(voice.bank());
+                track.setProgram(voice.program());
+            });
+            auditionRow();
         });
         trackName.addActionListener(event -> commitTrackName());
         trackName.addFocusListener(new FocusAdapter() {
@@ -280,10 +349,23 @@ final class TrackInspector {
         if (!trackName.isFocusOwner()) {
             trackName.setText(track.name());
         }
-        noteValue.setText(Notes.name(track.note()));
+        boolean pitched = track.mode() == TrackMode.DRUM && track.preset() != null;
+        for (JButton button : noteButtons) {
+            button.setEnabled(!pitched);
+        }
+        noteValue.setText(Notes.name(track.playedNote()));
         ((CardLayout) soundPicker.getLayout()).show(soundPicker, track.mode() == TrackMode.DRUM ? "drum" : "note");
-        selectDrum(track.note());
-        programs.setSelectedIndex(track.program());
+        refillDrums(track);
+        refillKits(track);
+        selectProgram(track);
+        boolean drum = track.mode() == TrackMode.DRUM;
+        kits.setVisible(drum);
+        ChannelPlan plan = ChannelPlan.of(beat, everySlot());
+        boolean overflow = drum && !ChannelPlan.sharesDrumChannel(track) && plan.overflow(editor.trackIndex());
+        channelNote.setVisible(overflow);
+        if (kits.getParent() != null) {
+            kits.getParent().revalidate();
+        }
         if (!gate.getValueIsAdjusting()) {
             gate.setValue(track.gate());
         }
@@ -371,10 +453,10 @@ final class TrackInspector {
         editor.edit(beat -> {
             Track track = beat.slot(slot)[row];
             Step step = track.step(column);
-            step.setPitch(step.soundingNote(track.note()) + delta);
+            step.setPitch(step.soundingNote(track.playedNote()) + delta);
         });
         Track updated = editor.selectedTrack();
-        player.audition(updated, updated.step(column).soundingNote(updated.note()));
+        auditionRow(updated.step(column).soundingNote(updated.playedNote()));
     }
 
     private void clearStepPitch() {
@@ -386,18 +468,126 @@ final class TrackInspector {
         }
         char slot = editor.viewSlot();
         editor.edit(beat -> beat.slot(slot)[row].step(column).clearPitch());
-        player.audition(editor.selectedTrack());
+        auditionRow();
     }
 
-    private void selectDrum(int note) {
-        for (int i = 0; i < Gm.DRUM_NOTES.length; i++) {
-            if (Gm.DRUM_NOTES[i] == note) {
-                drums.setSelectedIndex(i);
-                return;
+    private void refillDrums(Track track) {
+        drumPicks.clear();
+        drums.removeAllItems();
+        boolean listed = false;
+        for (int note : Gm.DRUM_NOTES) {
+            drumPicks.add(new DrumKey(note));
+            drums.addItem(Gm.drumChoice(note));
+            if (track.preset() == null && track.note() == note) {
+                listed = true;
             }
         }
-        drums.setSelectedIndex(-1);
+        if (track.preset() == null && !listed) {
+            drumPicks.add(new DrumKey(track.note()));
+            drums.addItem(Gm.drumChoice(track.note()));
+        }
+        for (PitchedPreset preset : PitchedPreset.values()) {
+            drumPicks.add(new DrumPreset(preset));
+            drums.addItem(preset.label());
+        }
+        int select = 0;
+        if (track.preset() != null) {
+            for (int i = 0; i < drumPicks.size(); i++) {
+                if (drumPicks.get(i) instanceof DrumPreset chosen && chosen.preset() == track.preset()) {
+                    select = i;
+                    break;
+                }
+            }
+        } else {
+            for (int i = 0; i < drumPicks.size(); i++) {
+                if (drumPicks.get(i) instanceof DrumKey key && key.note() == track.note()) {
+                    select = i;
+                    break;
+                }
+            }
+        }
+        drums.setSelectedIndex(select);
     }
+
+    private void refillKits(Track track) {
+        kitPrograms.clear();
+        kits.removeAllItems();
+        List<SoundCatalog.Kit> catalog = SoundCatalog.kits(player.soundbank());
+        boolean listed = false;
+        for (SoundCatalog.Kit kit : catalog) {
+            kitPrograms.add(kit.program());
+            kits.addItem(SoundCatalog.kitLabel(kit));
+            if (kit.program() == track.kit()) {
+                listed = true;
+            }
+        }
+        if (!listed) {
+            kitPrograms.add(track.kit());
+            kits.addItem(track.kit() + "  Kit " + track.kit());
+        }
+        int select = 0;
+        for (int i = 0; i < kitPrograms.size(); i++) {
+            if (kitPrograms.get(i) == track.kit()) {
+                select = i;
+                break;
+            }
+        }
+        kits.setSelectedIndex(select);
+        kits.setEnabled(track.preset() == null);
+    }
+
+    private void selectProgram(Track track) {
+        Soundbank bank = player.soundbank();
+        if (!programsReady || bank != programBank) {
+            programBank = bank;
+            programsReady = true;
+            voices = SoundCatalog.melodic(bank);
+            programs.removeAllItems();
+            for (SoundCatalog.Voice voice : voices) {
+                programs.addItem(SoundCatalog.voiceLabel(voice));
+            }
+        }
+        int match = -1;
+        for (int i = 0; i < voices.size(); i++) {
+            SoundCatalog.Voice voice = voices.get(i);
+            if (voice.bank() == track.bank() && voice.program() == track.program()) {
+                match = i;
+                break;
+            }
+        }
+        while (programs.getItemCount() > voices.size()) {
+            programs.removeItemAt(programs.getItemCount() - 1);
+        }
+        if (match < 0) {
+            programs.addItem(SoundCatalog.voiceLabel(new SoundCatalog.Voice(
+                track.bank(), track.program(), Gm.programName(track.program())
+            )));
+            match = programs.getItemCount() - 1;
+        }
+        programs.setSelectedIndex(match);
+    }
+
+    private static List<Character> everySlot() {
+        List<Character> slots = new ArrayList<>();
+        for (int i = 0; i < Beat.SLOT_COUNT; i++) {
+            slots.add(Beat.slotLetter(i));
+        }
+        return slots;
+    }
+
+    private void auditionRow() {
+        player.audition(editor.beat(), editor.viewSlot(), editor.trackIndex());
+    }
+
+    private void auditionRow(int note) {
+        player.audition(editor.beat(), editor.viewSlot(), editor.trackIndex(), note);
+    }
+
+    private interface DrumPick {}
+
+    private record DrumKey(int note) implements DrumPick {}
+
+    private record DrumPreset(PitchedPreset preset) implements DrumPick {}
 
     private void applyChance(Beat beat) {
         int step = editor.stepIndex();
@@ -435,7 +625,7 @@ final class TrackInspector {
             return;
         }
         editor.edit(beat -> onScreen(beat).setMode(mode));
-        player.audition(editor.selectedTrack());
+        auditionRow();
     }
 
     private JButton buttonPair(String text, String tip, int delta, int width) {
@@ -443,6 +633,7 @@ final class TrackInspector {
         button.setToolTipText(tip);
         Widgets.fix(button, width, 32);
         button.addActionListener(event -> changeNote(delta));
+        noteButtons.add(button);
         return button;
     }
 
@@ -451,7 +642,7 @@ final class TrackInspector {
             Track track = onScreen(beat);
             track.setNote(track.note() + delta);
         });
-        player.audition(editor.selectedTrack());
+        auditionRow();
     }
 
     /**

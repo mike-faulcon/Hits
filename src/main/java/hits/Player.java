@@ -12,6 +12,7 @@ import javax.sound.midi.Transmitter;
 import javax.sound.midi.MidiSystem;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -36,6 +37,8 @@ public final class Player implements AutoCloseable {
     private String soundFontName;
     private String soundFontNote;
     private ScheduledFuture<?> noteOff;
+    private int auditionChannel = -1;
+    private int auditionNote = -1;
     private final Object midiLock = new Object();
     private final ScheduledExecutorService audition = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "hits-audition");
@@ -70,6 +73,13 @@ public final class Player implements AutoCloseable {
 
     public boolean isBuiltIn() {
         return synthesizer != null && synthesizer.isOpen();
+    }
+
+    /** The bank on the built-in synth, or null on an external output. */
+    public Soundbank soundbank() {
+        synchronized (midiLock) {
+            return loadedBank != null ? loadedBank : defaultBank;
+        }
     }
 
     /** Why the last SoundFont did not load, or null. */
@@ -236,35 +246,40 @@ public final class Player implements AutoCloseable {
         );
     }
 
-    public void audition(Track track) {
-        audition(track, track.note());
-    }
-
-    public void audition(Track track, int note) {
-        Receiver current = receiver();
-        if (current == null) {
+    /** Preview the row's current sound, on the channel playback would use. */
+    public void audition(Beat beat, char slot, int row) {
+        if (beat == null || row < 0 || row >= Beat.TRACKS) {
             return;
         }
-        int channel = track.mode() == TrackMode.DRUM ? Gm.DRUM_CHANNEL : 0;
+        audition(beat, slot, row, beat.slot(slot)[row].playedNote());
+    }
+
+    /** Preview one pitch of the row, with the same bank, program, and channel as playback. */
+    public void audition(Beat beat, char slot, int row, int note) {
+        Receiver current = receiver();
+        if (current == null || beat == null || row < 0 || row >= Beat.TRACKS) {
+            return;
+        }
+        Track track = beat.slot(slot)[row];
+        ChannelPlan plan = ChannelPlan.of(beat, List.of(Beat.normalizeSlot(slot)));
+        int channel = plan.channel(track, row);
         int sounding = Notes.clamp(note);
         try {
-            if (track.mode() == TrackMode.NOTE) {
-                ShortMessage bank = new ShortMessage();
-                bank.setMessage(ShortMessage.CONTROL_CHANGE, channel, 0, 0);
-                current.send(bank, -1);
-                ShortMessage bankLsb = new ShortMessage();
-                bankLsb.setMessage(ShortMessage.CONTROL_CHANGE, channel, 32, 0);
-                current.send(bankLsb, -1);
-                ShortMessage program = new ShortMessage();
-                program.setMessage(ShortMessage.PROGRAM_CHANGE, channel, track.program(), 0);
-                current.send(program, -1);
+            if (noteOff != null) {
+                noteOff.cancel(false);
+                noteOff = null;
+            }
+            if (auditionChannel >= 0) {
+                silence(auditionChannel, auditionNote);
+            }
+            for (ShortMessage message : plan.setup(track, channel)) {
+                current.send(message, -1);
             }
             ShortMessage on = new ShortMessage();
             on.setMessage(ShortMessage.NOTE_ON, channel, sounding, track.velocity());
             current.send(on, -1);
-            if (noteOff != null) {
-                noteOff.cancel(false);
-            }
+            auditionChannel = channel;
+            auditionNote = sounding;
             noteOff = audition.schedule(() -> silence(channel, sounding), 160, TimeUnit.MILLISECONDS);
         } catch (InvalidMidiDataException | RuntimeException ignored) {
             // The note is already clamped, or the output closed before the preview was sent.

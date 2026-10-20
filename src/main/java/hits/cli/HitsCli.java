@@ -210,7 +210,7 @@ public final class HitsCli {
                     Beat.slotLabel(slot),
                     track.name(),
                     track.mode().json(),
-                    Notes.name(track.note()),
+                    Notes.name(track.playedNote()),
                     track.soundName(),
                     flags
                 ));

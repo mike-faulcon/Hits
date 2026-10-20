@@ -148,6 +148,15 @@ public final class BeatJson {
         if (track.shift() != 0) {
             field(out, 5, "shift", track.shift(), true);
         }
+        if (track.bank() != 0) {
+            field(out, 5, "bank", track.bank(), true);
+        }
+        if (track.kit() != 0) {
+            field(out, 5, "kit", track.kit(), true);
+        }
+        if (track.preset() != null) {
+            field(out, 5, "preset", track.preset().json(), true);
+        }
         out.append("          \"steps\": [");
         for (int i = 0; i < Track.CAPACITY; i++) {
             if (i > 0) {
@@ -250,6 +259,15 @@ public final class BeatJson {
         }
         if (object.containsKey("shift") && object.get("shift") != null) {
             track.setShift(number(object.get("shift")));
+        }
+        if (object.containsKey("bank") && object.get("bank") != null) {
+            track.setBank(number(object.get("bank")));
+        }
+        if (object.containsKey("kit") && object.get("kit") != null) {
+            track.setKit(number(object.get("kit")));
+        }
+        if (object.get("preset") instanceof String preset) {
+            track.setPreset(PitchedPreset.parse(preset));
         }
         List<?> steps = asList(object.get("steps"));
         int count = Math.min(Track.CAPACITY, steps.size());
