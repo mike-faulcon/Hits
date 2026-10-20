@@ -9,14 +9,16 @@ import java.util.Map;
  * Versioned beat document.
  * Version 1 is the original document. Version 2 adds optional fields: {@code pitch} on a step,
  * {@code probability} on a step (0–100, omitted when it is 100), a {@code chain} of pattern entries,
- * a track {@code pan} or mixer {@code level}, a beat {@code master}, and pattern slots {@code c} through {@code h}.
- * Mute and solo are original track fields. Slots C–H are omitted unless that pattern differs from the empty kit,
- * so a beat that only uses A and B is unchanged. A beat that uses none of the version 2 fields is still written as version 1.
+ * a track {@code pan} or mixer {@code level}, a beat {@code master}, pattern slots {@code c} through {@code h},
+ * and a per-pattern {@code steps} count. Mute and solo are original track fields.
+ * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
+ * A slot {@code steps} key is written only when that pattern's length differs from the root {@code steps},
+ * which stays 16 or 32. A beat that uses none of the version 2 fields is still written as version 1.
  */
 public final class BeatJson {
     private BeatJson() {}
 
-    /** 1 unless a version 2 field is in use: pitch, probability, the chain, the mixer, or pattern C–H. */
+    /** 1 unless a version 2 field is in use: pitch, probability, the chain, the mixer, pattern C–H, or a pattern length. */
     public static int documentVersion(Beat beat) {
         return beat.usesFormatV2() ? Beat.FORMAT_V2 : Beat.VERSION;
     }
@@ -35,11 +37,11 @@ public final class BeatJson {
         }
         List<Character> extra = beat.extraSlots();
         out.append("  \"slots\": {\n");
-        writeSlot(out, "a", beat.slot('a'), true);
-        writeSlot(out, "b", beat.slot('b'), !extra.isEmpty());
+        writeSlot(out, beat, 'a', true);
+        writeSlot(out, beat, 'b', !extra.isEmpty());
         for (int i = 0; i < extra.size(); i++) {
             char slot = extra.get(i);
-            writeSlot(out, String.valueOf(slot), beat.slot(slot), i + 1 < extra.size());
+            writeSlot(out, beat, slot, i + 1 < extra.size());
         }
         out.append("  }");
         if (beat.hasChain()) {
@@ -104,8 +106,13 @@ public final class BeatJson {
         return parts;
     }
 
-    private static void writeSlot(StringBuilder out, String name, Track[] tracks, boolean comma) {
-        out.append("    \"").append(name).append("\": {\n");
+    private static void writeSlot(StringBuilder out, Beat beat, char slot, boolean comma) {
+        Track[] tracks = beat.slot(slot);
+        int steps = beat.stepCount(slot);
+        out.append("    \"").append(slot).append("\": {\n");
+        if (steps != beat.stepCount()) {
+            field(out, 3, "steps", steps, true);
+        }
         out.append("      \"tracks\": [\n");
         for (int i = 0; i < tracks.length; i++) {
             writeTrack(out, tracks[i], i < tracks.length - 1);
@@ -191,6 +198,9 @@ public final class BeatJson {
     }
 
     private static void readSlot(Beat beat, char slot, Map<String, Object> object) {
+        if (object.containsKey("steps") && object.get("steps") != null) {
+            beat.setSlotSteps(slot, number(object.get("steps")));
+        }
         List<?> tracks = asList(object.get("tracks"));
         if (tracks.size() != Beat.TRACKS) {
             throw new IllegalArgumentException("A slot needs " + Beat.TRACKS + " tracks");

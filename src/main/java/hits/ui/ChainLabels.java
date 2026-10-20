@@ -14,14 +14,31 @@ final class ChainLabels {
         return "Holding pattern " + slotName(slot) + ". Click Song to follow the chain.";
     }
 
-    static String partText(Chain.Part part) {
+    /** {@code C ·1} is one bar. {@code C×3 ·2} repeats a two-bar pattern. A length that is not a whole bar shows the step count. */
+    static String partText(Chain.Part part, int steps) {
         String name = slotName(part.slot());
-        return part.repeats() == 1 ? name : name + "×" + part.repeats();
+        String body = part.repeats() == 1 ? name : name + "×" + part.repeats();
+        return body + " " + barMark(steps);
     }
 
-    static String partTip(Chain.Part part) {
+    static String partTip(Chain.Part part, int steps) {
+        int length = hits.Beat.clampSteps(steps);
         String name = slotName(part.slot());
-        return name + " plays " + part.repeats() + (part.repeats() == 1 ? " time" : " times") + ". Click to select.";
+        String size = length + (length == 1 ? " step" : " steps");
+        if (length % 16 == 0) {
+            int bars = length / 16;
+            size = size + " (" + bars + (bars == 1 ? " bar" : " bars") + ")";
+        }
+        String times = part.repeats() == 1 ? "once" : part.repeats() + " times";
+        return name + " is " + size + " and plays " + times + ". Click to select.";
+    }
+
+    private static String barMark(int steps) {
+        int length = hits.Beat.clampSteps(steps);
+        if (length % 16 == 0) {
+            return "·" + (length / 16);
+        }
+        return "·" + length;
     }
 
     static String added(char slot) {

@@ -200,7 +200,8 @@ class BeatTest {
         beat.track(0).tap(3, true);
         int accent = beat.track(0).step(3).velocity();
         beat.copyBar();
-        assertEquals(32, beat.stepCount());
+        assertEquals(32, beat.stepCount('a'));
+        assertEquals(16, beat.stepCount());
         assertTrue(beat.track(0).step(16).on());
         assertTrue(beat.track(0).step(19).on());
         assertEquals(accent, beat.track(0).step(19).velocity());

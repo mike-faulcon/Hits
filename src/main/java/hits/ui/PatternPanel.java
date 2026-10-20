@@ -70,7 +70,7 @@ final class PatternPanel extends JPanel implements Scrollable {
 
     @Override
     public Dimension getPreferredSize() {
-        int columns = editor.beat().stepCount();
+        int columns = editor.beat().gridColumns(editor.viewSlot());
         int groups = Math.max(0, columns / 4 - 1);
         return new Dimension(248 + columns * 30 + groups * 12, 28 + Beat.TRACKS * MIN_CELL + LANE_RESERVE);
     }
@@ -81,18 +81,23 @@ final class PatternPanel extends JPanel implements Scrollable {
         Graphics2D g = (Graphics2D) graphics.create();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         Metrics metrics = metrics();
+        int length = editor.beat().stepCount(editor.viewSlot());
         FontMetrics names = g.getFontMetrics(getFont().deriveFont(Font.BOLD));
         g.setFont(getFont());
         g.setColor(Theme.MUTED);
         for (int group = 0; group < metrics.columns / 4; group++) {
             String label = Integer.toString((group % 4) + 1);
             int center = metrics.stepX(group * 4) + metrics.cellWidth * 2;
+            if (group * 4 >= length) {
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f));
+            }
             g.drawString(label, center - g.getFontMetrics().stringWidth(label) / 2, 18);
+            g.setComposite(AlphaComposite.SrcOver);
         }
         for (int row = 0; row < Beat.TRACKS; row++) {
-            paintRow(g, metrics, names, row);
+            paintRow(g, metrics, names, row, length);
         }
-        paintLane(g, metrics);
+        paintLane(g, metrics, length);
         g.setColor(Theme.GRID_LINE);
         for (int column = 4; column < metrics.columns; column += 4) {
             int line = metrics.stepX(column) - metrics.groupGap / 2;
@@ -100,14 +105,19 @@ final class PatternPanel extends JPanel implements Scrollable {
         }
         if (playhead >= 0 && playhead < metrics.columns) {
             int x = metrics.stepX(playhead) + metrics.cellWidth / 2;
+            Composite previous = g.getComposite();
+            if (playhead >= length) {
+                g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f));
+            }
             g.setColor(Theme.LINE);
             g.setStroke(new BasicStroke(2f));
             g.drawLine(x, metrics.header - 4, x, getHeight() - 6);
+            g.setComposite(previous);
         }
         g.dispose();
     }
 
-    private void paintRow(Graphics2D g, Metrics metrics, FontMetrics names, int row) {
+    private void paintRow(Graphics2D g, Metrics metrics, FontMetrics names, int row, int length) {
         Track[] tracks = editor.viewTracks();
         Track track = tracks[row];
         int y = metrics.header + row * metrics.cellHeight;
@@ -134,6 +144,10 @@ final class PatternPanel extends JPanel implements Scrollable {
         for (int column = 0; column < metrics.columns; column++) {
             Rectangle cell = metrics.step(row, column);
             Step cellStep = track.step(column);
+            Composite cellComposite = g.getComposite();
+            if (column >= length) {
+                dim(g, cellComposite);
+            }
             g.setColor(Theme.STEP_OFF);
             g.fillRoundRect(cell.x, cell.y, cell.width, cell.height, 6, 6);
             if (cellStep.on()) {
@@ -164,11 +178,12 @@ final class PatternPanel extends JPanel implements Scrollable {
                 g.setStroke(new BasicStroke(2f));
                 g.drawRoundRect(cell.x + 1, cell.y + 1, cell.width - 3, cell.height - 3, 6, 6);
             }
+            g.setComposite(cellComposite);
         }
         g.setComposite(previous);
     }
 
-    private void paintLane(Graphics2D g, Metrics metrics) {
+    private void paintLane(Graphics2D g, Metrics metrics, int length) {
         Track track = editor.selectedTrack();
         Composite previous = g.getComposite();
         if (!Beat.audibleIn(editor.viewTracks(), track)) {
@@ -180,6 +195,10 @@ final class PatternPanel extends JPanel implements Scrollable {
         for (int column = 0; column < metrics.columns; column++) {
             Rectangle bar = metrics.laneBar(column);
             Step step = track.step(column);
+            Composite barComposite = g.getComposite();
+            if (column >= length) {
+                dim(g, barComposite);
+            }
             g.setColor(Theme.STEP_OFF);
             g.fillRoundRect(bar.x, bar.y, bar.width, bar.height, 4, 4);
             if (step.on()) {
@@ -192,8 +211,17 @@ final class PatternPanel extends JPanel implements Scrollable {
                 g.setStroke(new BasicStroke(2f));
                 g.drawRoundRect(bar.x + 1, bar.y + 1, bar.width - 3, bar.height - 3, 4, 4);
             }
+            g.setComposite(barComposite);
         }
         g.setComposite(previous);
+    }
+
+    private static void dim(Graphics2D g, Composite base) {
+        float alpha = 0.38f;
+        if (base instanceof AlphaComposite existing) {
+            alpha *= existing.getAlpha();
+        }
+        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
     }
 
     private void paintChip(Graphics2D g, Rectangle box, String letter, boolean on, Color onColor) {
@@ -333,8 +361,11 @@ final class PatternPanel extends JPanel implements Scrollable {
             Step step = editor.viewTrack(row).step(column);
             String pitch = step.hasPitch() ? " Step pitch " + Notes.name(step.pitch()) + "." : "";
             String chance = step.uncertain() ? " Chance " + step.probability() + "%." : "";
+            String past = column >= editor.beat().stepCount(editor.viewSlot())
+                ? " Past this pattern's length, so it does not play."
+                : "";
             return "Click toggles the step. Shift-click makes a loud hit. Drag up or down to set velocity. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
-                + pitch + chance;
+                + pitch + chance + past;
         }
         if (row >= 0) {
             return "Select this track";
@@ -352,7 +383,7 @@ final class PatternPanel extends JPanel implements Scrollable {
     }
 
     private Metrics metrics() {
-        int columns = editor.beat().stepCount();
+        int columns = editor.beat().gridColumns(editor.viewSlot());
         int width = Math.max(getWidth(), getPreferredSize().width);
         int height = Math.max(getHeight(), getPreferredSize().height);
         int gutter = 236;

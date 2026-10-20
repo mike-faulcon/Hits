@@ -135,6 +135,7 @@ class HitsCliTest {
         assertTrue(info.out.contains("tempo: 120 bpm"));
         assertTrue(info.out.contains("swing: 58%"));
         assertTrue(info.out.contains("patterns: A, D"));
+        assertTrue(info.out.contains("lengths: A 16, D 16"));
         assertTrue(info.out.contains("chain: A x1, D x1"));
         assertTrue(info.out.contains("Kick"));
         assertTrue(info.out.contains("Bass"));
@@ -206,6 +207,54 @@ class HitsCliTest {
         int peak = peak(data);
         assertTrue(peak > 500, "rendered audio was silent, peak " + peak);
         assertEquals(0.049, rms, 0.020, "rms " + rms + " peak " + peak);
+    }
+
+    @Test
+    void renderAndInfoFollowAMixedLengthChain(@TempDir Path directory) throws Exception {
+        Beat beat = Beat.drumKit("mixed");
+        beat.setBpm(120);
+        beat.setSwing(50);
+        beat.setSlotSteps('b', 32);
+        beat.slot('a')[0].tap(0, false);
+        beat.slot('b')[1].tap(0, false);
+        beat.slot('b')[1].tap(16, false);
+        beat.addChain('a');
+        beat.addChain('b');
+        Path json = directory.resolve("mixed.json");
+        Files.writeString(json, BeatJson.write(beat));
+
+        Result info = run("info", json.toString());
+        assertEquals(HitsCli.OK, info.code, info.err);
+        assertTrue(info.out.contains("lengths: A 16, B 32"));
+        assertTrue(info.out.contains("length: 1 bar, 2.000 s"));
+        assertTrue(info.out.contains("song: 3 bars, 6.000 s"));
+
+        Path mid = directory.resolve("mixed.mid");
+        Result rendered = run("render", json.toString(), "--song", "--out", mid.toString());
+        assertEquals(HitsCli.OK, rendered.code, rendered.err);
+        String events = dump(MidiSystem.getSequence(mid.toFile()));
+        Path direct = directory.resolve("direct.mid");
+        BeatFiles.exportMidi(beat, direct, new ExportOptions(true, false, 1, true));
+        assertEquals(dump(MidiSystem.getSequence(direct.toFile())), events);
+        assertTrue(events.contains("\t0\tnote-on ch=9 d1=36"));
+        assertTrue(events.contains("\t384\tnote-on ch=9 d1=38"));
+        assertTrue(events.contains("\t768\tnote-on ch=9 d1=38"));
+        assertTrue(events.contains("\t1152\tmeta 06"));
+        assertFalse(events.contains("\t1152\tnote-on"));
+
+        Path wav = directory.resolve("mixed.wav");
+        Result wavRender = run("render", json.toString(), "--song", "--out", wav.toString());
+        if (wavRender.code != HitsCli.OK && synthUnavailable(wavRender.err)) {
+            Assumptions.abort("offline render is not available: " + wavRender.err);
+        }
+        assertEquals(HitsCli.OK, wavRender.code, wavRender.err);
+        Sequence song = SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true));
+        long expectedFrames = WavAudio.frameCount(WavAudio.renderMicros(song));
+        AudioFileFormat file = AudioSystem.getAudioFileFormat(wav.toFile());
+        double actualSeconds = file.getFrameLength() / (double) WavAudio.SAMPLE_RATE;
+        double expectedSeconds = expectedFrames / (double) WavAudio.SAMPLE_RATE;
+        assertEquals(expectedSeconds, actualSeconds, 0.05);
+        assertEquals(8.0, actualSeconds, 0.05, "three bars at 120 bpm plus the release tail");
     }
 
     /** Original pattern: swung hats, a muted clap that export leaves out, and a two-slot chain. */

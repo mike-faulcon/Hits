@@ -9,12 +9,17 @@ public final class Beat {
     /**
      * Written when a step stores its own pitch, a step stores a play probability
      * other than 100, the beat has a song chain, the mixer is off its defaults,
-     * or a pattern C–H is in use. Version 1 files stay version 1.
+     * a pattern C–H is in use, or a pattern's length differs from the root
+     * {@code steps}. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
     /** Master fader at full. Track levels are not turned down any further. */
     public static final int MASTER = 127;
     public static final int TRACKS = 8;
+    /** Shortest pattern. One step still loops. */
+    public static final int MIN_STEPS = 1;
+    /** Longest pattern. Matches {@link Track#CAPACITY}. The root length stays 16 or 32. */
+    public static final int MAX_STEPS = Track.CAPACITY;
     /** Slowest tempo the spinner, tap tempo, and saved beats can store. */
     public static final int MIN_BPM = 40;
     /** Fastest tempo the spinner, tap tempo, and saved beats can store. */
@@ -30,7 +35,13 @@ public final class Beat {
     private String name;
     private int bpm;
     private int swing;
+    /** Root length, 16 or 32. Old readers use this for every pattern. */
     private int stepCount;
+    /**
+     * Per-pattern length, or 0 to follow {@link #stepCount}. Written only when it differs.
+     * Swing still pairs steps. On an odd length the last step is an even index, so it is not delayed.
+     */
+    private final int[] slotSteps = new int[SLOT_COUNT];
     private char active;
     private int master = MASTER;
     private final Track[][] slots = new Track[SLOT_COUNT][TRACKS];
@@ -85,6 +96,7 @@ public final class Beat {
         copy.bpm = bpm;
         copy.swing = swing;
         copy.stepCount = stepCount;
+        System.arraycopy(slotSteps, 0, copy.slotSteps, 0, SLOT_COUNT);
         copy.active = active;
         copy.master = master;
         copy.chain = chain;
@@ -125,12 +137,58 @@ public final class Beat {
         this.swing = Math.max(50, Math.min(75, swing));
     }
 
+    /** Root length, 16 or 32. Patterns without their own length use this. */
     public int stepCount() {
         return stepCount;
     }
 
+    /** How many steps {@code slot} plays, from {@link #MIN_STEPS} to {@link #MAX_STEPS}. */
+    public int stepCount(char slot) {
+        int custom = slotSteps[slotIndex(slot)];
+        return custom == 0 ? stepCount : custom;
+    }
+
+    /**
+     * Columns drawn for {@code slot}. Steps at and after {@link #stepCount(char)} stay in the grid,
+     * dimmed, so a shorter pattern does not throw away the notes past its length.
+     */
+    public int gridColumns(char slot) {
+        int length = stepCount(slot);
+        int bars = length <= 16 ? 16 : MAX_STEPS;
+        return Math.min(MAX_STEPS, Math.max(stepCount(), Math.max(bars, length)));
+    }
+
+    /** Root length. 32 and above become 32. Anything smaller becomes 16, which is what old files store. */
     public void setStepCount(int stepCount) {
         this.stepCount = stepCount >= 32 ? 32 : 16;
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            if (slotSteps[i] == this.stepCount) {
+                slotSteps[i] = 0;
+            }
+        }
+    }
+
+    /**
+     * Length of one pattern, clamped to {@link #MIN_STEPS}–{@link #MAX_STEPS}.
+     * A value equal to the root length is not stored, so the file omits it.
+     */
+    public void setSlotSteps(char slot, int steps) {
+        int clamped = clampSteps(steps);
+        slotSteps[slotIndex(slot)] = clamped == stepCount ? 0 : clamped;
+    }
+
+    public static int clampSteps(int steps) {
+        return Math.max(MIN_STEPS, Math.min(MAX_STEPS, steps));
+    }
+
+    /** True when any pattern plays a different number of steps from the root length. */
+    public boolean hasCustomLengths() {
+        for (int steps : slotSteps) {
+            if (steps != 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public char activeSlot() {
@@ -183,9 +241,9 @@ public final class Beat {
         copyBar(active);
     }
 
-    /** Copies the first 16 steps of {@code slot} onto its second bar and switches to 32 steps. */
+    /** Copies the first 16 steps of {@code slot} onto its second bar and sets that pattern to 32 steps. */
     public void copyBar(char slot) {
-        stepCount = 32;
+        setSlotSteps(slot, 32);
         for (Track track : this.slot(slot)) {
             for (int i = 0; i < 16; i++) {
                 track.step(16 + i).copyFrom(track.step(i));
@@ -244,10 +302,15 @@ public final class Beat {
     /**
      * True when a step has its own pitch, a probability other than 100,
      * the song chain is not empty, the mixer is not at its defaults,
-     * or a pattern C–H is in use.
+     * a pattern C–H is in use, or a pattern's length differs from the root.
      */
     public boolean usesFormatV2() {
-        return hasStepPitch() || hasChance() || hasChain() || hasMixer() || usesExtraSlots();
+        return hasStepPitch()
+            || hasChance()
+            || hasChain()
+            || hasMixer()
+            || usesExtraSlots()
+            || hasCustomLengths();
     }
 
     /** Pan, track level, or the master fader differs from the value a new kit uses, in any pattern. */
@@ -280,7 +343,7 @@ public final class Beat {
     List<Character> extraSlots() {
         List<Character> extra = new ArrayList<>();
         for (char slot = 'c'; slot <= 'h'; slot++) {
-            if (!matchesKit(slot)) {
+            if (!matchesKit(slot) || stepCount(slot) != stepCount) {
                 extra.add(slot);
             }
         }

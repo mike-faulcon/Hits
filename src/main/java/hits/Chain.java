@@ -5,8 +5,8 @@ import java.util.List;
 
 /**
  * A song is an ordered list of pattern entries. Each entry plays one pattern,
- * A through H, {@code repeats} times. The chain is not a timeline: every entry
- * uses the beat's length, tempo, and swing.
+ * A through H, {@code repeats} times. Every entry uses the beat's tempo and swing.
+ * The length is that pattern's own step count.
  */
 public final class Chain {
     public static final int MAX_PARTS = 32;
@@ -81,9 +81,19 @@ public final class Chain {
         return distinctSlots(chain).size() > 1;
     }
 
-    /** Tick length of one pass through the chain. Zero when the chain is empty. */
+    /** Tick length of one pass when every pattern has the same {@code stepCount}. Zero when the chain is empty. */
     public static long ticks(List<Part> chain, int stepCount) {
         return (long) sections(chain) * SequenceBuilder.loopTicks(stepCount);
+    }
+
+    /** Tick length of one pass. Each entry uses that pattern's own length. An empty chain is the active pattern. */
+    public static long ticks(Beat beat) {
+        return Timeline.ticks(Timeline.song(beat));
+    }
+
+    /** How many sections one pass contains. An empty chain counts as the active pattern once. */
+    public static int sections(Beat beat) {
+        return Timeline.song(beat).size();
     }
 
     /**
@@ -100,5 +110,16 @@ public final class Chain {
         int section = (int) (wrapped / sectionTicks);
         long offset = wrapped - (long) section * sectionTicks;
         return new Place(slotAt(chain, section), SequenceBuilder.stepForTick(offset, stepCount, swing), section);
+    }
+
+    /**
+     * Slot, step, and section for {@code tick} in {@code beat}'s chain.
+     * An empty chain is the active pattern. The tick wraps so the song loops.
+     */
+    public static Place place(Beat beat, long tick) {
+        if (beat == null) {
+            return new Place('a', 0, 0);
+        }
+        return Timeline.place(Timeline.song(beat), tick, beat.swing());
     }
 }

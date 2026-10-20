@@ -43,6 +43,7 @@ public final class SequenceBuilder {
         int pairTicks = STEP_TICKS * 2;
         int pair = step / 2;
         long pairStart = (long) pair * pairTicks;
+        // Even steps sit on the pair boundary. An odd-length pattern ends on an even step, so that step is not delayed.
         if (step % 2 == 0) {
             return pairStart;
         }
@@ -131,8 +132,8 @@ public final class SequenceBuilder {
     /** Tick length of {@link #playback}, including every pre-rolled pass. */
     public static long playbackTicks(Beat beat, boolean song) {
         long one = song && beat.hasChain()
-            ? Chain.ticks(beat.chain(), beat.stepCount())
-            : loopTicks(beat.stepCount());
+            ? Chain.ticks(beat)
+            : loopTicks(beat.stepCount(beat.activeSlot()));
         return one * playbackPasses(beat, song);
     }
 
@@ -161,7 +162,7 @@ public final class SequenceBuilder {
     private static Sequence pattern(Beat beat, Random random, int passes, boolean metronome) throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
-        int steps = beat.stepCount();
+        int steps = beat.stepCount(beat.activeSlot());
         int times = Math.max(1, passes);
         long loop = loopTicks(steps);
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
@@ -187,7 +188,7 @@ public final class SequenceBuilder {
             }
         }
         if (metronome) {
-            addClicks(sequence, steps, times);
+            addClicks(sequence, Timeline.pattern(beat), times);
         }
         return sequence;
     }
@@ -217,21 +218,21 @@ public final class SequenceBuilder {
         boolean song = chosen.song() && beat.hasChain();
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
-        int steps = beat.stepCount();
-        long sectionTicks = loopTicks(steps);
-        int sections = song ? Chain.sections(beat.chain()) : chosen.sections();
+        List<Timeline.Section> sections = Timeline.export(beat, chosen);
+        long span = Timeline.ticks(sections);
         int times = Math.max(1, passes);
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
-        tempo.add(new MidiEvent(marker("end"), sectionTicks * sections * times));
+        tempo.add(new MidiEvent(marker("end"), span * times));
 
         List<Character> spanSlots = spanSlots(beat, chosen, song);
-        boolean span = spanSlots.size() > 1;
+        boolean joined = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int pass = 0; pass < times; pass++) {
-            for (int section = 0; section < sections; section++) {
-                char slot = song ? Chain.slotAt(beat.chain(), section) : chosen.slotAt(section, beat.activeSlot());
+            long origin = pass * span;
+            for (Timeline.Section section : sections) {
+                char slot = section.slot();
                 hits.Track[] tracks = beat.slot(slot);
-                long offset = ((long) pass * sections + section) * sectionTicks;
+                long offset = origin + section.start();
                 for (int i = 0; i < tracks.length; i++) {
                     hits.Track track = tracks[i];
                     if (chosen.asHeard() && !Beat.audibleIn(tracks, track)) {
@@ -239,15 +240,15 @@ public final class SequenceBuilder {
                     }
                     if (midiTracks[i] == null) {
                         midiTracks[i] = sequence.createTrack();
-                        midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, span)), 0));
+                        midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, joined)), 0));
                     }
                     writeSetup(midiTracks[i], track, i, offset);
-                    writeNotes(midiTracks[i], beat, track, i, steps, offset, sectionTicks, random);
+                    writeNotes(midiTracks[i], beat, track, i, section.steps(), offset, section.ticks(), random);
                 }
             }
         }
         if (metronome) {
-            addClicks(sequence, steps, sections * times);
+            addClicks(sequence, sections, times);
         }
         return sequence;
     }
@@ -321,7 +322,7 @@ public final class SequenceBuilder {
             return;
         }
         char slot = song && beat.hasChain()
-            ? Chain.place(beat.chain(), tick, beat.stepCount(), beat.swing()).slot()
+            ? Chain.place(beat, tick).slot()
             : beat.activeSlot();
         hits.Track[] tracks = beat.slot(slot);
         for (int row = 0; row < tracks.length; row++) {
@@ -406,32 +407,50 @@ public final class SequenceBuilder {
     }
 
     /**
-     * A click on every quarter note of every bar in the sequence. Beat 1 of each bar is the accent.
+     * A click on every quarter note inside each section, on every pass.
+     * Beat 1 of each bar is the accent. A bar is 16 steps, so a 32-step pattern accents
+     * at its start and again halfway through, and a shorter pattern accents only at its start.
      * The notes are claves and an open triangle, not the wood blocks a drum track can play.
-     * {@code bars} is pattern sections times playback passes, so a later pass still clicks.
      * Quarter notes fall on even 16ths, which swing does not move, so the click stays on the beat.
      */
-    private static void addClicks(Sequence sequence, int stepCount, int bars) throws InvalidMidiDataException {
-        if (bars <= 0 || stepCount < 4) {
+    private static void addClicks(Sequence sequence, List<Timeline.Section> sections, int passes) throws InvalidMidiDataException {
+        if (passes <= 0 || sections == null || sections.isEmpty()) {
+            return;
+        }
+        boolean any = false;
+        for (Timeline.Section section : sections) {
+            if (section.steps() >= 4) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) {
             return;
         }
         Track click = sequence.createTrack();
         click.add(new MidiEvent(trackName("Click"), 0));
-        int quarters = stepCount / 4;
-        long bar = loopTicks(stepCount);
-        for (int section = 0; section < bars; section++) {
-            for (int quarter = 0; quarter < quarters; quarter++) {
-                int step = quarter * 4;
-                boolean downbeat = step % 16 == 0;
-                long start = section * bar + (long) step * STEP_TICKS;
-                int note = downbeat ? CLICK_ACCENT_NOTE : CLICK_NOTE;
-                int velocity = downbeat ? CLICK_ACCENT_VELOCITY : CLICK_VELOCITY;
-                ShortMessage on = new ShortMessage();
-                on.setMessage(ShortMessage.NOTE_ON, Gm.DRUM_CHANNEL, note, velocity);
-                click.add(new MidiEvent(on, start));
-                ShortMessage off = new ShortMessage();
-                off.setMessage(ShortMessage.NOTE_OFF, Gm.DRUM_CHANNEL, note, 0);
-                click.add(new MidiEvent(off, start + CLICK_TICKS));
+        long span = Timeline.ticks(sections);
+        for (int pass = 0; pass < passes; pass++) {
+            long origin = pass * span;
+            for (Timeline.Section section : sections) {
+                int steps = section.steps();
+                if (steps < 4) {
+                    continue;
+                }
+                int quarters = steps / 4;
+                for (int quarter = 0; quarter < quarters; quarter++) {
+                    int step = quarter * 4;
+                    boolean downbeat = step % 16 == 0;
+                    long start = origin + section.start() + (long) step * STEP_TICKS;
+                    int note = downbeat ? CLICK_ACCENT_NOTE : CLICK_NOTE;
+                    int velocity = downbeat ? CLICK_ACCENT_VELOCITY : CLICK_VELOCITY;
+                    ShortMessage on = new ShortMessage();
+                    on.setMessage(ShortMessage.NOTE_ON, Gm.DRUM_CHANNEL, note, velocity);
+                    click.add(new MidiEvent(on, start));
+                    ShortMessage off = new ShortMessage();
+                    off.setMessage(ShortMessage.NOTE_OFF, Gm.DRUM_CHANNEL, note, 0);
+                    click.add(new MidiEvent(off, start + CLICK_TICKS));
+                }
             }
         }
     }

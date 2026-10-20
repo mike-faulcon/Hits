@@ -25,13 +25,14 @@ build/install/hits/bin/hits render beats/somefile.json --song --out out.mid
 
 `render` writes the active pattern once. `--song` writes the chain, including every pattern A–H that the chain names. The extension picks the file: `.wav`, `.mid`, or `.midi`. Mute and solo match what playback would do. WAV is the built-in General MIDI synth, offline, the same renderer as Export WAV with no SoundFont loaded. The start script and `./gradlew run` pass `--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED`, which that renderer needs.
 
-`info` prints the tempo, swing, the patterns in use, the chain, the track list, and the length of one pattern and of the song in bars and seconds. For the test fixture:
+`info` prints the tempo, swing, the patterns in use, each pattern's length in steps, the chain, the track list, and the length of one pattern and of the song in bars and seconds. For the test fixture:
 
 ```text
 Sparse groove
 tempo: 120 bpm
 swing: 58%
 patterns: A, D
+lengths: A 16, D 16
 chain: A x1, D x1
 tracks:
   A  Kick             drum   C1  Kick
@@ -89,7 +90,7 @@ Choose a pattern while a song plays to select it and hold the grid on it. Click 
 
 **Copy** replaces the pattern chosen next to it with the pattern on screen. The other patterns stay.
 
-Every entry uses the beat's tempo, swing, and length. Song mode itself is not saved. The chain is. An empty chain still plays the pattern on screen.
+Every entry uses the beat's tempo and swing. Each pattern has its own length, from 1 to 32 steps, so a 16-step stop can sit between 32-step grooves. The chain button shows that length in bars (`C ·1` is one bar, `C ·2` is two). A length that is not a whole number of bars shows the step count (`C ·12`). Song mode itself is not saved. The chain is. An empty chain still plays the pattern on screen.
 
 ## Saving
 
@@ -105,9 +106,9 @@ Export writes a Standard MIDI file of 16th notes. Swing is part of the note time
 
 - The default matches playback. Muted tracks are left out, and solo is respected, judged separately for each pattern.
 - **Ignore mute and solo** writes every track, so a part you muted while listening is still in the file.
-- **A then B** writes pattern A followed by pattern B. Each row keeps one MIDI track. A row whose name differs is labeled `Kick / Rim`. If the instrument changes between A and B, the file carries a program change where B starts.
+- **A then B** writes pattern A followed by pattern B. Each pattern keeps its own length. Each row keeps one MIDI track. A row whose name differs is labeled `Kick / Rim`. If the instrument changes between A and B, the file carries a program change where B starts.
 - **Repeats** writes that material again, from 1 to 32 times. With A then B, the pair repeats (A B A B).
-- **Song** writes the chain, including each entry's repeats. An entry can name any pattern from A through H. A then B and Repeats are not used for that export. Mute and solo still apply unless you ignore them, judged separately for each entry. A row that plays in more than one pattern keeps one MIDI track. Differing names are joined in pattern order, such as `Kick / Rim`. If the instrument changes, the file carries a program change where the new pattern starts. Pan and levels stay in the file.
+- **Song** writes the chain, including each entry's repeats. An entry can name any pattern from A through H, and each pattern keeps its own length, so the file is the sum of those lengths. A then B and Repeats are not used for that export. Mute and solo still apply unless you ignore them, judged separately for each entry. A row that plays in more than one pattern keeps one MIDI track. Differing names are joined in pattern order, such as `Kick / Rim`. If the instrument changes, the file carries a program change where the new pattern starts. Pan and levels stay in the file.
 
 The suggested `.mid` name uses the same file-safe spelling as Save. A step with its own pitch is written at that note. The metronome is playback only and is not in the file.
 
@@ -155,7 +156,7 @@ A SoundFont does not change an external output. Ableton, IAC, and hardware play 
 
 ## Files
 
-Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`) and a play probability (`probability`, 0–100). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "c", "repeats": 2 }`. Patterns C through H are optional keys in `slots`, written only when that pattern differs from the empty kit, including a difference in pan, level, step velocity, or probability. A track can store a mixer `pan` (0–127, 64 is center) and a mixer `level` (0–127, 100 leaves the hits as programmed). A beat can store `master` (0–127, 127 is full). Mute and solo are stored on every track, as they always have been. The file is version 2 when any step has its own pitch, a probability other than 100, the chain is not empty, pan, level, or master is not at those defaults, or pattern C–H is selected, named in the chain, or different from the empty kit. A step without `pitch` uses the track pitch. A step without `probability` plays every time, and 100 is omitted when saving. A beat that only uses A and B, and none of the other version 2 fields, is written the same way as before, so a previous version of Hits can still open a version 1 file. Extra fields Hits does not know are ignored. Older `.btf` files still load.
+Saved beats are still JSON. A file with `"version": 1` opens as before. Version 2 is that document plus optional fields. A step can store its own pitch (`pitch`) and a play probability (`probability`, 0–100). A beat can store a song chain (`chain`): a list of entries such as `{ "slot": "c", "repeats": 2 }`. Patterns C through H are optional keys in `slots`, written only when that pattern differs from the empty kit, including a difference in pan, level, step velocity, or probability. A track can store a mixer `pan` (0–127, 64 is center) and a mixer `level` (0–127, 100 leaves the hits as programmed). A beat can store `master` (0–127, 127 is full). Mute and solo are stored on every track, as they always have been. A pattern can store its own `steps` (1–32) on that slot. The key is written only when the length differs from the beat's `steps`, which stays 16 or 32 so an older Hits still sees one length. Notes past a pattern's length stay in the file. An older Hits ignores the key and drops that pattern's length the next time it saves. The file is version 2 when any step has its own pitch, a probability other than 100, the chain is not empty, pan, level, or master is not at those defaults, a pattern's length differs from the beat's steps, or pattern C–H is selected, named in the chain, or different from the empty kit. A step without `pitch` uses the track pitch. A step without `probability` plays every time, and 100 is omitted when saving. A beat that only uses A and B, and none of the other version 2 fields, is written the same way as before, so a previous version of Hits can still open a version 1 file. Extra fields Hits does not know are ignored. Older `.btf` files still load.
 
 ## Controls
 
@@ -184,7 +185,8 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | + | Add the pattern chosen beside it to the chain. Any pattern A through H. |
 | Remove / Up / Down | Edit the selected chain entry. |
 | × | How many times the selected chain entry plays, from 1 to 32. |
-| 16 steps / 32 steps | One bar, or two. Copy bar duplicates the first bar into the second. |
+| 16 steps / 32 steps | Sets the pattern on screen to one bar or two. The other patterns keep their lengths. |
+| Steps | Length of the pattern on screen, from 1 to 32. Notes past it stay on the grid, dimmed, and do not play. Copy bar duplicates the first bar and sets this pattern to 32 steps. |
 | Make me a beat | Starter groove from a style. Asks first when the pattern on screen has hits. Tempo and swing change for the whole beat. The other patterns' hits stay. |
 | Shuffle | New rhythm on the selected track. The sound, tempo, and other tracks stay. |
 | Boom bap / Reggae | Replace the pattern on screen, the tempo, and the swing, after a confirmation. The other patterns are kept. |

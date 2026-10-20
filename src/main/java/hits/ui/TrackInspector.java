@@ -16,8 +16,10 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
+import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.Scrollable;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
@@ -52,6 +54,7 @@ final class TrackInspector {
     private final JButton noteMode = Widgets.button("Note");
     private final JButton steps16 = Widgets.button("16 steps");
     private final JButton steps32 = Widgets.button("32 steps");
+    private final JSpinner patternSteps = new JSpinner(new SpinnerNumberModel(16, Beat.MIN_STEPS, Beat.MAX_STEPS, 1));
     private final JButton shuffle = Widgets.button("Shuffle");
     private Runnable shuffleTrack = () -> {};
     private final JLabel stepPitchValue = new JLabel("—", SwingConstants.LEFT);
@@ -136,15 +139,21 @@ final class TrackInspector {
         shuffle.addActionListener(event -> shuffleTrack.run());
         addRow(panel, constraints, shuffle);
         JButton copyBar = Widgets.button("Copy bar");
-        copyBar.setToolTipText("Copy the first 16 steps into a second bar and switch to 32 steps.");
+        copyBar.setToolTipText("Copy the first 16 steps into a second bar and set this pattern to 32 steps.");
         copyBar.addActionListener(event -> {
             char slot = editor.viewSlot();
             editor.edit(beat -> beat.copyBar(slot));
         });
         addRow(panel, constraints, copyBar);
-        steps16.setToolTipText("One bar of 16th notes.");
-        steps32.setToolTipText("Two bars of 16th notes.");
+        steps16.setToolTipText("This pattern is one bar of 16th notes. Other patterns keep their own length.");
+        steps32.setToolTipText("This pattern is two bars. Other patterns keep their own length.");
         addRow(panel, constraints, Widgets.row(steps16, steps32));
+        JLabel stepsLabel = Widgets.label("Steps");
+        String stepsTip = "How many steps this pattern plays, from 1 to 32. 16 is one bar. Notes past that stay on the grid, dimmed.";
+        stepsLabel.setToolTipText(stepsTip);
+        patternSteps.setToolTipText(stepsTip);
+        Widgets.fix(patternSteps, 72, 32);
+        addRow(panel, constraints, Widgets.row(stepsLabel, patternSteps));
         constraints.weighty = 1;
         JPanel spacer = new JPanel();
         spacer.setOpaque(false);
@@ -159,15 +168,13 @@ final class TrackInspector {
         accentDrag.wire(accent, beat -> onScreen(beat).setAccent(accent.getValue()));
         drumMode.addActionListener(event -> setMode(TrackMode.DRUM));
         noteMode.addActionListener(event -> setMode(TrackMode.NOTE));
-        steps16.addActionListener(event -> {
-            if (editor.beat().stepCount() != 16) {
-                editor.edit(beat -> beat.setStepCount(16));
+        steps16.addActionListener(event -> setPatternLength(16));
+        steps32.addActionListener(event -> setPatternLength(32));
+        patternSteps.addChangeListener(event -> {
+            if (sync.on()) {
+                return;
             }
-        });
-        steps32.addActionListener(event -> {
-            if (editor.beat().stepCount() != 32) {
-                editor.edit(beat -> beat.setStepCount(32));
-            }
+            setPatternLength((Integer) patternSteps.getValue());
         });
         drums.addActionListener(event -> {
             if (sync.on() || drums.getSelectedIndex() < 0) {
@@ -222,8 +229,9 @@ final class TrackInspector {
             velocity.setValue(shownVelocity);
         }
         velocityValue.setText(Integer.toString(shownVelocity));
-        velocity.setToolTipText(TrackReadout.velocityTip(track, editor.stepIndex(), beat.stepCount()));
-        TrackReadout.Chance shownChance = TrackReadout.chance(track, editor.stepIndex(), beat.stepCount());
+        int columns = beat.gridColumns(editor.viewSlot());
+        velocity.setToolTipText(TrackReadout.velocityTip(track, editor.stepIndex(), columns));
+        TrackReadout.Chance shownChance = TrackReadout.chance(track, editor.stepIndex(), columns);
         chance.setEnabled(shownChance.enabled());
         if (!chance.getValueIsAdjusting() || !shownChance.enabled()) {
             chance.setValue(shownChance.value());
@@ -236,9 +244,13 @@ final class TrackInspector {
         accentValue.setText(Integer.toString(track.accent()));
         Widgets.paintToggle(drumMode, track.mode() == TrackMode.DRUM);
         Widgets.paintToggle(noteMode, track.mode() == TrackMode.NOTE);
-        Widgets.paintToggle(steps16, beat.stepCount() == 16);
-        Widgets.paintToggle(steps32, beat.stepCount() == 32);
-        TrackReadout.StepPitch pitch = TrackReadout.stepPitch(beat, track, editor.stepIndex());
+        int length = beat.stepCount(editor.viewSlot());
+        Widgets.paintToggle(steps16, length == 16);
+        Widgets.paintToggle(steps32, length == 32);
+        if (!patternSteps.getValue().equals(length)) {
+            patternSteps.setValue(length);
+        }
+        TrackReadout.StepPitch pitch = TrackReadout.stepPitch(beat, editor.viewSlot(), track, editor.stepIndex());
         stepPitchDown.setEnabled(pitch.nudgeEnabled());
         stepPitchUp.setEnabled(pitch.nudgeEnabled());
         stepPitchTrack.setEnabled(pitch.clearEnabled());
@@ -258,7 +270,7 @@ final class TrackInspector {
         int row = editor.trackIndex();
         int column = editor.stepIndex();
         Track current = editor.selectedTrack();
-        if (column < 0 || column >= editor.beat().stepCount() || !current.step(column).on()) {
+        if (column < 0 || column >= editor.beat().gridColumns(editor.viewSlot()) || !current.step(column).on()) {
             return;
         }
         char slot = editor.viewSlot();
@@ -295,7 +307,7 @@ final class TrackInspector {
 
     private void applyChance(Beat beat) {
         int step = editor.stepIndex();
-        if (step < 0 || step >= beat.stepCount()) {
+        if (step < 0 || step >= beat.gridColumns(editor.viewSlot())) {
             return;
         }
         onScreen(beat).step(step).setProbability(chance.getValue());
@@ -314,6 +326,14 @@ final class TrackInspector {
 
     private Track onScreen(Beat beat) {
         return beat.slot(editor.viewSlot())[editor.trackIndex()];
+    }
+
+    private void setPatternLength(int steps) {
+        char slot = editor.viewSlot();
+        if (editor.beat().stepCount(slot) == steps) {
+            return;
+        }
+        editor.edit(beat -> beat.setSlotSteps(slot, steps));
     }
 
     private void setMode(TrackMode mode) {

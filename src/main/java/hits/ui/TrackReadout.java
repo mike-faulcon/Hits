@@ -45,8 +45,8 @@ final class TrackReadout {
 
     record StepPitch(String text, String tip, boolean nudgeEnabled, boolean clearEnabled) {}
 
-    static StepPitch stepPitch(Beat beat, Track track, int column) {
-        boolean editable = column >= 0 && column < beat.stepCount() && track.step(column).on();
+    static StepPitch stepPitch(Beat beat, char slot, Track track, int column) {
+        boolean editable = column >= 0 && column < beat.gridColumns(slot) && track.step(column).on();
         if (!editable) {
             return new StepPitch("—", "Right-click or Alt-click a step that is on.", false, false);
         }

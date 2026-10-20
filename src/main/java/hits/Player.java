@@ -227,11 +227,11 @@ public final class Player implements AutoCloseable {
         }
         long tick = sequencer.getTickPosition();
         if (song && beat.hasChain()) {
-            return Chain.place(beat.chain(), tick, beat.stepCount(), beat.swing());
+            return Chain.place(beat, tick);
         }
         return new Chain.Place(
             beat.activeSlot(),
-            SequenceBuilder.stepForTick(tick, beat.stepCount(), beat.swing()),
+            SequenceBuilder.stepForTick(tick, beat.stepCount(beat.activeSlot()), beat.swing()),
             0
         );
     }
