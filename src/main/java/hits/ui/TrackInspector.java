@@ -19,7 +19,6 @@ import javax.swing.JPanel;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
-import javax.swing.SpinnerNumberModel;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
@@ -111,6 +110,15 @@ final class TrackInspector {
 
         trackName.setToolTipText("Name shown on this row.");
         addRow(panel, constraints, trackName);
+        steps16.setToolTipText("This pattern is one bar of 16th notes. Other patterns keep their own length.");
+        steps32.setToolTipText("This pattern is two bars. Other patterns keep their own length.");
+        addRow(panel, constraints, Widgets.row(steps16, steps32));
+        JLabel stepsLabel = Widgets.label("Steps");
+        String stepsTip = "How many steps this pattern plays, from 1 to 32. 16 is one bar. Notes past that stay on the grid, dimmed.";
+        stepsLabel.setToolTipText(stepsTip);
+        patternSteps.setToolTipText(stepsTip);
+        Widgets.fix(patternSteps, 72, 32);
+        addRow(panel, constraints, Widgets.row(stepsLabel, patternSteps));
         addRow(panel, constraints, noteValue);
         JPanel noteButtons = Widgets.row(
             buttonPair("−", "One semitone down", -1, 44),
@@ -138,7 +146,7 @@ final class TrackInspector {
         legato.setFocusable(false);
         legato.setToolTipText("Note tracks only. Each hit holds until the next hit on this row. Drum tracks keep Hold instead.");
         addRow(panel, constraints, legato);
-        String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. 0 is left out of the file.";
+        String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. Swing cannot push that onto the next step. 0 is left out of the file.";
         addRow(panel, constraints, spun("Shift", shiftTip, shift, shiftUnit));
         addRow(panel, constraints, Widgets.label("Sound"));
         drums.setToolTipText("Drum sound for this track.");
@@ -165,15 +173,6 @@ final class TrackInspector {
             editor.edit(beat -> beat.copyBar(slot));
         });
         addRow(panel, constraints, copyBar);
-        steps16.setToolTipText("This pattern is one bar of 16th notes. Other patterns keep their own length.");
-        steps32.setToolTipText("This pattern is two bars. Other patterns keep their own length.");
-        addRow(panel, constraints, Widgets.row(steps16, steps32));
-        JLabel stepsLabel = Widgets.label("Steps");
-        String stepsTip = "How many steps this pattern plays, from 1 to 32. 16 is one bar. Notes past that stay on the grid, dimmed.";
-        stepsLabel.setToolTipText(stepsTip);
-        patternSteps.setToolTipText(stepsTip);
-        Widgets.fix(patternSteps, 72, 32);
-        addRow(panel, constraints, Widgets.row(stepsLabel, patternSteps));
         constraints.weighty = 1;
         JPanel spacer = new JPanel();
         spacer.setOpaque(false);

@@ -8,18 +8,29 @@ import hits.cli.HitsCli;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.awt.GraphicsEnvironment;
 
 public final class HitsApp {
     private HitsApp() {}
 
     public static void main(String[] args) {
-        if (HitsCli.launchesDesktop(args)) {
+        if (opensWindow(args)) {
             SwingUtilities.invokeLater(HitsApp::start);
             return;
         }
         // Set before any window. render and info never call Swing.
+        // No arguments on a machine with no display prints usage and exits, instead of
+        // starting Swing and hanging after HeadlessException.
         System.setProperty("java.awt.headless", "true");
         System.exit(HitsCli.run(args, System.out, System.err));
+    }
+
+    /**
+     * True when the desktop window should open.
+     * An empty command opens the window only when a display is available.
+     */
+    public static boolean opensWindow(String[] args) {
+        return HitsCli.launchesDesktop(args) && !GraphicsEnvironment.isHeadless();
     }
 
     private static void start() {

@@ -17,8 +17,12 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntConsumer;
 
@@ -65,13 +69,22 @@ public final class WavRenderer {
             WavAudio.send(receiver, sequence);
             long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence));
             Path parent = path.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
             Path directory = parent == null ? Path.of(".") : parent;
-            temp = Files.createTempFile(directory, "hits-wav", ".part");
-            write(stream, temp, frames, progress, cancelled);
-            moveIntoPlace(temp, path);
+            try {
+                if (parent != null) {
+                    Files.createDirectories(parent);
+                }
+                temp = Files.createTempFile(directory, "hits-wav", ".part");
+                write(stream, temp, frames, progress, cancelled);
+                // createTempFile is owner-only. MIDI is created with the process umask, usually 0644.
+                applyUmaskPermissions(temp);
+                moveIntoPlace(temp, path);
+            } catch (IOException exception) {
+                if (exception instanceof Cancelled) {
+                    throw exception;
+                }
+                throw writeError(path, exception);
+            }
             finished = true;
             report(progress, 100);
         } catch (javax.sound.midi.InvalidMidiDataException exception) {
@@ -193,6 +206,40 @@ public final class WavRenderer {
                 }
             }
         }
+    }
+
+    /**
+     * Copies the permissions of a file created the normal way, so the WAV follows the umask
+     * the same way {@link javax.sound.midi.MidiSystem#write} does.
+     */
+    private static void applyUmaskPermissions(Path file) throws IOException {
+        PosixFileAttributeView view = Files.getFileAttributeView(file, PosixFileAttributeView.class);
+        if (view == null) {
+            return;
+        }
+        Path probe = file.resolveSibling(file.getFileName().toString() + ".umask");
+        try {
+            Files.newByteChannel(
+                probe,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING
+            ).close();
+            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(probe);
+            view.setPermissions(permissions);
+        } finally {
+            Files.deleteIfExists(probe);
+        }
+    }
+
+    /** Names the destination. A temp-file failure must not be the path the user sees. */
+    private static IOException writeError(Path path, IOException exception) {
+        String message = exception.getMessage();
+        boolean tempPath = message != null && (message.contains("hits-wav") || message.contains(".part") || message.contains(".umask"));
+        String detail = message == null || message.isBlank() || tempPath
+            ? "the folder is not writable or the path is not a file"
+            : message;
+        return new IOException("Could not write " + path + ": " + detail, exception);
     }
 
     private static void moveIntoPlace(Path temp, Path path) throws IOException {

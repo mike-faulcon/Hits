@@ -8,6 +8,7 @@ import hits.SequenceBuilder;
 import hits.Track;
 import hits.TrackMode;
 import hits.WavAudio;
+import hits.ui.HitsApp;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -27,11 +28,14 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** Headless render and info. The fixture is an original one-bar groove, not a recording. */
 class HitsCliTest {
@@ -54,6 +58,31 @@ class HitsCliTest {
         assertTrue(HitsCli.launchesDesktop(new String[] {"-psn_0_12345"}));
         assertFalse(HitsCli.launchesDesktop(new String[] {"info", "beat.json"}));
         assertFalse(HitsCli.launchesDesktop(new String[] {"render", "beat.json", "--out", "out.mid"}));
+    }
+
+    @Test
+    void noArgumentsOnAHeadlessMachinePrintUsageAndExit() throws Exception {
+        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        ProcessBuilder builder = new ProcessBuilder(
+            java.toString(),
+            "-Djava.awt.headless=true",
+            "-cp",
+            System.getProperty("java.class.path"),
+            HitsApp.class.getName()
+        );
+        builder.environment().remove("DISPLAY");
+        builder.environment().remove("WAYLAND_DISPLAY");
+        Process process = builder.start();
+        boolean finished = process.waitFor(20, TimeUnit.SECONDS);
+        String out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String err = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!finished) {
+            process.destroyForcibly();
+            fail("hits with no arguments hung without a display\n" + out + "\n" + err);
+        }
+        assertEquals(HitsCli.USAGE, process.exitValue(), out + err);
+        assertTrue(out.contains("Usage"), out);
+        assertTrue(out.contains("hits info"), out);
     }
 
     @Test
@@ -120,6 +149,56 @@ class HitsCliTest {
         Result bare = run("render", broken.toString(), "--out", directory.resolve("out").toString());
         assertEquals(HitsCli.USAGE, bare.code);
         assertTrue(bare.err.contains("Unknown output extension"));
+
+        String missingPattern = BeatJson.write(Beat.drumKit("plain"));
+        int slotB = missingPattern.indexOf("\n    \"b\":");
+        assertTrue(slotB > 0);
+        String withoutB = missingPattern.substring(0, slotB).replaceAll(",\\s*$", "") + "\n  }\n}\n";
+        Path missingB = directory.resolve("missing-b.json");
+        Files.writeString(missingB, withoutB);
+        Result missingSlot = run("info", missingB.toString());
+        assertEquals(HitsCli.FAIL, missingSlot.code);
+        assertTrue(missingSlot.err.contains("\"b\""), missingSlot.err);
+        assertFalse(missingSlot.err.contains("Expected an object"), missingSlot.err);
+    }
+
+    @Test
+    void anUnwritableWavNamesTheOutputNotTheTempFile(@TempDir Path directory) throws Exception {
+        Path folder = directory.resolve("ro");
+        Files.createDirectories(folder);
+        Path wav = folder.resolve("song.wav");
+        Assumptions.assumeTrue(folder.toFile().setWritable(false, false), "could not make the folder read-only");
+        try {
+            Result rendered = run("render", FIXTURE.toString(), "--out", wav.toString());
+            assertEquals(HitsCli.FAIL, rendered.code, rendered.err);
+            assertTrue(rendered.err.contains(wav.toString()), rendered.err);
+            assertFalse(rendered.err.contains(".part"), rendered.err);
+            assertFalse(rendered.err.contains("hits-wav"), rendered.err);
+        } finally {
+            folder.toFile().setWritable(true, false);
+        }
+    }
+
+    @Test
+    void wavPermissionsFollowTheUmaskLikeMidi(@TempDir Path directory) throws Exception {
+        Assumptions.assumeTrue(
+            Files.getFileStore(directory).supportsFileAttributeView(PosixFileAttributeView.class),
+            "POSIX permissions"
+        );
+        Beat beat = Beat.drumKit("perms");
+        beat.track(0).tap(0, false);
+        Path wav = directory.resolve("out.wav");
+        Path mid = directory.resolve("out.mid");
+        try {
+            BeatFiles.exportWav(beat, wav, ExportOptions.matchingPlayback(), null, null);
+        } catch (Exception exception) {
+            if (synthUnavailable(exception.getMessage())) {
+                Assumptions.abort("offline render is not available: " + exception.getMessage());
+            }
+            throw exception;
+        }
+        BeatFiles.exportMidi(beat, mid, ExportOptions.matchingPlayback());
+        assertEquals(Files.getPosixFilePermissions(mid), Files.getPosixFilePermissions(wav));
     }
 
     @Test

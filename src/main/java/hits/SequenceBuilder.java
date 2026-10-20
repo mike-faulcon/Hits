@@ -17,17 +17,17 @@ public final class SequenceBuilder {
     public static final int PPQ = 96;
     public static final int STEP_TICKS = PPQ / 4;
     /**
-     * GM claves. Playback click on beat 1 of each bar.
-     * Not the high wood block (76), and not one of the kit notes, so a wood-block track
-     * stays separate from the click. GM2 metronome keys 33 and 34 are silent on the JDK's
-     * generated drum kit, which has no samples below note 35.
+     * Metronome channel. Not a track row and not the drum channel, so the click is a pitched
+     * instrument. On the JDK's built-in bank, drum keys 75 and 81 are the same sample as the
+     * wood blocks, which made the old claves click indistinguishable from a wood-block track.
      */
-    public static final int CLICK_ACCENT_NOTE = 75;
-    /**
-     * GM open triangle. Playback click on the other beats.
-     * Not the low wood block (77), and not one of the kit notes.
-     */
-    public static final int CLICK_NOTE = 81;
+    public static final int CLICK_CHANNEL = 15;
+    /** Syn Square Wave. A short pitched click, distinct from the drum kit on the built-in bank. */
+    public static final int CLICK_PROGRAM = 80;
+    /** Downbeat pitch, C6. Louder than the other beats. */
+    public static final int CLICK_ACCENT_NOTE = 84;
+    /** Other beats, C5. A different pitch from the downbeat, still not a kit note. */
+    public static final int CLICK_NOTE = 72;
     public static final int CLICK_ACCENT_VELOCITY = 120;
     public static final int CLICK_VELOCITY = 80;
     /** Short enough that a click does not ring into the next beat. */
@@ -250,8 +250,7 @@ public final class SequenceBuilder {
                         midiTracks[i] = sequence.createTrack();
                         midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, joined)), 0));
                     }
-                    writeSetup(midiTracks[i], track, i, offset);
-                    writeNotes(
+                    writeSection(
                         midiTracks[i],
                         beat,
                         track,
@@ -260,7 +259,6 @@ public final class SequenceBuilder {
                         offset,
                         section.ticks(),
                         random,
-                        false,
                         clipEnd ? sequenceEnd : -1,
                         ahead
                     );
@@ -387,9 +385,39 @@ public final class SequenceBuilder {
     }
 
     /**
+     * One section of a song or export. Bank, program, and pan are written at the section start,
+     * or earlier when a step-0 nudge pulls a hit into the previous section. That hit then uses
+     * this track's sound and pan, not the pattern it overlaps.
+     */
+    private static void writeSection(
+        Track midi,
+        Beat beat,
+        hits.Track track,
+        int row,
+        int steps,
+        long offset,
+        long sectionTicks,
+        Random random,
+        long clipTick,
+        int[] ahead
+    ) throws InvalidMidiDataException {
+        List<Placed> notes = placedNotes(
+            beat, track, steps, offset, sectionTicks, random, false, clipTick, ahead
+        );
+        long setupAt = offset;
+        for (Placed note : notes) {
+            if (note.sound.start() < setupAt) {
+                setupAt = note.sound.start();
+            }
+        }
+        writeSetup(midi, track, row, setupAt);
+        emitNotes(midi, Mix.channel(track, row), notes);
+    }
+
+    /**
      * Writes the hits in one section.
-     * {@code wrapStart} is looped pattern playback: a negative nudge on the first step
-     * lands at the end of this pass, and every note-off stops at {@code clipTick}.
+     * {@code wrapStart} is looped pattern playback: a nudge that falls outside the loop
+     * comes back in at the other end, and every note-off stops at {@code clipTick}.
      * Song playback passes the end of the whole sequence as {@code clipTick} so a note can
      * cross into the next section and still release before the song loops.
      * {@code ahead} is each later section's step count, including later passes, so the
@@ -412,6 +440,22 @@ public final class SequenceBuilder {
         int[] ahead
     ) throws InvalidMidiDataException {
         int channel = Mix.channel(track, row);
+        emitNotes(midi, channel, placedNotes(
+            beat, track, steps, offset, sectionTicks, random, wrapStart, clipTick, ahead
+        ));
+    }
+
+    private static List<Placed> placedNotes(
+        Beat beat,
+        hits.Track track,
+        int steps,
+        long offset,
+        long sectionTicks,
+        Random random,
+        boolean wrapStart,
+        long clipTick,
+        int[] ahead
+    ) {
         int swing = beat.swing();
         boolean legato = track.legato() && track.mode() == TrackMode.NOTE;
         boolean[] play = new boolean[steps];
@@ -465,6 +509,10 @@ public final class SequenceBuilder {
                 placed.add(new Placed(sound, sounding[step], velocities[step]));
             }
         }
+        return placed;
+    }
+
+    private static void emitNotes(Track midi, int channel, List<Placed> placed) throws InvalidMidiDataException {
         // A negative nudge can put step 0 after a later step. Emit in time order so the
         // later note-on shortens a same-pitch note that would otherwise overlap it.
         placed.sort((left, right) -> Long.compare(left.sound.start(), right.sound.start()));
@@ -508,7 +556,7 @@ public final class SequenceBuilder {
             boolean noteOff = message.getCommand() == ShortMessage.NOTE_OFF
                 || (message.getCommand() == ShortMessage.NOTE_ON && message.getData2() == 0);
             boolean noteOn = message.getCommand() == ShortMessage.NOTE_ON && message.getData2() > 0;
-            if (noteOn && event.getTick() < start && (on == null || event.getTick() >= on.getTick())) {
+            if (noteOn && event.getTick() <= start && (on == null || event.getTick() >= on.getTick())) {
                 on = event;
                 off = null;
             } else if (noteOff && on != null && event.getTick() >= on.getTick() && off == null) {
@@ -547,8 +595,10 @@ public final class SequenceBuilder {
      * A click on every quarter note inside each section, on every pass.
      * Beat 1 of each bar is the accent. A bar is 16 steps, so a 32-step pattern accents
      * at its start and again halfway through, and a shorter pattern accents only at its start.
-     * The notes are claves and an open triangle, not the wood blocks a drum track can play.
-     * Quarter notes fall on even 16ths, which swing does not move, so the click stays on the beat.
+     * The click is a short square-wave note on its own channel. Drum claves and wood blocks
+     * share one sample on the JDK's built-in bank, so a drum-channel click cannot be told apart
+     * from a wood-block track. Quarter notes fall on even 16ths, which swing does not move,
+     * so the click stays on the beat.
      */
     private static void addClicks(Sequence sequence, List<Timeline.Section> sections, int passes) throws InvalidMidiDataException {
         if (passes <= 0 || sections == null || sections.isEmpty()) {
@@ -566,6 +616,10 @@ public final class SequenceBuilder {
         }
         Track click = sequence.createTrack();
         click.add(new MidiEvent(trackName("Click"), 0));
+        click.add(new MidiEvent(controlMessage(CLICK_CHANNEL, 0, 0), 0));
+        click.add(new MidiEvent(controlMessage(CLICK_CHANNEL, 32, 0), 0));
+        click.add(new MidiEvent(programMessage(CLICK_CHANNEL, CLICK_PROGRAM), 0));
+        click.add(new MidiEvent(controlMessage(CLICK_CHANNEL, 10, 64), 0));
         long span = Timeline.ticks(sections);
         for (int pass = 0; pass < passes; pass++) {
             long origin = pass * span;
@@ -582,10 +636,10 @@ public final class SequenceBuilder {
                     int note = downbeat ? CLICK_ACCENT_NOTE : CLICK_NOTE;
                     int velocity = downbeat ? CLICK_ACCENT_VELOCITY : CLICK_VELOCITY;
                     ShortMessage on = new ShortMessage();
-                    on.setMessage(ShortMessage.NOTE_ON, Gm.DRUM_CHANNEL, note, velocity);
+                    on.setMessage(ShortMessage.NOTE_ON, CLICK_CHANNEL, note, velocity);
                     click.add(new MidiEvent(on, start));
                     ShortMessage off = new ShortMessage();
-                    off.setMessage(ShortMessage.NOTE_OFF, Gm.DRUM_CHANNEL, note, 0);
+                    off.setMessage(ShortMessage.NOTE_OFF, CLICK_CHANNEL, note, 0);
                     click.add(new MidiEvent(off, start + CLICK_TICKS));
                 }
             }

@@ -12,7 +12,7 @@ You can also install a double-clickable app that includes a Java runtime. See [I
 
 ## Command line
 
-`render` and `info` run with no display. They do not open the window. The same `HitsApp` entry point still opens the window when it is given no arguments, including the packaged app.
+`render` and `info` run with no display. They do not open the window. The same `HitsApp` entry point still opens the window when it is given no arguments, including the packaged app. With no display, no arguments prints the usage text and exits with code 2.
 
 ```shell
 ./gradlew installDist
@@ -65,10 +65,10 @@ Open a pattern from the beats folder. Until you choose another one, `./gradlew r
 
 - **Space** plays and stops. That stays true when a button, slider, or the beat list has focus. Space still types a character while the cursor is in a text field (the beat name, a track name, or the BPM box).
 - **T** sets the tempo from your taps, unless you are typing. Hits averages the last few gaps, starts over when you pause for more than two seconds, and keeps the tempo between 40 and 240. **Tap** does the same. Each change can be undone.
-- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. Beat 1 is claves (GM note 75) and the other beats are an open triangle (note 81). Those are not the high and low wood blocks (notes 76 and 77), and they are not in the kit list, so a wood-block track stays separate from the click. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on. When a step can miss, playback rolls chance across several passes, and the click is on every pass.
+- **Click** is a metronome while the pattern or song plays. It clicks on each beat and is louder on beat 1 of each bar. The click is a short square-wave note on its own channel (higher on beat 1), not a drum-kit hit. On the JDK's built-in bank the claves and wood-block keys are the same sample, so a drum click could not be told apart from a wood-block track. The clicks are not written into a MIDI or WAV export. Hits remembers whether Click is on. When a step can miss, playback rolls chance across several passes, and the click is on every pass.
 - Click a step to toggle it. **Shift-click** sets a loud hit, using the **Loud hit** slider. **Right-click** or **Alt-click** selects a step so **Volume** edits that hit without turning it off. A bright pad is at least as loud as the track's Loud hit value. Drag a pad up or down to set that step's velocity. The pad fills from the bottom to show it, and the **Velocity** lane under the grid does the same for the selected track. A new hit uses the track's normal or loud-hit velocity, so an older beat sounds the same. **Chance** is the percent chance the selected step plays. 100% always plays, which is the default. Each pass through the pattern, or through the song, rolls chance again. Hits prepares a long run of those rolls when playback starts; when the run ends, the same series repeats. With a step selected, **Step pitch** sets that hit's note. **Use track** clears it. A white mark on a pad means that step has its own pitch. A number on a pad is its chance, when that chance is not 100%.
 - **M** mutes that track. **S** solos it. While any solo is on, only soloed tracks play. A muted track stays silent, including when it is also soloed. The same buttons are on the **Mixer**.
-- **Mixer** shows every track's level and pan, plus **Master**. Level **100** leaves each hit as programmed. **0** is silent. Pan **C** is center. Playback uses them. A drum that is not centered gets its own MIDI channel so its pan is not stuck to the rest of the kit. Drums at center stay on the General MIDI drum channel. **All patterns** starts on, so a level or pan change is written to every pattern. Turn it off to edit only the pattern on screen. Mute and solo always stay on the pattern on screen. The choice is not stored in the file. Each pattern still keeps its own level and pan.
+- **Mixer** shows every track's level and pan, plus **Master**. Level **100** leaves each hit as programmed. **0** is silent. Pan **C** is center. Playback uses them. A drum that is not centered gets its own MIDI channel so its pan is not stuck to the rest of the kit. Drums at center stay on the General MIDI drum channel. **All patterns** starts on. A level or pan change is written to every pattern whose row has the same name and sound. A row that is a different instrument, such as a lead in one pattern and a hat in another, keeps its own level and pan. Turn All patterns off to edit only the pattern on screen. Mute and solo always stay on the pattern on screen. The choice is not stored in the file. Each pattern still keeps its own level and pan.
 - **⌘Z / Ctrl-Z** undoes. **⌘⇧Z / Ctrl-Shift-Z** redoes.
 - **⌘S / Ctrl-S** saves. **⌘⇧S / Ctrl-Shift-S** is Save As.
 
@@ -90,7 +90,7 @@ Choose a pattern while a song plays to select it and hold the grid on it. Click 
 
 **Copy** replaces the pattern chosen next to it with the pattern on screen. The other patterns stay.
 
-Every entry uses the beat's tempo and swing. Each pattern has its own length, from 1 to 32 steps, so a 16-step stop can sit between 32-step grooves. The chain button shows that length in bars (`C ·1` is one bar, `C ·2` is two). A length that is not a whole number of bars shows the step count (`C ·12`). A held note runs into the next pattern using that pattern's length, and a nudge early on the first step lands in the pattern before it. Looping a single pattern stops the note at that pattern's end. Song mode itself is not saved. The chain is. An empty chain still plays the pattern on screen.
+Every entry uses the beat's tempo and swing. Each pattern has its own length, from 1 to 32 steps, so a 16-step stop can sit between 32-step grooves. The chain button shows that length in bars (`C ·1` is one bar, `C ·2` is two). A length that is not a whole number of bars shows the step count (`C ·12`). A held note runs into the next pattern using that pattern's length, and a nudge early on the first step lands in the pattern before it, using that step's own instrument and pan. Looping a single pattern stops a held note at that pattern's end. A nudge that falls past the end of that loop starts again at the beginning. Song mode itself is not saved. The chain is. An empty chain still plays the pattern on screen.
 
 ## Saving
 
@@ -165,19 +165,19 @@ Saved beats are still JSON. A file with `"version": 1` opens as before. Version 
 | Length | How long the last step of a hit holds, as a percent of that step. This used to be labeled Gate. A longer Hold uses this only on its last step. |
 | Hold | How many steps the selected hit lasts. 1 is a single step. Drag a lit pad sideways to stretch it. Covered steps draw as a bar. |
 | Legato | On a note track, each hit holds until the next hit. Drum tracks keep Hold instead. |
-| Nudge | Moves the selected hit off the grid, from −50% to +50% of a step. Comma is earlier, period is later. The pad shows a small tick. |
-| Shift | Moves every hit on the track by the same percent. Added to Nudge, then kept inside half a step. |
+| Nudge | Moves the selected hit off the grid, from −50% to +50% of a step, and keeps the note the same length. Comma is earlier, period is later. The pad shows a small tick. Swing cannot push the hit onto the next step. |
+| Shift | Moves every hit on the track by the same percent. Added to Nudge, then kept inside half a step. Swing cannot push that total onto the next step. |
 | Volume | How hard a hit is, from 1 to 127. Edits the selected step when that step is on. Otherwise it is the volume of new hits. Drag a pad or the velocity lane to set a step directly. |
 | Chance | Percent chance the selected step plays. 100% always plays. 0% never plays. Playback rolls each pass. MIDI and WAV export use a fixed seed. |
 | Loud hit | Volume used by shift-click. Bright pads are at least this loud. This used to be labeled Accent. |
 | Swing | 50% is straight. The readout says `50% straight`. |
 | Tap | Set the tempo by tapping. T does this unless you are typing. A pause of more than two seconds starts over. |
-| Click | Metronome during playback. Louder on beat 1 of each bar (claves, then an open triangle). Not the wood blocks. Left out of exports. The choice is remembered. |
+| Click | Metronome during playback. Louder and higher on beat 1. A square-wave click, not a drum hit, so it stays distinct from wood blocks. Left out of exports. The choice is remembered. |
 | − / + | Move the track note by one semitone. |
 | Oct − / Oct + | Move the track note by one octave. These used to say −8 / +8. |
 | Step pitch | Pitch of the selected step, when that step is on. Use track clears it. A step without its own pitch uses the track pitch. |
 | M / S | Mute this track, or solo it. While any solo is on, only soloed tracks play. A muted track stays silent. |
-| Mixer | Level and pan for every track, plus Master. Level 100 is unity. Pan C is center. All patterns applies level and pan to every pattern. |
+| Mixer | Level and pan for every track, plus Master. Level 100 is unity. Pan C is center. All patterns applies level and pan to the same instrument in every pattern. |
 | Level | How loud the track is in the mix. This is separate from Volume, which is how hard a hit is. |
 | Pan | Left, center, or right. A drum off center uses its own MIDI channel. |
 | Master | Turns every track down together. 127 is full. |

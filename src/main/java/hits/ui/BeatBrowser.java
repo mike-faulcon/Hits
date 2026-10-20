@@ -127,7 +127,7 @@ final class BeatBrowser {
         JPanel panel = new JPanel(new BorderLayout(0, 6));
         panel.setBackground(Theme.PANEL);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        panel.setPreferredSize(new Dimension(200, 248));
+        panel.setPreferredSize(new Dimension(200, 200));
         JPanel heading = new JPanel(new BorderLayout());
         heading.setOpaque(false);
         JButton folder = Widgets.button("Folder…");

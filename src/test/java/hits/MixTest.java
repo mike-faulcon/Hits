@@ -204,6 +204,44 @@ class MixTest {
     }
 
     @Test
+    void anEarlyNudgeUsesThatPatternsProgramBankAndPan() throws Exception {
+        Beat beat = Beat.drumKit("early");
+        beat.setBpm(120);
+        beat.setSwing(50);
+        Track piano = beat.slot('a')[7];
+        piano.setMode(TrackMode.NOTE);
+        piano.setProgram(0);
+        piano.setNote(88);
+        piano.setPan(0);
+        piano.tap(0, false);
+
+        Track wood = beat.slot('b')[7];
+        wood.setName("Wood");
+        wood.setMode(TrackMode.NOTE);
+        wood.setProgram(115);
+        wood.setNote(88);
+        wood.setPan(127);
+        wood.tap(0, false);
+        wood.step(0).setNudge(-50);
+        wood.step(8).setOn(true);
+        beat.addChain('a');
+        beat.addChain('b');
+
+        long early = SequenceBuilder.loopTicks(16) + NoteTiming.offsetTicks(-50);
+        assertTrue(early < SequenceBuilder.loopTicks(16));
+        Sequence exported = SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true));
+        assertEquals(115, lastProgramAtOrBefore(exported, early, 7));
+        assertEquals(0, lastControlAtOrBefore(exported, early, 7, 0));
+        assertEquals(0, lastControlAtOrBefore(exported, early, 7, 32));
+        assertEquals(127, lastControlAtOrBefore(exported, early, 7, 10));
+        assertEquals(early, noteOnTick(exported, 88, 2));
+
+        Sequence played = SequenceBuilder.buildSong(beat);
+        assertEquals(115, lastProgramAtOrBefore(played, early, 7));
+        assertEquals(127, lastControlAtOrBefore(played, early, 7, 10));
+    }
+
+    @Test
     void centredPanIsSentAtTheNextPatternBoundary() throws Exception {
         Beat beat = Beat.drumKit("pan");
         beat.track(7).setMode(TrackMode.NOTE);
@@ -352,6 +390,29 @@ class MixTest {
     }
 
     @Test
+    void allPatternsMatchesTheInstrumentNotTheRowNumber() {
+        Beat beat = Beat.drumKit("shared-row");
+        beat.slot('d')[1].setName("Hat click");
+        beat.slot('d')[1].setMode(TrackMode.DRUM);
+        beat.slot('d')[1].setNote(42);
+        beat.slot('e')[1].setName("Hat click");
+        beat.slot('e')[1].setNote(42);
+        Mix.setLevel(beat, 'a', 1, 40, true);
+        Mix.setPan(beat, 'a', 1, 20, true);
+        assertEquals(40, beat.slot('a')[1].level());
+        assertEquals(40, beat.slot('b')[1].level());
+        assertEquals(20, beat.slot('c')[1].pan());
+        assertEquals(Track.LEVEL, beat.slot('d')[1].level());
+        assertEquals(Track.PAN_CENTER, beat.slot('d')[1].pan());
+        assertEquals(Track.LEVEL, beat.slot('e')[1].level());
+        assertEquals(20, beat.slot('h')[1].pan());
+        Mix.setLevel(beat, 'd', 1, 70, true);
+        assertEquals(70, beat.slot('d')[1].level());
+        assertEquals(70, beat.slot('e')[1].level());
+        assertEquals(40, beat.slot('a')[1].level());
+    }
+
+    @Test
     void mixerEditsUndo() {
         Editor editor = new Editor(Beat.drumKit("t"));
         editor.edit(beat -> {
@@ -492,6 +553,53 @@ class MixTest {
         }
         assertEquals(1, values.size());
         return values.get(0);
+    }
+
+    private static int lastProgramAtOrBefore(Sequence sequence, long tick, int channel) {
+        int program = -1;
+        long at = -1;
+        for (MidiEvent event : events(sequence)) {
+            if (event.getTick() > tick || !(event.getMessage() instanceof ShortMessage message)) {
+                continue;
+            }
+            if (message.getCommand() == ShortMessage.PROGRAM_CHANGE && message.getChannel() == channel && event.getTick() >= at) {
+                program = message.getData1();
+                at = event.getTick();
+            }
+        }
+        return program;
+    }
+
+    private static int lastControlAtOrBefore(Sequence sequence, long tick, int channel, int controller) {
+        int value = -1;
+        long at = -1;
+        for (MidiEvent event : events(sequence)) {
+            if (event.getTick() > tick || !(event.getMessage() instanceof ShortMessage message)) {
+                continue;
+            }
+            if (message.getCommand() == ShortMessage.CONTROL_CHANGE
+                && message.getChannel() == channel
+                && message.getData1() == controller
+                && event.getTick() >= at) {
+                value = message.getData2();
+                at = event.getTick();
+            }
+        }
+        return value;
+    }
+
+    private static long noteOnTick(Sequence sequence, int note, int occurrence) {
+        int seen = 0;
+        for (MidiEvent event : noteOnEvents(sequence)) {
+            ShortMessage message = (ShortMessage) event.getMessage();
+            if (message.getData1() == note) {
+                seen++;
+                if (seen == occurrence) {
+                    return event.getTick();
+                }
+            }
+        }
+        throw new AssertionError("missing note " + note);
     }
 
     private static int controlAt(Sequence sequence, long tick, int channel, int controller) {

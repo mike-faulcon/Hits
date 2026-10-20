@@ -20,6 +20,7 @@ import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Note length, legato, and nudge. Version 1 files stay byte-identical. */
@@ -338,10 +339,10 @@ class NoteLengthTest {
         Track bass = beat.track(6);
         bass.step(1).setOn(true);
         bass.step(1).setNudge(17);
-        assertEquals(List.of(hit(40, 48, 6, 36, 100)), hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())));
+        assertEquals(List.of(hit(40, 52, 6, 36, 100)), hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())));
 
         bass.step(1).setNudge(-25);
-        assertEquals(List.of(hit(30, 48, 6, 36, 100)), hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())));
+        assertEquals(List.of(hit(30, 42, 6, 36, 100)), hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())));
 
         bass.step(1).setOn(false);
         bass.step(1).setNudge(0);
@@ -362,25 +363,88 @@ class NoteLengthTest {
         beat.addChain('a');
         beat.addChain('a');
         List<Hit> song = hits(SequenceBuilder.buildSong(beat));
-        assertEquals(hit(0, 96, 6, 36, 100), song.get(0));
-        assertEquals(hit(372, 480, 6, 36, 100), song.get(1));
+        assertEquals(hit(0, 84, 6, 36, 100), song.get(0));
+        assertEquals(hit(372, 468, 6, 36, 100), song.get(1));
 
         Beat shifted = noteBeat(50, 100);
         Track row = shifted.track(6);
         row.setShift(10);
         row.step(0).setOn(true);
         row.step(0).setNudge(10);
-        assertEquals(List.of(hit(5, 24, 6, 36, 100)), hits(SequenceBuilder.export(shifted, ExportOptions.matchingPlayback())));
+        assertEquals(List.of(hit(5, 29, 6, 36, 100)), hits(SequenceBuilder.export(shifted, ExportOptions.matchingPlayback())));
         row.setShift(40);
         row.step(0).setNudge(30);
         assertEquals(50, row.playedNudge(0));
-        assertEquals(List.of(hit(12, 24, 6, 36, 100)), hits(SequenceBuilder.export(shifted, ExportOptions.matchingPlayback())));
+        assertEquals(List.of(hit(12, 36, 6, 36, 100)), hits(SequenceBuilder.export(shifted, ExportOptions.matchingPlayback())));
 
         row.setShift(0);
         row.step(0).setNudge(25);
         row.step(0).setLength(3);
         row.setGate(80);
-        assertEquals(List.of(hit(6, 67, 6, 36, 100)), hits(SequenceBuilder.export(shifted, ExportOptions.matchingPlayback())));
+        assertEquals(List.of(hit(6, 73, 6, 36, 100)), hits(SequenceBuilder.export(shifted, ExportOptions.matchingPlayback())));
+    }
+
+    @Test
+    void nudgeKeepsTheGatedLength() throws Exception {
+        Beat beat = noteBeat(50, 45);
+        Track lead = beat.track(6);
+        lead.setProgram(81);
+        lead.step(4).setOn(true);
+        assertEquals(List.of(hit(96, 107, 6, 36, 100)), hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())));
+
+        lead.step(4).setNudge(25);
+        Hit late = hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())).get(0);
+        assertEquals(102, late.on());
+        assertEquals(11, late.off() - late.on());
+
+        lead.step(4).setNudge(45);
+        Hit later = hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())).get(0);
+        assertEquals(107, later.on());
+        assertEquals(118, later.off());
+        assertEquals(11, later.off() - later.on());
+
+        lead.step(4).setNudge(-45);
+        Hit early = hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())).get(0);
+        assertEquals(85, early.on());
+        assertEquals(11, early.off() - early.on());
+    }
+
+    @Test
+    void swingPlusNudgeDoesNotLandOnTheNextHit() throws Exception {
+        Beat beat = noteBeat(75, 100);
+        Track lead = beat.track(6);
+        lead.setProgram(81);
+        lead.setNote(60);
+        lead.step(13).setOn(true);
+        lead.step(13).setNudge(50);
+        lead.step(14).setOn(true);
+        lead.step(14).setVelocity(90);
+
+        List<Hit> notes = hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback()));
+        assertEquals(2, notes.size());
+        long nextGrid = SequenceBuilder.tickForStep(14, 75);
+        assertTrue(notes.get(0).on() < nextGrid, "nudged hit moved onto the next step");
+        assertEquals(nextGrid, notes.get(1).on());
+        assertNotEquals(notes.get(0).on(), notes.get(1).on());
+        assertTrue(notes.get(1).off() - notes.get(1).on() > 1, "the next hit was cut to a tick");
+        assertTrue(notes.get(0).off() <= notes.get(1).on());
+    }
+
+    @Test
+    void aLateNudgePastTheLoopWrapsToTheStart() throws Exception {
+        Beat beat = noteBeat(75, 100);
+        Track lead = beat.track(6);
+        lead.step(15).setOn(true);
+        lead.step(15).setNudge(50);
+
+        List<Hit> played = hits(SequenceBuilder.build(beat));
+        assertEquals(1, played.size());
+        assertEquals(0, played.get(0).on());
+        assertTrue(played.get(0).off() - played.get(0).on() > 1);
+        assertTrue(played.get(0).off() < SequenceBuilder.loopTicks(16));
+
+        List<Hit> exported = hits(SequenceBuilder.export(beat, ExportOptions.matchingPlayback()));
+        assertEquals(SequenceBuilder.loopTicks(16), exported.get(0).on());
     }
 
     @Test
@@ -477,9 +541,9 @@ class NoteLengthTest {
 
         List<Hit> song = hits(SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true)));
         assertEquals(List.of(
-            hit(0, 36, 6, 36, 100),
+            hit(0, 24, 6, 36, 100),
             hit(240, 408, 6, 36, 110),
-            hit(276, 324, 6, 40, 80)
+            hit(276, 312, 6, 40, 80)
         ), song);
         assertEquals(song, hits(SequenceBuilder.buildSong(beat)));
 
