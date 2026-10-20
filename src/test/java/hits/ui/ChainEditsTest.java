@@ -23,8 +23,8 @@ class ChainEditsTest {
 
         assertEquals("Added B to the chain", edits.append('b'));
         assertEquals(1, edits.index());
-        assertEquals("A", ChainLabels.partText(editor.beat().chain().get(0)));
-        assertEquals("B", ChainLabels.partText(editor.beat().chain().get(1)));
+        assertEquals("A ·1", ChainLabels.partText(editor.beat().chain().get(0), 16));
+        assertEquals("B ·1", ChainLabels.partText(editor.beat().chain().get(1), 16));
 
         assertTrue(edits.remove());
         assertEquals(0, edits.index());
@@ -53,10 +53,10 @@ class ChainEditsTest {
 
         edits.setRepeats(3);
         assertEquals(3, editor.beat().chain().get(1).repeats());
-        assertEquals("A×3", ChainLabels.partText(editor.beat().chain().get(1)));
+        assertEquals("A×3 ·1", ChainLabels.partText(editor.beat().chain().get(1), 16));
         assertEquals(
-            "A plays 3 times. Click to select.",
-            ChainLabels.partTip(editor.beat().chain().get(1))
+            "A is 16 steps (1 bar) and plays 3 times. Click to select.",
+            ChainLabels.partTip(editor.beat().chain().get(1), 16)
         );
         edits.setRepeats(3);
         editor.undo();
@@ -67,7 +67,9 @@ class ChainEditsTest {
         assertEquals("Following the song", ChainLabels.following());
         assertEquals("Add a pattern to the chain", ChainLabels.needEntry());
         assertEquals("C", ChainLabels.slotName('c'));
-        assertEquals("H×4", ChainLabels.partText(new Chain.Part('h', 4)));
+        assertEquals("H×4 ·1", ChainLabels.partText(new Chain.Part('h', 4), 16));
+        assertEquals("C ·2", ChainLabels.partText(new Chain.Part('c', 1), 32));
+        assertEquals("C ·12", ChainLabels.partText(new Chain.Part('c', 1), 12));
         assertEquals("Added H to the chain", new ChainEdits(editor).append('h'));
         assertEquals('h', editor.beat().chain().get(2).slot());
     }

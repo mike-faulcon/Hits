@@ -243,7 +243,9 @@ class ChainTest {
         int accent = beat.slot('b')[0].step(3).velocity();
         beat.copyBar('b');
         assertEquals('a', beat.activeSlot());
-        assertEquals(32, beat.stepCount());
+        assertEquals(32, beat.stepCount('b'));
+        assertEquals(16, beat.stepCount());
+        assertEquals(16, beat.stepCount('a'));
         assertTrue(beat.slot('b')[0].step(16).on());
         assertTrue(beat.slot('b')[0].step(19).on());
         assertEquals(accent, beat.slot('b')[0].step(19).velocity());

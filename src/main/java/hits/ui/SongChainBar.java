@@ -114,15 +114,16 @@ final class SongChainBar {
         Widgets.paintToggle(songMode, editor.songMode());
         List<Chain.Part> chain = editor.beat().chain();
         edits.clamp(chain.size());
-        String signature = edits.index() + " " + chain;
+        String signature = edits.index() + " " + chain + " " + lengths(editor.beat());
         if (!signature.equals(chainButtons)) {
             chainButtons = signature;
             chainSlots.removeAll();
             for (int i = 0; i < chain.size(); i++) {
                 Chain.Part part = chain.get(i);
-                JButton partButton = Widgets.button(ChainLabels.partText(part));
+                int steps = editor.beat().stepCount(part.slot());
+                JButton partButton = Widgets.button(ChainLabels.partText(part, steps));
                 int index = i;
-                partButton.setToolTipText(ChainLabels.partTip(part));
+                partButton.setToolTipText(ChainLabels.partTip(part, steps));
                 partButton.addActionListener(event -> selectChain(index));
                 Widgets.paintToggle(partButton, i == edits.index());
                 chainSlots.add(partButton);
@@ -212,5 +213,13 @@ final class SongChainBar {
             status.set(ChainLabels.hold(slot));
         }
         refreshStudio.run();
+    }
+
+    private static String lengths(hits.Beat beat) {
+        StringBuilder text = new StringBuilder();
+        for (Chain.Part part : beat.chain()) {
+            text.append(beat.stepCount(part.slot())).append(',');
+        }
+        return text.toString();
     }
 }

@@ -7,6 +7,7 @@ import hits.ExportOptions;
 import hits.GrooveGenerator;
 import hits.Notes;
 import hits.SequenceBuilder;
+import hits.Timeline;
 import hits.Track;
 import hits.WavAudio;
 
@@ -172,16 +173,15 @@ public final class HitsCli {
     }
 
     /**
-     * Tempo, swing, the patterns that are playing or named, the chain,
-     * each of those patterns' tracks, and the length of one pattern and of the song.
+     * Tempo, swing, the patterns that are playing or named, each pattern's step count,
+     * the chain, each of those patterns' tracks, and the length of one pattern and of the song.
      * Lengths use the same sequences as {@code render}.
      */
     static String describe(Beat beat) throws InvalidMidiDataException {
         Sequence pattern = SequenceBuilder.export(beat, ExportOptions.matchingPlayback());
         Sequence song = SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true));
-        int patternBars = bars(beat.stepCount(), 1);
-        int songSections = beat.hasChain() ? Math.max(1, Chain.sections(beat.chain())) : 1;
-        int songBars = bars(beat.stepCount(), songSections);
+        List<Timeline.Section> patternSections = Timeline.pattern(beat);
+        List<Timeline.Section> songSections = beat.hasChain() ? Timeline.song(beat) : patternSections;
         StringBuilder text = new StringBuilder();
         text.append(beat.name()).append('\n');
         text.append("tempo: ").append(beat.bpm()).append(" bpm\n");
@@ -191,6 +191,7 @@ public final class HitsCli {
         }
         text.append('\n');
         text.append("patterns: ").append(patternsUsed(beat)).append('\n');
+        text.append("lengths: ").append(lengthsText(beat)).append('\n');
         text.append("chain: ").append(chainText(beat)).append('\n');
         text.append("tracks:\n");
         for (char slot : usedSlots(beat)) {
@@ -215,20 +216,42 @@ public final class HitsCli {
                 ));
             }
         }
-        text.append("length: ").append(lengthText(pattern, patternBars)).append('\n');
-        text.append("song: ").append(lengthText(song, songBars)).append('\n');
+        text.append("length: ").append(lengthText(pattern, patternSections)).append('\n');
+        text.append("song: ").append(lengthText(song, songSections)).append('\n');
         return text.toString();
     }
 
-    private static int bars(int steps, int sections) {
-        int perSection = Math.max(1, steps / 16);
-        return perSection * Math.max(1, sections);
+    private static String lengthsText(Beat beat) {
+        StringBuilder text = new StringBuilder();
+        for (char slot : usedSlots(beat)) {
+            if (text.length() > 0) {
+                text.append(", ");
+            }
+            text.append(Beat.slotLabel(slot)).append(' ').append(beat.stepCount(slot));
+        }
+        return text.toString();
     }
 
-    private static String lengthText(Sequence sequence, int barCount) {
+    private static String lengthText(Sequence sequence, List<Timeline.Section> sections) {
         double seconds = WavAudio.musicalMicros(sequence) / 1_000_000.0;
-        String noun = barCount == 1 ? "bar" : "bars";
-        return barCount + " " + noun + ", " + String.format(Locale.ROOT, "%.3f", seconds) + " s";
+        return barPhrase(sections) + ", " + String.format(Locale.ROOT, "%.3f", seconds) + " s";
+    }
+
+    /** Whole bars when every section is a multiple of 16. Otherwise the step total. */
+    private static String barPhrase(List<Timeline.Section> sections) {
+        int steps = 0;
+        boolean whole = true;
+        for (Timeline.Section section : sections) {
+            steps += section.steps();
+            if (section.steps() % 16 != 0) {
+                whole = false;
+            }
+        }
+        if (whole && steps > 0 && steps % 16 == 0) {
+            int bars = steps / 16;
+            return bars + (bars == 1 ? " bar" : " bars");
+        }
+        return steps + (steps == 1 ? " step" : " steps");
     }
 
     private static String patternsUsed(Beat beat) {

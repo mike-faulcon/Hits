@@ -32,14 +32,14 @@ class TrackReadoutTest {
     void stepPitchUsesTheTrackUntilTheStepHasItsOwn() {
         Beat beat = Beat.drumKit("t");
         Track kick = beat.track(0);
-        TrackReadout.StepPitch none = TrackReadout.stepPitch(beat, kick, -1);
+        TrackReadout.StepPitch none = TrackReadout.stepPitch(beat, 'a', kick, -1);
         assertEquals("—", none.text());
         assertEquals("Right-click or Alt-click a step that is on.", none.tip());
         assertFalse(none.nudgeEnabled());
         assertFalse(none.clearEnabled());
 
         kick.tap(0, false);
-        TrackReadout.StepPitch trackPitch = TrackReadout.stepPitch(beat, kick, 0);
+        TrackReadout.StepPitch trackPitch = TrackReadout.stepPitch(beat, 'a', kick, 0);
         assertEquals("C1", trackPitch.text());
         assertEquals("Uses the track pitch, C1.", trackPitch.tip());
         assertTrue(trackPitch.nudgeEnabled());
@@ -57,7 +57,7 @@ class TrackReadoutTest {
         assertFalse(unselected.enabled());
 
         kick.step(0).setPitch(38);
-        TrackReadout.StepPitch own = TrackReadout.stepPitch(beat, kick, 0);
+        TrackReadout.StepPitch own = TrackReadout.stepPitch(beat, 'a', kick, 0);
         assertEquals("D1", own.text());
         assertEquals("This step plays D1. The track pitch is C1.", own.tip());
         assertTrue(own.nudgeEnabled());

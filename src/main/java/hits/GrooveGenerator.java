@@ -104,13 +104,13 @@ public final class GrooveGenerator {
         this.random = new Random(seed);
     }
 
-    /** A full starter groove for {@code stepCount} steps (16, or 32 when the pattern is two bars). */
+    /** A starter groove for {@code stepCount} steps. Lengths past 16 keep a second bar up to that length. */
     public Groove generate(Genre genre, int stepCount) {
         if (genre == null) {
             throw new IllegalArgumentException("A style is required");
         }
         this.genre = genre;
-        this.steps = stepCount >= 32 ? 32 : 16;
+        this.steps = Beat.clampSteps(stepCount);
         this.grid = new int[Beat.TRACKS][steps];
         switch (genre) {
             case BOOM_BAP -> boomBap();
@@ -128,7 +128,7 @@ public final class GrooveGenerator {
      * An empty role still gets a few hits, so Shuffle always changes the row.
      */
     public int[] shuffle(Genre genre, int role, int stepCount) {
-        int length = stepCount >= 32 ? 32 : 16;
+        int length = Beat.clampSteps(stepCount);
         if (role < 0 || role >= Beat.TRACKS) {
             return new int[length];
         }
@@ -164,7 +164,7 @@ public final class GrooveGenerator {
 
     /** True when any step inside the audible length of {@code slot} is on. */
     public static boolean patternHasHits(Beat beat, char slot) {
-        int limit = beat.stepCount();
+        int limit = beat.stepCount(slot);
         for (Track track : beat.slot(slot)) {
             for (int step = 0; step < limit; step++) {
                 if (track.step(step).on()) {
@@ -199,7 +199,7 @@ public final class GrooveGenerator {
     /** Writes {@code genre} onto the pattern on screen. Tempo, swing, and hits are one undo. */
     public static void write(Editor editor, Genre genre, long seed) {
         char slot = editor.viewSlot();
-        Groove groove = new GrooveGenerator(seed).generate(genre, editor.beat().stepCount());
+        Groove groove = new GrooveGenerator(seed).generate(genre, editor.beat().stepCount(slot));
         editor.edit(beat -> {
             beat.setActiveSlot(slot);
             apply(beat, groove);
@@ -213,7 +213,7 @@ public final class GrooveGenerator {
     public static void shuffleTrack(Editor editor, Genre genre, long seed) {
         int index = editor.trackIndex();
         char slot = editor.viewSlot();
-        int steps = editor.beat().stepCount();
+        int steps = editor.beat().stepCount(slot);
         int[] hits = new GrooveGenerator(seed).shuffle(genre, role(editor.viewTrack(index), index), steps);
         int[] changed = ensureAudibleChange(editor.viewTrack(index), hits, steps, seed);
         editor.edit(beat -> {
@@ -248,7 +248,7 @@ public final class GrooveGenerator {
     public static void apply(Beat beat, Groove groove) {
         beat.setBpm(groove.bpm());
         beat.setSwing(groove.swing());
-        int limit = beat.stepCount();
+        int limit = beat.stepCount(beat.activeSlot());
         for (int track = 0; track < Beat.TRACKS; track++) {
             writeSteps(beat.activeTracks()[track], groove.hits(track), limit);
         }
@@ -259,7 +259,7 @@ public final class GrooveGenerator {
         if (track < 0 || track >= Beat.TRACKS || velocities == null) {
             return;
         }
-        writeSteps(beat.activeTracks()[track], velocities, beat.stepCount());
+        writeSteps(beat.activeTracks()[track], velocities, beat.stepCount(beat.activeSlot()));
     }
 
     private static void writeSteps(Track track, int[] velocities, int limit) {
@@ -426,9 +426,9 @@ public final class GrooveGenerator {
         }
     }
 
-    /** Copies the bar, then adds a little hat movement and, for boom bap and rock, a tom fill. */
+    /** Copies the bar up to this pattern's length, then adds a little hat movement and, for boom bap and rock, a tom fill. */
     private void secondBar() {
-        if (steps < 32) {
+        if (steps <= 16) {
             return;
         }
         for (int track = 0; track < Beat.TRACKS; track++) {
@@ -437,17 +437,29 @@ public final class GrooveGenerator {
                 if (velocity > 0 && (track == HAT || track == OPEN || track == CLAP)) {
                     velocity = vary(velocity, 5);
                 }
-                grid[track][16 + step] = velocity;
+                int target = 16 + step;
+                if (target < steps) {
+                    grid[track][target] = velocity;
+                }
             }
         }
         int extra = 16 + pick(1, 3, 5, 9, 11, 13);
-        if (grid[HAT][extra] == 0 && grid[OPEN][extra] == 0 && chance(80)) {
+        if (extra < steps && grid[HAT][extra] == 0 && grid[OPEN][extra] == 0 && chance(80)) {
             grid[HAT][extra] = vary(68, 8);
         }
         if ((genre == Genre.ROCK || genre == Genre.BOOM_BAP) && chance(55)) {
-            grid[TOM][16 + 13] = vary(78, 8);
-            grid[TOM][16 + 14] = vary(98, 8);
-            grid[TOM][16 + 15] = vary(114, 6);
+            int low = vary(78, 8);
+            int mid = vary(98, 8);
+            int high = vary(114, 6);
+            if (29 < steps) {
+                grid[TOM][29] = low;
+            }
+            if (30 < steps) {
+                grid[TOM][30] = mid;
+            }
+            if (31 < steps) {
+                grid[TOM][31] = high;
+            }
         }
     }
 

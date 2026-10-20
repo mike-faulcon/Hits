@@ -449,6 +449,48 @@ class NoteLengthTest {
         assertEquals(14, NoteSpan.lengthForDrag(2, 20, 16));
     }
 
+    @Test
+    void aTwelveStepSlotCarriesHeldAndNudgedNotesAcrossTheChain() throws Exception {
+        Beat beat = noteBeat(75, 100);
+        beat.setSlotSteps('a', 12);
+        beat.setSlotSteps('b', 5);
+        Track bass = beat.track(6);
+        bass.step(0).setOn(true);
+        bass.step(0).setNudge(-50);
+        bass.step(0).setVelocity(100);
+        bass.step(10).setOn(true);
+        bass.step(10).setLength(7);
+        bass.step(10).setVelocity(110);
+        bass.step(14).setOn(true);
+        bass.step(14).setLength(2);
+        bass.step(14).setVelocity(70);
+        Track next = beat.slot('b')[6];
+        next.setMode(TrackMode.NOTE);
+        next.setNote(36);
+        next.setGate(100);
+        next.step(0).setOn(true);
+        next.step(0).setPitch(40);
+        next.step(0).setNudge(-50);
+        next.step(0).setVelocity(80);
+        beat.addChain('a');
+        beat.addChain('b');
+
+        List<Hit> song = hits(SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true)));
+        assertEquals(List.of(
+            hit(0, 36, 6, 36, 100),
+            hit(240, 408, 6, 36, 110),
+            hit(276, 324, 6, 40, 80)
+        ), song);
+        assertEquals(song, hits(SequenceBuilder.buildSong(beat)));
+
+        List<Hit> loop = hits(SequenceBuilder.build(beat));
+        assertEquals(List.of(
+            hit(240, 276, 6, 36, 110),
+            hit(276, 288, 6, 36, 100)
+        ), loop);
+        assertTrue(loop.stream().allMatch(note -> note.off() <= 288));
+    }
+
     private static Beat noteBeat(int swing, int gate) {
         Beat beat = Beat.drumKit("notes");
         beat.setSwing(swing);

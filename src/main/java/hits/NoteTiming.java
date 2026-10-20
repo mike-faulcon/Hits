@@ -18,25 +18,39 @@ final class NoteTiming {
 
     /**
      * Tick of step {@code index} measured from the start of a pattern.
-     * Indexes past {@code stepCount} continue into the following patterns, and each of those
-     * restarts swing the way the song chain does. The tick of {@code stepCount} itself is
-     * {@code sectionTicks}, which is the boundary the last one-step note already uses.
+     * Indexes past {@code stepCount} continue into {@code ahead}, each entry being the next
+     * section's own step count, and each of those restarts swing. After the known sections,
+     * the last length repeats so a note can finish past the file. An empty {@code ahead}
+     * repeats this section, which is what one looping pattern already did.
+     * The tick of {@code stepCount} itself is {@code sectionTicks}.
      */
-    static long gridTick(int index, int stepCount, int swing, long sectionTicks) {
+    static long gridTick(int index, int stepCount, int swing, long sectionTicks, int[] ahead) {
         if (index < stepCount) {
             return SequenceBuilder.tickForStep(index, swing);
         }
+        long cursor = sectionTicks;
+        int remaining = index - Math.max(1, stepCount);
         int span = Math.max(1, stepCount);
-        int beyond = index - span;
-        int later = beyond / span;
-        int local = beyond % span;
-        return sectionTicks * (later + 1L) + SequenceBuilder.tickForStep(local, swing);
+        if (ahead != null) {
+            for (int next : ahead) {
+                int count = Math.max(1, next);
+                if (remaining < count) {
+                    return cursor + SequenceBuilder.tickForStep(remaining, swing);
+                }
+                cursor += SequenceBuilder.loopTicks(count);
+                remaining -= count;
+                span = count;
+            }
+        }
+        int later = remaining / span;
+        int local = remaining % span;
+        return cursor + (long) later * SequenceBuilder.loopTicks(span) + SequenceBuilder.tickForStep(local, swing);
     }
 
     /**
      * Start tick of one step. {@code wrapStart} is pattern playback: a negative nudge on step 0
      * moves to the end of this loop. Song and export leave the start in the previous section,
-     * and clamp it at tick 0.
+     * and clamp it at tick 0. The section start already comes from each pattern's own length.
      */
     static long startTick(
         int step,
@@ -45,9 +59,10 @@ final class NoteTiming {
         int nudgePercent,
         long origin,
         long sectionTicks,
-        boolean wrapStart
+        boolean wrapStart,
+        int[] ahead
     ) {
-        long local = gridTick(step, stepCount, swing, sectionTicks) + offsetTicks(nudgePercent);
+        long local = gridTick(step, stepCount, swing, sectionTicks, ahead) + offsetTicks(nudgePercent);
         if (wrapStart && local < 0) {
             return origin + sectionTicks + local;
         }
@@ -59,7 +74,8 @@ final class NoteTiming {
      * Places one hit.
      * Length counts steps from {@code step}. The gate shortens only the last of those steps.
      * {@code tieAt} ends the note at that tick instead (legato into the next hit). Pass {@code -1}
-     * to use the length. {@code wrapStart} wraps a start that falls before the section.
+     * to use the length. {@code ahead} is each following section's step count.
+     * {@code wrapStart} wraps a start that falls before the section.
      * {@code clipTick} cuts the note-off so a loop does not leave the note hanging. Pass {@code -1}
      * to let a long note cross a section boundary or run past the file.
      * A wrapped start keeps its unwrapped duration and then stops at the clip, so the note-off
@@ -76,13 +92,14 @@ final class NoteTiming {
         long origin,
         long sectionTicks,
         boolean wrapStart,
-        long clipTick
+        long clipTick,
+        int[] ahead
     ) {
-        long localStart = gridTick(step, stepCount, swing, sectionTicks) + offsetTicks(nudgePercent);
+        long localStart = gridTick(step, stepCount, swing, sectionTicks, ahead) + offsetTicks(nudgePercent);
         long naturalStart = origin + localStart;
         long naturalEnd = tieAt >= 0
             ? tieAt
-            : gatedEnd(step, lengthSteps, stepCount, swing, gatePercent, origin, sectionTicks);
+            : gatedEnd(step, lengthSteps, stepCount, swing, gatePercent, origin, sectionTicks, ahead);
         long start = naturalStart;
         long end = naturalEnd;
         if (wrapStart && localStart < 0) {
@@ -114,12 +131,13 @@ final class NoteTiming {
         int swing,
         int gatePercent,
         long origin,
-        long sectionTicks
+        long sectionTicks,
+        int[] ahead
     ) {
         int length = Step.clampLength(lengthSteps);
         int last = step + length - 1;
-        long lastStart = origin + gridTick(last, stepCount, swing, sectionTicks);
-        long boundary = origin + gridTick(last + 1, stepCount, swing, sectionTicks);
+        long lastStart = origin + gridTick(last, stepCount, swing, sectionTicks, ahead);
+        long boundary = origin + gridTick(last + 1, stepCount, swing, sectionTicks, ahead);
         long piece = Math.max(1, boundary - lastStart);
         int gate = Math.max(5, Math.min(100, gatePercent));
         return lastStart + Math.max(1, Math.round(piece * (gate / 100.0)));

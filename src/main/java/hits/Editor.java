@@ -161,7 +161,7 @@ public final class Editor {
 
     /** Points the velocity slider at a step without toggling it. */
     public void selectStep(int row, int column) {
-        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.stepCount()) {
+        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         trackIndex = row;
@@ -172,7 +172,7 @@ public final class Editor {
     /** Sets the play probability of the selected step. No-op when no step is selected. */
     public void setStepProbability(int probability) {
         int column = stepIndex;
-        if (column < 0 || column >= beat.stepCount()) {
+        if (column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         int row = trackIndex;
@@ -183,7 +183,7 @@ public final class Editor {
     /** Sets how many steps the selected hit lasts. No-op when no step is selected. */
     public void setStepLength(int length) {
         int column = stepIndex;
-        if (column < 0 || column >= beat.stepCount()) {
+        if (column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         int row = trackIndex;
@@ -194,7 +194,7 @@ public final class Editor {
     /** Moves the selected step off the grid by one percent. No-op when no step is selected. */
     public void bumpStepNudge(int delta) {
         int column = stepIndex;
-        if (column < 0 || column >= beat.stepCount()) {
+        if (column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         int row = trackIndex;
@@ -208,7 +208,7 @@ public final class Editor {
     /** Sets the selected step's nudge in percent of a step. No-op when no step is selected. */
     public void setStepNudge(int nudge) {
         int column = stepIndex;
-        if (column < 0 || column >= beat.stepCount()) {
+        if (column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         int row = trackIndex;
@@ -231,7 +231,7 @@ public final class Editor {
     }
 
     public void tap(int row, int column, boolean accent) {
-        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.stepCount()) {
+        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         trackIndex = row;
