@@ -54,4 +54,44 @@ class ExportPlanTest {
         assertEquals(" (all tracks, song)", ExportPlan.summary(new ExportOptions(false, true, 4, true)));
         assertEquals(" (as heard, song)", ExportPlan.summary(new ExportOptions(true, false, 1, true)));
     }
+
+    @Test
+    void dragFollowsSongModeAndKeepsTheOtherChoices() {
+        ExportOptions pattern = ExportPlan.dragOptions(false, false, 1, false, true);
+        assertFalse(pattern.song());
+        assertFalse(pattern.bothSlots());
+        assertFalse(pattern.asHeard());
+        assertEquals(1, pattern.repeats());
+
+        ExportOptions song = ExportPlan.dragOptions(true, true, 4, true, true);
+        assertTrue(song.asHeard());
+        assertTrue(song.song());
+        assertFalse(song.bothSlots());
+        assertEquals(1, song.repeats());
+
+        ExportOptions emptyChain = ExportPlan.dragOptions(false, true, 3, true, false);
+        assertFalse(emptyChain.song());
+        assertTrue(emptyChain.bothSlots());
+        assertEquals(3, emptyChain.repeats());
+
+        ExportOptions remembered = ExportPlan.dragOptions(true, true, 100, false, true);
+        assertTrue(remembered.asHeard());
+        assertTrue(remembered.bothSlots());
+        assertEquals(32, remembered.repeats());
+        assertFalse(remembered.song());
+    }
+
+    @Test
+    void dragFileNameSaysWhatIsInTheFile() {
+        ExportOptions pattern = ExportPlan.dragOptions(false, false, 1, false, false);
+        assertEquals("AlbumTrackv3-A.mid", ExportPlan.dragFileName("Album Track – v3", pattern, 'a', "MID"));
+        assertEquals("AlbumTrackv3-B.wav", ExportPlan.dragFileName("Album Track – v3", pattern, 'b', "wav"));
+        assertEquals("untitled-A.mid", ExportPlan.dragFileName("???", pattern, 'a', "mid"));
+
+        ExportOptions song = ExportPlan.dragOptions(true, true, 4, true, true);
+        assertEquals("Take-song-as-heard.wav", ExportPlan.dragFileName("Take", song, 'b', "wav"));
+
+        ExportOptions pair = ExportPlan.dragOptions(true, true, 4, false, true);
+        assertEquals("Take-A-then-B-x4-as-heard.mid", ExportPlan.dragFileName("Take", pair, 'a', "mid"));
+    }
 }
