@@ -57,7 +57,7 @@ final class MixerPanel {
     void wire() {
         master.setToolTipText("Master volume. 127 is full. This turns every track down together.");
         masterDrag.wire(master, beat -> beat.setMaster(master.getValue()));
-        allPatterns.setToolTipText("Level and pan apply to every pattern. Turn this off to edit only the pattern on screen. Mute and solo stay on this pattern.");
+        allPatterns.setToolTipText("Level and pan apply to every pattern whose row has the same name and sound. A different instrument on that row is left alone. Turn this off to edit only the pattern on screen. Mute and solo stay on this pattern.");
         for (int row = 0; row < Beat.TRACKS; row++) {
             int index = row;
             levels[row].setToolTipText("Track level. 100 leaves each hit as programmed. 0 is silent.");

@@ -48,9 +48,10 @@ final class NoteTiming {
     }
 
     /**
-     * Start tick of one step. {@code wrapStart} is pattern playback: a negative nudge on step 0
-     * moves to the end of this loop. Song and export leave the start in the previous section,
-     * and clamp it at tick 0. The section start already comes from each pattern's own length.
+     * Start tick of one step. {@code wrapStart} is pattern playback: a nudge that falls outside
+     * the loop comes back in at the other end. Song and export leave an early start in the
+     * previous section, and clamp it at tick 0. The section start already comes from each
+     * pattern's own length.
      */
     static long startTick(
         int step,
@@ -62,9 +63,12 @@ final class NoteTiming {
         boolean wrapStart,
         int[] ahead
     ) {
-        long local = gridTick(step, stepCount, swing, sectionTicks, ahead) + offsetTicks(nudgePercent);
+        long local = swungStart(step, stepCount, swing, nudgePercent, sectionTicks, ahead).local;
         if (wrapStart && local < 0) {
             return origin + sectionTicks + local;
+        }
+        if (wrapStart && local >= sectionTicks) {
+            return origin + (local - sectionTicks);
         }
         long start = origin + local;
         return start < 0 ? 0 : start;
@@ -75,11 +79,14 @@ final class NoteTiming {
      * Length counts steps from {@code step}. The gate shortens only the last of those steps.
      * {@code tieAt} ends the note at that tick instead (legato into the next hit). Pass {@code -1}
      * to use the length. {@code ahead} is each following section's step count.
-     * {@code wrapStart} wraps a start that falls before the section.
+     * {@code wrapStart} wraps a start that falls outside the section, early or late.
      * {@code clipTick} cuts the note-off so a loop does not leave the note hanging. Pass {@code -1}
      * to let a long note cross a section boundary or run past the file.
      * A wrapped start keeps its unwrapped duration and then stops at the clip, so the note-off
      * is never left on the far side of the loop.
+     * The nudge moves the note-off by the same amount as the note-on, so the hit keeps its length.
+     * A legato tie is the next hit's start and is not shifted again.
+     * Swing plus nudge stays strictly inside the neighbouring steps, so two hits cannot share a tick.
      */
     static Sound place(
         int step,
@@ -95,22 +102,21 @@ final class NoteTiming {
         long clipTick,
         int[] ahead
     ) {
-        long localStart = gridTick(step, stepCount, swing, sectionTicks, ahead) + offsetTicks(nudgePercent);
+        Swung swung = swungStart(step, stepCount, swing, nudgePercent, sectionTicks, ahead);
+        long localStart = swung.local;
         long naturalStart = origin + localStart;
         long naturalEnd = tieAt >= 0
             ? tieAt
-            : gatedEnd(step, lengthSteps, stepCount, swing, gatePercent, origin, sectionTicks, ahead);
+            : gatedEnd(step, lengthSteps, stepCount, swing, gatePercent, origin, sectionTicks, ahead) + swung.applied;
         long start = naturalStart;
         long end = naturalEnd;
-        if (wrapStart && localStart < 0) {
+        if (wrapStart && (localStart < 0 || localStart >= sectionTicks)) {
             long duration = Math.max(1, naturalEnd - naturalStart);
-            start = origin + sectionTicks + localStart;
+            long wrapped = localStart < 0 ? sectionTicks + localStart : localStart - sectionTicks;
+            start = origin + wrapped;
             end = start + duration;
         } else if (start < 0) {
             start = 0;
-        }
-        if (wrapStart && start >= origin + sectionTicks) {
-            start = origin + sectionTicks - 1;
         }
         if (clipTick >= 0 && end > clipTick) {
             end = clipTick;
@@ -123,6 +129,41 @@ final class NoteTiming {
         }
         return new Sound(start, end);
     }
+
+    /**
+     * Grid tick plus nudge. The nudge is then pulled back by a tick when it would land on the
+     * previous or next step inside this section. The last step may still cross the section end:
+     * pattern playback wraps that hit, and song playback lets it enter the next section.
+     */
+    private static Swung swungStart(
+        int step,
+        int stepCount,
+        int swing,
+        int nudgePercent,
+        long sectionTicks,
+        int[] ahead
+    ) {
+        long applied = offsetTicks(nudgePercent);
+        long local = gridTick(step, stepCount, swing, sectionTicks, ahead) + applied;
+        if (step + 1 < stepCount) {
+            long next = gridTick(step + 1, stepCount, swing, sectionTicks, ahead);
+            if (local >= next) {
+                applied -= local - (next - 1);
+                local = next - 1;
+            }
+        }
+        if (step > 0) {
+            long previous = gridTick(step - 1, stepCount, swing, sectionTicks, ahead);
+            if (local <= previous) {
+                applied += (previous + 1) - local;
+                local = previous + 1;
+            }
+        }
+        return new Swung(local, applied);
+    }
+
+    /** {@code local} is the start measured from the section. {@code applied} is the tick offset that moved both ends. */
+    private record Swung(long local, long applied) {}
 
     private static long gatedEnd(
         int step,

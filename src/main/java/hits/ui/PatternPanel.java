@@ -26,8 +26,12 @@ import java.awt.event.MouseEvent;
 
 /** Track names, mute, solo, the step grid, and a velocity lane for the selected track. */
 final class PatternPanel extends JPanel implements Scrollable {
-    private static final int LANE_RESERVE = 64;
-    private static final int MIN_CELL = 32;
+    private static final int LANE_RESERVE = 56;
+    private static final int MIN_CELL = 26;
+    private static final int MIN_CELL_WIDTH = 16;
+    private static final int GUTTER = 210;
+    private static final int GROUP_GAP = 6;
+    private static final int HEADER = 24;
 
     private final Editor editor;
     private int playhead = -1;
@@ -73,7 +77,10 @@ final class PatternPanel extends JPanel implements Scrollable {
     public Dimension getPreferredSize() {
         int columns = editor.beat().gridColumns(editor.viewSlot());
         int groups = Math.max(0, columns / 4 - 1);
-        return new Dimension(248 + columns * 30 + groups * 12, 28 + Beat.TRACKS * MIN_CELL + LANE_RESERVE);
+        return new Dimension(
+            GUTTER + 16 + columns * MIN_CELL_WIDTH + groups * GROUP_GAP,
+            HEADER + Beat.TRACKS * MIN_CELL + LANE_RESERVE
+        );
     }
 
     @Override
@@ -136,10 +143,10 @@ final class PatternPanel extends JPanel implements Scrollable {
         g.drawString(index, 10, y + metrics.cellHeight / 2 + 5);
         g.setFont(getFont().deriveFont(Font.BOLD));
         g.setColor(Theme.TEXT);
-        g.drawString(clip(names, track.name(), 108), 28, y + metrics.cellHeight / 2 - 2);
+        g.drawString(clip(names, track.name(), 96), 28, y + metrics.cellHeight / 2 - 2);
         g.setFont(getFont().deriveFont(11f));
         g.setColor(Theme.MUTED);
-        g.drawString(clip(g.getFontMetrics(), track.soundName(), 108), 28, y + metrics.cellHeight / 2 + 14);
+        g.drawString(clip(g.getFontMetrics(), track.soundName(), 96), 28, y + metrics.cellHeight / 2 + 12);
         paintChip(g, metrics.mute(row), "M", track.mute(), Theme.MUTE_ON);
         paintChip(g, metrics.solo(row), "S", track.solo(), Theme.SOLO);
         for (int column = 0; column < metrics.columns; column++) {
@@ -422,14 +429,11 @@ final class PatternPanel extends JPanel implements Scrollable {
         int columns = editor.beat().gridColumns(editor.viewSlot());
         int width = Math.max(getWidth(), getPreferredSize().width);
         int height = Math.max(getHeight(), getPreferredSize().height);
-        int gutter = 236;
-        int header = 28;
-        int groupGap = 12;
         int groups = Math.max(0, columns / 4 - 1);
-        int availableWidth = width - gutter - 12 - groups * groupGap;
-        int cellWidth = Math.max(28, availableWidth / columns);
-        int cellHeight = Math.max(MIN_CELL, (height - header - LANE_RESERVE) / Beat.TRACKS);
-        return new Metrics(gutter, header, groupGap, cellWidth, cellHeight, columns);
+        int availableWidth = width - GUTTER - 12 - groups * GROUP_GAP;
+        int cellWidth = Math.max(MIN_CELL_WIDTH, availableWidth / Math.max(1, columns));
+        int cellHeight = Math.max(MIN_CELL, (height - HEADER - LANE_RESERVE) / Beat.TRACKS);
+        return new Metrics(GUTTER, HEADER, GROUP_GAP, cellWidth, cellHeight, columns);
     }
 
     private static String clip(FontMetrics metrics, String text, int width) {

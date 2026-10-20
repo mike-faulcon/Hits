@@ -199,7 +199,8 @@ public final class Track {
 
     /**
      * The offset that playback uses. Step nudge and track shift add together,
-     * then stay inside half a step so a hit cannot move onto the next grid point.
+     * then stay inside half a step. Swing is applied as well, and the sounding tick
+     * is kept off the next grid point so two hits cannot land together.
      */
     public int playedNudge(int index) {
         return Step.clampNudge(steps[index].nudge() + shift);

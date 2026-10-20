@@ -7,7 +7,8 @@ public final class Mix {
     private Mix() {}
 
     /**
-     * Sets one row's level. {@code allPatterns} writes every pattern A–H.
+     * Sets one row's level. {@code allPatterns} writes every pattern whose row is the same
+     * instrument (name, mode, program, and note). A row that is a different sound is left alone.
      * Otherwise only {@code slot} changes, which is how a section can have its own mix.
      */
     public static void setLevel(Beat beat, char slot, int row, int level, boolean allPatterns) {
@@ -15,8 +16,8 @@ public final class Mix {
     }
 
     /**
-     * Sets one row's pan. {@code allPatterns} writes every pattern A–H.
-     * Otherwise only {@code slot} changes.
+     * Sets one row's pan. {@code allPatterns} writes every pattern whose row is the same
+     * instrument. Otherwise only {@code slot} changes.
      */
     public static void setPan(Beat beat, char slot, int row, int pan, boolean allPatterns) {
         apply(beat, slot, row, allPatterns, track -> track.setPan(pan));
@@ -26,13 +27,26 @@ public final class Mix {
         if (beat == null || row < 0 || row >= Beat.TRACKS) {
             return;
         }
+        char current = Beat.normalizeSlot(slot);
+        Track source = beat.slot(current)[row];
         if (allPatterns) {
             for (int i = 0; i < Beat.SLOT_COUNT; i++) {
-                edit.accept(beat.slot(Beat.slotLetter(i))[row]);
+                Track track = beat.slot(Beat.slotLetter(i))[row];
+                if (track == source || sameInstrument(source, track)) {
+                    edit.accept(track);
+                }
             }
             return;
         }
-        edit.accept(beat.slot(slot)[row]);
+        edit.accept(source);
+    }
+
+    /** Name plus the sound. Two rows that only share a number are not the same instrument. */
+    static boolean sameInstrument(Track left, Track right) {
+        return left.name().equals(right.name())
+            && left.mode() == right.mode()
+            && left.program() == right.program()
+            && left.note() == right.note();
     }
 
     /**

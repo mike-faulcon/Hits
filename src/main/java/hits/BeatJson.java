@@ -72,9 +72,9 @@ public final class BeatJson {
         if (root.containsKey("master") && root.get("master") != null) {
             beat.setMaster(number(root.get("master")));
         }
-        Map<String, Object> slots = asMap(root.get("slots"));
-        readSlot(beat, 'a', asMap(slots.get("a")));
-        readSlot(beat, 'b', asMap(slots.get("b")));
+        Map<String, Object> slots = requireObject(root, "slots");
+        readSlot(beat, 'a', requireObject(slots, "a"));
+        readSlot(beat, 'b', requireObject(slots, "b"));
         for (char slot = 'c'; slot <= 'h'; slot++) {
             Object value = slots.get(String.valueOf(slot));
             if (value != null) {
@@ -279,6 +279,19 @@ public final class BeatJson {
             return (Map<String, Object>) map;
         }
         throw new IllegalArgumentException("Expected an object");
+    }
+
+    /** A required object field. The message names the missing key. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> requireObject(Map<String, Object> parent, String key) {
+        if (!parent.containsKey(key) || parent.get(key) == null) {
+            throw new IllegalArgumentException("Beat file is missing \"" + key + "\"");
+        }
+        Object value = parent.get(key);
+        if (!(value instanceof Map<?, ?> map)) {
+            throw new IllegalArgumentException("\"" + key + "\" should be an object");
+        }
+        return (Map<String, Object>) map;
     }
 
     private static List<?> asList(Object value) {

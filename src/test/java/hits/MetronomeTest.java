@@ -1,11 +1,15 @@
 package hits;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.sound.midi.MidiEvent;
 import javax.sound.midi.MidiMessage;
 import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,10 +18,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MetronomeTest {
     @Test
-    void clickUsesClavesAndATriangleNotTheWoodBlocks() {
-        assertEquals(75, SequenceBuilder.CLICK_ACCENT_NOTE);
-        assertEquals(81, SequenceBuilder.CLICK_NOTE);
+    void clickIsAPitchedSquareWaveNotADrumWoodBlock() {
+        assertEquals(15, SequenceBuilder.CLICK_CHANNEL);
+        assertEquals(80, SequenceBuilder.CLICK_PROGRAM);
+        assertEquals(84, SequenceBuilder.CLICK_ACCENT_NOTE);
+        assertEquals(72, SequenceBuilder.CLICK_NOTE);
+        assertTrue(SequenceBuilder.CLICK_CHANNEL != Gm.DRUM_CHANNEL);
         assertTrue(SequenceBuilder.CLICK_ACCENT_NOTE != 76 && SequenceBuilder.CLICK_NOTE != 77);
+        assertTrue(SequenceBuilder.CLICK_ACCENT_NOTE != 75 && SequenceBuilder.CLICK_NOTE != 81);
         for (int note : Gm.DRUM_NOTES) {
             assertTrue(note != SequenceBuilder.CLICK_ACCENT_NOTE && note != SequenceBuilder.CLICK_NOTE);
         }
@@ -32,7 +40,7 @@ class MetronomeTest {
         assertEquals(List.of(0L, 96L, 192L, 288L), ticks(clicks));
         assertEquals(SequenceBuilder.CLICK_ACCENT_NOTE, note(clicks.get(0)));
         assertEquals(SequenceBuilder.CLICK_ACCENT_VELOCITY, velocity(clicks.get(0)));
-        assertEquals(Gm.DRUM_CHANNEL, channel(clicks.get(0)));
+        assertEquals(SequenceBuilder.CLICK_CHANNEL, channel(clicks.get(0)));
         for (int i = 1; i < clicks.size(); i++) {
             assertEquals(SequenceBuilder.CLICK_NOTE, note(clicks.get(i)));
             assertEquals(SequenceBuilder.CLICK_VELOCITY, velocity(clicks.get(i)));
@@ -128,6 +136,114 @@ class MetronomeTest {
         assertTrue(clicks(SequenceBuilder.export(beat, new ExportOptions(false, true, 2))).isEmpty());
         assertTrue(clicks(SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true))).isEmpty());
         assertTrue(clicks(SequenceBuilder.build(beat, true)).size() > 0);
+    }
+
+    @Test
+    void theClickIsSpectrallyDistinctFromAWoodBlock(@TempDir Path directory) throws Exception {
+        Beat clickBeat = Beat.drumKit("click");
+        clickBeat.setBpm(120);
+        clickBeat.setSwing(50);
+        Sequence clickSequence = SequenceBuilder.build(clickBeat, true);
+        assertTrue(program(clickSequence, SequenceBuilder.CLICK_CHANNEL, SequenceBuilder.CLICK_PROGRAM));
+
+        Beat wood = Beat.drumKit("wood");
+        wood.setBpm(120);
+        wood.setSwing(50);
+        wood.track(0).setNote(76);
+        wood.track(0).tap(0, false);
+        wood.track(0).step(0).setVelocity(120);
+        Sequence woodSequence = SequenceBuilder.build(wood, false);
+
+        Path clickWav = directory.resolve("click.wav");
+        Path woodWav = directory.resolve("wood.wav");
+        try {
+            WavRenderer.render(clickSequence, clickWav, null, null, null);
+            WavRenderer.render(woodSequence, woodWav, null, null, null);
+        } catch (Exception exception) {
+            if (WavRenderer.unavailable(exception)) {
+                Assumptions.abort("offline render is not available: " + exception.getMessage());
+            }
+            throw exception;
+        }
+
+        int samples = 2048;
+        double[] clickSpectrum = spectrum(mono(Files.readAllBytes(clickWav), samples));
+        double[] woodSpectrum = spectrum(mono(Files.readAllBytes(woodWav), samples));
+        double correlation = cosine(clickSpectrum, woodSpectrum);
+        assertTrue(correlation < 0.85, "click matched the wood block, correlation " + correlation);
+
+        double expectedHz = 440.0 * Math.pow(2.0, (SequenceBuilder.CLICK_ACCENT_NOTE - 69) / 12.0);
+        double peakHz = peakHz(clickSpectrum, samples);
+        assertEquals(expectedHz, peakHz, 40.0, "click peak " + peakHz + " Hz, expected " + expectedHz);
+    }
+
+    private static boolean program(Sequence sequence, int channel, int program) {
+        for (javax.sound.midi.Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                if (track.get(i).getMessage() instanceof ShortMessage message
+                    && message.getCommand() == ShortMessage.PROGRAM_CHANGE
+                    && message.getChannel() == channel
+                    && message.getData1() == program) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static short[] mono(byte[] wav, int count) {
+        short[] samples = new short[count];
+        int index = 0;
+        for (int i = WavAudio.HEADER_BYTES; i + 3 < wav.length && index < count; i += 4) {
+            int left = (wav[i] & 0xff) | (wav[i + 1] << 8);
+            int right = (wav[i + 2] & 0xff) | (wav[i + 3] << 8);
+            samples[index++] = (short) ((left + right) / 2);
+        }
+        return samples;
+    }
+
+    /** Magnitude of bins 1..n/2-1. Bin 0 is left at 0 so silence does not dominate the correlation. */
+    private static double[] spectrum(short[] samples) {
+        int n = samples.length;
+        double[] magnitude = new double[n / 2];
+        for (int bin = 1; bin < magnitude.length; bin++) {
+            double real = 0;
+            double imag = 0;
+            double step = 2 * Math.PI * bin / n;
+            for (int i = 0; i < n; i++) {
+                double angle = step * i;
+                real += samples[i] * Math.cos(angle);
+                imag -= samples[i] * Math.sin(angle);
+            }
+            magnitude[bin] = Math.hypot(real, imag);
+        }
+        return magnitude;
+    }
+
+    private static double cosine(double[] left, double[] right) {
+        double dot = 0;
+        double leftEnergy = 0;
+        double rightEnergy = 0;
+        int bins = Math.min(left.length, right.length);
+        for (int i = 1; i < bins; i++) {
+            dot += left[i] * right[i];
+            leftEnergy += left[i] * left[i];
+            rightEnergy += right[i] * right[i];
+        }
+        if (leftEnergy == 0 || rightEnergy == 0) {
+            return 1;
+        }
+        return dot / Math.sqrt(leftEnergy * rightEnergy);
+    }
+
+    private static double peakHz(double[] magnitude, int n) {
+        int peak = 1;
+        for (int bin = 2; bin < magnitude.length; bin++) {
+            if (magnitude[bin] > magnitude[peak]) {
+                peak = bin;
+            }
+        }
+        return peak * (WavAudio.SAMPLE_RATE / (double) n);
     }
 
     private static List<MidiEvent> clicks(Sequence sequence) {
