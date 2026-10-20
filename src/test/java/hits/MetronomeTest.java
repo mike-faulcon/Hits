@@ -77,6 +77,37 @@ class MetronomeTest {
     }
 
     @Test
+    void chancePlaybackClicksOnEveryPassAndExportDoesNot() throws Exception {
+        Beat beat = Beat.drumKit("t");
+        beat.track(0).tap(0, false);
+        beat.track(0).step(0).setProbability(50);
+        assertEquals(Chance.PLAYBACK_PASSES, SequenceBuilder.playbackPasses(beat, false));
+
+        Sequence played = SequenceBuilder.playback(beat, false, new java.util.Random(1), true);
+        List<MidiEvent> clicks = clicks(played);
+        int quarters = beat.stepCount() / 4;
+        assertEquals(quarters * Chance.PLAYBACK_PASSES, clicks.size());
+        long loop = SequenceBuilder.loopTicks(beat.stepCount());
+        assertEquals(0L, clicks.get(0).getTick());
+        assertEquals(loop, clicks.get(quarters).getTick());
+        assertEquals(SequenceBuilder.CLICK_ACCENT_NOTE, note(clicks.get(quarters)));
+        assertEquals(loop * (Chance.PLAYBACK_PASSES - 1), clicks.get(clicks.size() - quarters).getTick());
+
+        beat.addChain('a');
+        beat.addChain('b');
+        beat.slot('b')[0].step(0).setOn(true);
+        beat.slot('b')[0].step(0).setProbability(40);
+        Sequence song = SequenceBuilder.playback(beat, true, new java.util.Random(1), true);
+        int songBars = Chain.sections(beat.chain()) * SequenceBuilder.playbackPasses(beat, true);
+        assertEquals(quarters * songBars, clicks(song).size());
+        assertEquals(loop, clicks(song).get(quarters).getTick());
+
+        assertTrue(clicks(SequenceBuilder.playback(beat, true, new java.util.Random(1), false)).isEmpty());
+        assertTrue(clicks(SequenceBuilder.export(beat, ExportOptions.matchingPlayback())).isEmpty());
+        assertTrue(clicks(SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true))).isEmpty());
+    }
+
+    @Test
     void exportsLeaveTheClickOut() throws Exception {
         Beat beat = Beat.drumKit("t");
         beat.track(0).tap(0, false);

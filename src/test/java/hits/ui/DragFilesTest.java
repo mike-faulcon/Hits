@@ -12,6 +12,7 @@ import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -101,9 +102,11 @@ class DragFilesTest {
     void rememberedChoicesFeedTheNextDrag() {
         ExportCommands.ExportMemory memory = new ExportCommands.ExportMemory();
         ExportOptions initial = memory.forDrag(false, true);
-        assertFalse(initial.asHeard());
+        assertTrue(initial.asHeard());
         assertFalse(initial.song());
         assertEquals(1, initial.repeats());
+        assertTrue(ExportCommands.ExportMemory.asHeardFromIgnore(false));
+        assertFalse(ExportCommands.ExportMemory.asHeardFromIgnore(true));
 
         memory.remember(true, true, 3);
         ExportOptions pattern = memory.forDrag(false, true);
@@ -124,10 +127,44 @@ class DragFilesTest {
         assertFalse(memory.forDrag(true, false).song());
     }
 
+    @Test
+    void defaultDragLeavesMutedTracksOut() throws Exception {
+        Beat beat = Beat.drumKit("t");
+        beat.track(0).tap(0, false);
+        beat.track(1).tap(4, false);
+        beat.track(0).setMute(true);
+
+        ExportCommands.ExportMemory memory = new ExportCommands.ExportMemory();
+        DragFiles files = DragFiles.in(directory.resolve("drag-mute"));
+        Path heard = write(files, beat, memory.forDrag(false, false));
+        assertFalse(notes(MidiSystem.getSequence(heard.toFile())).contains(36));
+        assertTrue(notes(MidiSystem.getSequence(heard.toFile())).contains(38));
+
+        memory.remember(ExportCommands.ExportMemory.asHeardFromIgnore(true), false, 1);
+        Path all = write(files, beat, memory.forDrag(false, false));
+        assertTrue(notes(MidiSystem.getSequence(all.toFile())).contains(36));
+        assertTrue(notes(MidiSystem.getSequence(all.toFile())).contains(38));
+        files.close();
+    }
+
     private static Path write(DragFiles files, Beat beat, ExportOptions options) throws Exception {
         Path path = files.place(ExportPlan.dragFileName(beat.name(), options, beat.activeSlot(), "mid"));
         hits.BeatFiles.exportMidi(beat, path, options);
         return path;
+    }
+
+    private static Set<Integer> notes(Sequence sequence) {
+        Set<Integer> notes = new HashSet<>();
+        for (Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                if (track.get(i).getMessage() instanceof ShortMessage message
+                    && message.getCommand() == ShortMessage.NOTE_ON
+                    && message.getData2() > 0) {
+                    notes.add(message.getData1());
+                }
+            }
+        }
+        return notes;
     }
 
     private static int noteOns(Sequence sequence) {

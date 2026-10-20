@@ -34,7 +34,7 @@ public record ExportOptions(boolean asHeard, boolean bothSlots, int repeats, boo
     /** Section 0 is A when both slots are exported, then B, then A again. */
     public char slotAt(int section, char active) {
         if (!bothSlots) {
-            return active == 'b' ? 'b' : 'a';
+            return Beat.normalizeSlot(active);
         }
         return section % 2 == 0 ? 'a' : 'b';
     }

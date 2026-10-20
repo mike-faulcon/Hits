@@ -36,6 +36,7 @@ final class BeatBrowser {
     private Runnable fresh = () -> {};
     private Runnable boomBap = () -> {};
     private Runnable reggae = () -> {};
+    private Runnable makeBeat = () -> {};
     private Runnable chooseFolder = () -> {};
     private JComponent dragMidi;
     private JComponent dragWav;
@@ -77,6 +78,10 @@ final class BeatBrowser {
 
     void onReggae(Runnable action) {
         reggae = action;
+    }
+
+    void onMakeBeat(Runnable action) {
+        makeBeat = action;
     }
 
     void onChooseFolder(Runnable action) {
@@ -176,6 +181,7 @@ final class BeatBrowser {
         JButton export = Widgets.button("Export MIDI");
         JButton exportWavButton = Widgets.button("Export WAV");
         JButton freshButton = Widgets.button("New");
+        JButton makeBeatButton = Widgets.button("Make me a beat");
         JButton boom = Widgets.button("Boom bap");
         JButton reggaeButton = Widgets.button("Reggae");
         loadButton.setToolTipText("Load the selected beat. Double-click the list too.");
@@ -184,6 +190,7 @@ final class BeatBrowser {
         export.setToolTipText("Write a MIDI file. All tracks are included unless you choose As heard. Song writes the chain.");
         exportWavButton.setToolTipText("Write a WAV file of the same notes. Uses the built-in synth, and a loaded SoundFont when one is active. Song writes the chain.");
         freshButton.setToolTipText("Start a new empty drum kit.");
+        makeBeatButton.setToolTipText("Write a starter groove on the pattern on screen. Pick a style. Asks first when that pattern has hits.");
         boom.setToolTipText("Replace the pattern on screen with a boom bap groove. Asks first.");
         reggaeButton.setToolTipText("Replace the pattern on screen with a reggae groove. Asks first.");
         loadButton.addActionListener(event -> load.run());
@@ -192,6 +199,7 @@ final class BeatBrowser {
         export.addActionListener(event -> exportMidi.run());
         exportWavButton.addActionListener(event -> exportWav.run());
         freshButton.addActionListener(event -> fresh.run());
+        makeBeatButton.addActionListener(event -> makeBeat.run());
         boom.addActionListener(event -> boomBap.run());
         reggaeButton.addActionListener(event -> reggae.run());
         actions.add(loadButton);
@@ -200,6 +208,7 @@ final class BeatBrowser {
         actions.add(export);
         actions.add(exportWavButton);
         actions.add(freshButton);
+        actions.add(makeBeatButton);
         actions.add(boom);
         actions.add(reggaeButton);
         south.add(actions, BorderLayout.SOUTH);

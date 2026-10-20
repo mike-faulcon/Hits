@@ -65,7 +65,7 @@ final class ExportPlan {
 
     /**
      * File name for a drag. The stem matches Save. A qualifier says which material is in the file:
-     * {@code -A} or {@code -B}, {@code -song}, {@code -A-then-B}, {@code -x3}, and {@code -as-heard}.
+     * {@code -A} through {@code -H}, {@code -song}, {@code -A-then-B}, {@code -x3}, and {@code -as-heard}.
      */
     static String dragFileName(String displayName, ExportOptions options, char activeSlot, String extension) {
         StringBuilder name = new StringBuilder(suggestedStem(displayName));
@@ -74,7 +74,7 @@ final class ExportPlan {
         } else if (options.bothSlots()) {
             name.append("-A-then-B");
         } else {
-            name.append('-').append(activeSlot == 'b' ? 'B' : 'A');
+            name.append('-').append(Character.toUpperCase(hits.Beat.normalizeSlot(activeSlot)));
         }
         if (!options.song() && options.repeats() > 1) {
             name.append("-x").append(options.repeats());

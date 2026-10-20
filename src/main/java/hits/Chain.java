@@ -4,9 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A song is an ordered list of A/B entries. Each entry plays one pattern slot
- * {@code repeats} times. The chain is not a timeline: every entry uses the beat's
- * length, tempo, and swing.
+ * A song is an ordered list of pattern entries. Each entry plays one pattern,
+ * A through H, {@code repeats} times. The chain is not a timeline: every entry
+ * uses the beat's length, tempo, and swing.
  */
 public final class Chain {
     public static final int MAX_PARTS = 32;
@@ -16,7 +16,7 @@ public final class Chain {
     /** One slot in the chain. Repeats are clamped to {@link ExportOptions#MAX_REPEATS}. */
     public record Part(char slot, int repeats) {
         public Part {
-            slot = slot == 'b' ? 'b' : 'a';
+            slot = Beat.normalizeSlot(slot);
             repeats = Math.max(1, Math.min(ExportOptions.MAX_REPEATS, repeats));
         }
     }
@@ -57,17 +57,28 @@ public final class Chain {
         return chain.isEmpty() ? 'a' : chain.get(chain.size() - 1).slot();
     }
 
-    public static boolean usesBoth(List<Part> chain) {
-        boolean a = false;
-        boolean b = false;
-        for (Part part : chain) {
-            if (part.slot() == 'b') {
-                b = true;
-            } else {
-                a = true;
+    /** Patterns named by the chain, in letter order, with duplicates removed. */
+    public static List<Character> distinctSlots(List<Part> chain) {
+        boolean[] seen = new boolean[Beat.SLOT_COUNT];
+        if (chain != null) {
+            for (Part part : chain) {
+                if (part != null) {
+                    seen[Beat.slotIndex(part.slot())] = true;
+                }
             }
         }
-        return a && b;
+        List<Character> slots = new ArrayList<>();
+        for (int i = 0; i < Beat.SLOT_COUNT; i++) {
+            if (seen[i]) {
+                slots.add(Beat.slotLetter(i));
+            }
+        }
+        return List.copyOf(slots);
+    }
+
+    /** True when the chain names more than one pattern. */
+    public static boolean usesBoth(List<Part> chain) {
+        return distinctSlots(chain).size() > 1;
     }
 
     /** Tick length of one pass through the chain. Zero when the chain is empty. */

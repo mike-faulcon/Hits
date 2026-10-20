@@ -106,7 +106,7 @@ public final class Editor {
     public void holdSlot(char slot) {
         holding = true;
         playingKnown = true;
-        playingSlot = slot == 'b' ? 'b' : 'a';
+        playingSlot = Beat.normalizeSlot(slot);
         fire(false);
     }
 
@@ -118,7 +118,7 @@ public final class Editor {
         if (!songMode || holding) {
             return;
         }
-        char next = slot == 'b' ? 'b' : 'a';
+        char next = Beat.normalizeSlot(slot);
         if (playingKnown && playingSlot == next) {
             return;
         }
@@ -167,6 +167,17 @@ public final class Editor {
         trackIndex = row;
         stepIndex = column;
         fire(false);
+    }
+
+    /** Sets the play probability of the selected step. No-op when no step is selected. */
+    public void setStepProbability(int probability) {
+        int column = stepIndex;
+        if (column < 0 || column >= beat.stepCount()) {
+            return;
+        }
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].step(column).setProbability(probability));
     }
 
     public void tap(int row, int column, boolean accent) {

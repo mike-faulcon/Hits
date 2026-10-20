@@ -45,6 +45,17 @@ class TrackReadoutTest {
         assertTrue(trackPitch.nudgeEnabled());
         assertFalse(trackPitch.clearEnabled());
 
+        kick.step(0).setProbability(40);
+        TrackReadout.Chance chance = TrackReadout.chance(kick, 0, beat.stepCount());
+        assertEquals(40, chance.value());
+        assertEquals("40%", chance.text());
+        assertTrue(chance.enabled());
+        assertTrue(chance.tip().contains("Chance step 1"));
+
+        TrackReadout.Chance unselected = TrackReadout.chance(kick, -1, beat.stepCount());
+        assertEquals("—", unselected.text());
+        assertFalse(unselected.enabled());
+
         kick.step(0).setPitch(38);
         TrackReadout.StepPitch own = TrackReadout.stepPitch(beat, kick, 0);
         assertEquals("D1", own.text());

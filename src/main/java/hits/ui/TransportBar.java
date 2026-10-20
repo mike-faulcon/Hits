@@ -9,6 +9,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -25,7 +26,7 @@ import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.util.OptionalInt;
 
-/** Play/stop, tempo, tap tempo, the metronome, swing, the A/B slots, and the beat name. */
+/** Play/stop, tempo, tap tempo, the metronome, swing, pattern slots A–H, copy, and the beat name. */
 final class TransportBar {
     private final Editor editor;
     private final Player player;
@@ -39,8 +40,8 @@ final class TransportBar {
     private boolean clickOn;
     private final JSlider swing = Widgets.slider(50, 75, 50);
     private final JLabel swingValue = Widgets.label("50%");
-    private final JButton slotA = Widgets.button("A");
-    private final JButton slotB = Widgets.button("B");
+    private final JComboBox<String> patternSlot = Widgets.patternSlots();
+    private final JComboBox<String> copyTarget = Widgets.patternSlots();
     private final JButton copySlot = Widgets.button("Copy");
     private final JTextField documentName = new JTextField("untitled", 12);
     private final SliderDrag swingDrag;
@@ -88,15 +89,24 @@ final class TransportBar {
         Widgets.fix(swingValue, 120, 32);
         bar.add(swingValue);
         bar.add(Box.createHorizontalStrut(16));
-        slotA.setToolTipText("Pattern A. The other pattern stays in this beat.");
-        slotB.setToolTipText("Pattern B. The other pattern stays in this beat.");
-        Widgets.fix(slotA, 44, 32);
-        Widgets.fix(slotB, 44, 32);
-        bar.add(slotA);
-        bar.add(Box.createHorizontalStrut(4));
-        bar.add(slotB);
+        JLabel patternLabel = Widgets.label("Pattern");
+        patternLabel.setToolTipText("Pattern on screen, A through H.");
+        patternSlot.setToolTipText("Pattern on screen, A through H. During a song, choose one to hold the grid there.");
+        Widgets.fix(patternSlot, 72, 32);
+        bar.add(patternLabel);
+        bar.add(Box.createHorizontalStrut(6));
+        bar.add(patternSlot);
         bar.add(Box.createHorizontalStrut(8));
-        copySlot.setToolTipText("Copy this pattern onto the other slot, replacing it.");
+        JLabel toLabel = Widgets.label("to");
+        toLabel.setToolTipText("Pattern that Copy replaces.");
+        copyTarget.setToolTipText("Pattern that Copy replaces.");
+        copyTarget.setSelectedIndex(1);
+        Widgets.fix(copyTarget, 72, 32);
+        bar.add(toLabel);
+        bar.add(Box.createHorizontalStrut(4));
+        bar.add(copyTarget);
+        bar.add(Box.createHorizontalStrut(4));
+        copySlot.setToolTipText("Copy this pattern onto the chosen slot, replacing it.");
         bar.add(copySlot);
         bar.add(Box.createHorizontalGlue());
         documentName.setFont(documentName.getFont().deriveFont(Font.BOLD, 16f));
@@ -118,12 +128,19 @@ final class TransportBar {
             editor.edit(beat -> beat.setBpm(value));
         });
         swingDrag.wire(swing, beat -> beat.setSwing(swing.getValue()));
-        slotA.addActionListener(event -> switchSlot('a'));
-        slotB.addActionListener(event -> switchSlot('b'));
-        copySlot.addActionListener(event -> {
-            char slot = editor.viewSlot();
-            editor.edit(beat -> beat.copySlotToOther(slot));
+        patternSlot.addActionListener(event -> {
+            if (sync.on()) {
+                return;
+            }
+            switchSlot(Beat.slotLetter(patternSlot.getSelectedIndex()));
         });
+        copyTarget.addActionListener(event -> {
+            if (sync.on()) {
+                return;
+            }
+            copySlot.setEnabled(copyTargetIndex() != Beat.slotIndex(editor.viewSlot()));
+        });
+        copySlot.addActionListener(event -> copyPattern());
         documentName.addActionListener(event -> commitDocumentName());
         documentName.addFocusListener(new FocusAdapter() {
             @Override
@@ -140,8 +157,11 @@ final class TransportBar {
             swing.setValue(beat.swing());
         }
         swingValue.setText(TrackReadout.swing(beat.swing()));
-        Widgets.paintToggle(slotA, editor.viewSlot() == 'a');
-        Widgets.paintToggle(slotB, editor.viewSlot() == 'b');
+        int view = Beat.slotIndex(editor.viewSlot());
+        if (patternSlot.getSelectedIndex() != view) {
+            patternSlot.setSelectedIndex(view);
+        }
+        copySlot.setEnabled(copyTargetIndex() != view);
         if (!documentName.isFocusOwner()) {
             documentName.setText(beat.name());
         }
@@ -252,6 +272,24 @@ final class TransportBar {
             }
         }
         return null;
+    }
+
+    private void copyPattern() {
+        if (sync.on()) {
+            return;
+        }
+        char from = editor.viewSlot();
+        char to = Beat.slotLetter(copyTargetIndex());
+        if (from == to) {
+            return;
+        }
+        editor.edit(beat -> beat.copySlot(from, to));
+        status.set("Copied pattern " + Beat.slotLabel(from) + " to " + Beat.slotLabel(to));
+    }
+
+    private int copyTargetIndex() {
+        int index = copyTarget.getSelectedIndex();
+        return index < 0 ? 1 : index;
     }
 
     private void switchSlot(char slot) {

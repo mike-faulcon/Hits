@@ -28,7 +28,7 @@ import java.awt.Insets;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 
-/** Track name, sound, length, volume, loud hit, mode, step pitch, and pattern length. */
+/** Track name, sound, length, volume, chance, loud hit, mode, step pitch, and pattern length. */
 final class TrackInspector {
     private final Editor editor;
     private final Player player;
@@ -42,18 +42,23 @@ final class TrackInspector {
     private final JLabel gateValue = Widgets.label("45%");
     private final JSlider velocity = Widgets.slider(1, 127, 100);
     private final JLabel velocityValue = Widgets.label("100");
+    private final JSlider chance = Widgets.slider(0, 100, 100);
+    private final JLabel chanceValue = Widgets.label("100%");
     private final JSlider accent = Widgets.slider(1, 127, 120);
     private final JLabel accentValue = Widgets.label("120");
     private final JButton drumMode = Widgets.button("Drum");
     private final JButton noteMode = Widgets.button("Note");
     private final JButton steps16 = Widgets.button("16 steps");
     private final JButton steps32 = Widgets.button("32 steps");
+    private final JButton shuffle = Widgets.button("Shuffle");
+    private Runnable shuffleTrack = () -> {};
     private final JLabel stepPitchValue = new JLabel("—", SwingConstants.LEFT);
     private final JButton stepPitchDown = Widgets.button("−");
     private final JButton stepPitchUp = Widgets.button("+");
     private final JButton stepPitchTrack = Widgets.button("Use track");
     private final SliderDrag gateDrag;
     private final SliderDrag velocityDrag;
+    private final SliderDrag chanceDrag;
     private final SliderDrag accentDrag;
 
     TrackInspector(Editor editor, Player player, Sync sync) {
@@ -62,7 +67,12 @@ final class TrackInspector {
         this.sync = sync;
         this.gateDrag = new SliderDrag(editor, sync);
         this.velocityDrag = new SliderDrag(editor, sync);
+        this.chanceDrag = new SliderDrag(editor, sync);
         this.accentDrag = new SliderDrag(editor, sync);
+    }
+
+    void onShuffle(Runnable action) {
+        shuffleTrack = action;
     }
 
     JPanel component() {
@@ -113,12 +123,16 @@ final class TrackInspector {
         soundPicker.add(programs, "note");
         addRow(panel, constraints, soundPicker);
         addRow(panel, constraints, labeled("Length", "How long each note holds, as a percent of the step.", gate, gateValue));
-        addRow(panel, constraints, labeled("Volume", "How hard a hit is. Right-click or Alt-click a step to edit that step.", velocity, velocityValue));
+        addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
+        addRow(panel, constraints, labeled("Chance", "Percent chance the selected step plays. 100% always plays. Playback rolls each pass. Export uses a fixed seed.", chance, chanceValue));
         addRow(panel, constraints, labeled("Loud hit", "Shift-click uses this volume. Pads at least this loud use the bright color.", accent, accentValue));
         addRow(panel, constraints, Widgets.label("Mode"));
         drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
         noteMode.setToolTipText("One pitched instrument for the whole track.");
         addRow(panel, constraints, Widgets.row(drumMode, noteMode));
+        shuffle.setToolTipText("New hits on this track. The sound stays. Undo puts the old hits back.");
+        shuffle.addActionListener(event -> shuffleTrack.run());
+        addRow(panel, constraints, shuffle);
         JButton copyBar = Widgets.button("Copy bar");
         copyBar.setToolTipText("Copy the first 16 steps into a second bar and switch to 32 steps.");
         copyBar.addActionListener(event -> {
@@ -139,6 +153,7 @@ final class TrackInspector {
     void wire() {
         gateDrag.wire(gate, beat -> onScreen(beat).setGate(gate.getValue()));
         velocityDrag.wire(velocity, this::applyVelocity);
+        chanceDrag.wire(chance, this::applyChance);
         accentDrag.wire(accent, beat -> onScreen(beat).setAccent(accent.getValue()));
         drumMode.addActionListener(event -> setMode(TrackMode.DRUM));
         noteMode.addActionListener(event -> setMode(TrackMode.NOTE));
@@ -206,6 +221,13 @@ final class TrackInspector {
         }
         velocityValue.setText(Integer.toString(shownVelocity));
         velocity.setToolTipText(TrackReadout.velocityTip(track, editor.stepIndex(), beat.stepCount()));
+        TrackReadout.Chance shownChance = TrackReadout.chance(track, editor.stepIndex(), beat.stepCount());
+        chance.setEnabled(shownChance.enabled());
+        if (!chance.getValueIsAdjusting() || !shownChance.enabled()) {
+            chance.setValue(shownChance.value());
+        }
+        chanceValue.setText(shownChance.text());
+        chance.setToolTipText(shownChance.tip());
         if (!accent.getValueIsAdjusting()) {
             accent.setValue(track.accent());
         }
@@ -267,6 +289,14 @@ final class TrackInspector {
             }
         }
         drums.setSelectedIndex(-1);
+    }
+
+    private void applyChance(Beat beat) {
+        int step = editor.stepIndex();
+        if (step < 0 || step >= beat.stepCount()) {
+            return;
+        }
+        onScreen(beat).step(step).setProbability(chance.getValue());
     }
 
     private void applyVelocity(Beat beat) {

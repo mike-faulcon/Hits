@@ -251,7 +251,7 @@ final class ExportCommands {
         song.setEnabled(hasChain);
         song.setToolTipText(hasChain
             ? "Write the chain. Each entry's repeats are included."
-            : "Add a chain with +A or +B first.");
+            : "Add a pattern to the chain first.");
         JSpinner repeats = new JSpinner(new SpinnerNumberModel(1, 1, ExportOptions.MAX_REPEATS, 1));
         repeats.setToolTipText("How many times to write that material, from 1 to " + ExportOptions.MAX_REPEATS + ".");
         song.addActionListener(event -> {
@@ -268,7 +268,7 @@ final class ExportCommands {
                 repeats.setEnabled(true);
             }
         });
-        asHeard.setSelected(memory.asHeard());
+        ignoreMuteSolo.setSelected(!memory.asHeard());
         repeats.setValue(memory.repeats());
         boolean songOn = editor.songMode() && hasChain;
         if (songOn) {
@@ -299,7 +299,7 @@ final class ExportCommands {
         }
         boolean pair = song.isSelected() ? memory.bothSlots() : both.isSelected();
         int times = (Integer) repeats.getValue();
-        memory.remember(asHeard.isSelected(), pair, times);
+        memory.remember(ExportMemory.asHeardFromIgnore(ignoreMuteSolo.isSelected()), pair, times);
         disarmDrag();
         Path path = ExportPlan.withExtension(chooser.getSelectedFile().toPath(), extension);
         ExportOptions options = ExportPlan.fromDialog(
@@ -319,9 +319,15 @@ final class ExportCommands {
      * Song mode decides pattern versus song at the moment of the drag.
      */
     static final class ExportMemory {
-        private boolean asHeard;
+        /** A new drag matches playback until an export says otherwise. */
+        private boolean asHeard = true;
         private boolean bothSlots;
         private int repeats = 1;
+
+        /** The dialog's "Ignore mute and solo" box is the opposite of exporting as heard. */
+        static boolean asHeardFromIgnore(boolean ignoreMuteSolo) {
+            return !ignoreMuteSolo;
+        }
 
         void remember(boolean asHeard, boolean bothSlots, int repeats) {
             this.asHeard = asHeard;

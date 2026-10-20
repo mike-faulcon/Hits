@@ -119,7 +119,7 @@ final class FileCommands {
         String slot = ChainLabels.slotName(editor.viewSlot());
         int choice = JOptionPane.showConfirmDialog(
             frame,
-            name + " replaces pattern " + slot + ", the tempo, and the swing.\nThe other pattern is kept.",
+            name + " replaces pattern " + slot + ", the tempo, and the swing.\nThe other patterns are kept.",
             "Hits",
             JOptionPane.OK_CANCEL_OPTION,
             JOptionPane.WARNING_MESSAGE

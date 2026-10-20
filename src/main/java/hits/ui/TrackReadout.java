@@ -27,6 +27,22 @@ final class TrackReadout {
         return "Volume of new hits on this track. Right-click or Alt-click a pad to edit that hit.";
     }
 
+    record Chance(int value, String text, String tip, boolean enabled) {}
+
+    /** Probability of the selected step. Disabled until a step is selected. */
+    static Chance chance(Track track, int step, int stepCount) {
+        if (step < 0 || step >= stepCount) {
+            return new Chance(100, "—", "Right-click or Alt-click a step to set its chance.", false);
+        }
+        int value = track.step(step).probability();
+        return new Chance(
+            value,
+            value + "%",
+            "Chance step " + (step + 1) + " on " + track.name() + " plays. 100% always plays. 0% never plays.",
+            true
+        );
+    }
+
     record StepPitch(String text, String tip, boolean nudgeEnabled, boolean clearEnabled) {}
 
     static StepPitch stepPitch(Beat beat, Track track, int column) {

@@ -65,7 +65,11 @@ class ChainEditsTest {
         assertEquals("Holding pattern B. Click Song to follow the chain.", ChainLabels.hold('b'));
         assertEquals("The chain is empty. Playing pattern A.", ChainLabels.playingEmpty('a'));
         assertEquals("Following the song", ChainLabels.following());
-        assertEquals("Add A or B to the chain", ChainLabels.needEntry());
+        assertEquals("Add a pattern to the chain", ChainLabels.needEntry());
+        assertEquals("C", ChainLabels.slotName('c'));
+        assertEquals("H×4", ChainLabels.partText(new Chain.Part('h', 4)));
+        assertEquals("Added H to the chain", new ChainEdits(editor).append('h'));
+        assertEquals('h', editor.beat().chain().get(2).slot());
     }
 
     @Test

@@ -1,0 +1,210 @@
+{
+  "version": 2,
+  "name": "t",
+  "bpm": 96,
+  "swing": 50,
+  "steps": 16,
+  "active": "a",
+  "slots": {
+    "a": {
+      "tracks": [
+        {
+          "name": "Kick",
+          "mode": "drum",
+          "program": 0,
+          "note": 36,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Snare",
+          "mode": "drum",
+          "program": 0,
+          "note": 38,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Closed Hat",
+          "mode": "drum",
+          "program": 0,
+          "note": 42,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Open Hat",
+          "mode": "drum",
+          "program": 0,
+          "note": 46,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Clap",
+          "mode": "drum",
+          "program": 0,
+          "note": 39,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Tom",
+          "mode": "drum",
+          "program": 0,
+          "note": 45,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Crash",
+          "mode": "drum",
+          "program": 0,
+          "note": 49,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Ride",
+          "mode": "drum",
+          "program": 0,
+          "note": 51,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        }
+      ]
+    },
+    "b": {
+      "tracks": [
+        {
+          "name": "Kick",
+          "mode": "drum",
+          "program": 0,
+          "note": 36,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Snare",
+          "mode": "drum",
+          "program": 0,
+          "note": 38,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Closed Hat",
+          "mode": "drum",
+          "program": 0,
+          "note": 42,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":true,"velocity":100,"pitch":70}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Open Hat",
+          "mode": "drum",
+          "program": 0,
+          "note": 46,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Clap",
+          "mode": "drum",
+          "program": 0,
+          "note": 39,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Tom",
+          "mode": "drum",
+          "program": 0,
+          "note": 45,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Crash",
+          "mode": "drum",
+          "program": 0,
+          "note": 49,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        },
+        {
+          "name": "Ride",
+          "mode": "drum",
+          "program": 0,
+          "note": 51,
+          "mute": false,
+          "solo": false,
+          "gate": 45,
+          "velocity": 100,
+          "accent": 120,
+          "steps": [{"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}, {"on":false,"velocity":100}]
+        }
+      ]
+    }
+  }
+}
