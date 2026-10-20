@@ -8,11 +8,12 @@ final class GroovePrompt {
 
     static String makeBeat(char slot, boolean occupied) {
         String name = ChainLabels.slotName(slot);
+        String tempo = "Tempo and swing change for the whole beat, not just this pattern.";
         if (occupied) {
             return "Pattern " + name + " already has hits. Pick a style to replace them. "
-                + "Tempo and swing change to match. The other pattern stays. Undo brings this one back.";
+                + tempo + " The other patterns' hits stay. Undo brings this pattern back.";
         }
-        return "Pick a style. A starter groove lands on pattern " + name + ".";
+        return "Pick a style. A starter groove lands on pattern " + name + ". " + tempo;
     }
 
     static String groove(GrooveGenerator.Genre genre, char slot) {

@@ -12,10 +12,12 @@ class GroovePromptTest {
     void occupiedPatternWarnsAndAnEmptyOneDoesNot() {
         String empty = GroovePrompt.makeBeat('a', false);
         assertTrue(empty.contains("pattern A"));
+        assertTrue(empty.contains("whole beat"));
         assertFalse(empty.contains("already has hits"));
 
         String occupied = GroovePrompt.makeBeat('b', true);
         assertTrue(occupied.contains("Pattern B already has hits"));
+        assertTrue(occupied.contains("whole beat"));
         assertTrue(occupied.contains("Undo"));
         assertTrue(occupied.contains("other pattern"));
     }

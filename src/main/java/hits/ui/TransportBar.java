@@ -77,7 +77,7 @@ final class TransportBar {
         tap.setToolTipText("Tap tempo. T does this unless you are typing. A pause starts over.");
         bar.add(tap);
         bar.add(Box.createHorizontalStrut(4));
-        click.setToolTipText("Metronome while playing. Louder on beat 1 of each bar. Not included in exports.");
+        click.setToolTipText("Metronome while playing. Beat 1 is claves, the other beats an open triangle. Not the wood blocks, and not included in exports.");
         bar.add(click);
         bar.add(Box.createHorizontalStrut(16));
         JLabel swingLabel = Widgets.label("Swing");

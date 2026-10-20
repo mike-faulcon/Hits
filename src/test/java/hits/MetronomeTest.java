@@ -14,6 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MetronomeTest {
     @Test
+    void clickUsesClavesAndATriangleNotTheWoodBlocks() {
+        assertEquals(75, SequenceBuilder.CLICK_ACCENT_NOTE);
+        assertEquals(81, SequenceBuilder.CLICK_NOTE);
+        assertTrue(SequenceBuilder.CLICK_ACCENT_NOTE != 76 && SequenceBuilder.CLICK_NOTE != 77);
+        for (int note : Gm.DRUM_NOTES) {
+            assertTrue(note != SequenceBuilder.CLICK_ACCENT_NOTE && note != SequenceBuilder.CLICK_NOTE);
+        }
+    }
+
+    @Test
     void playbackClicksOnBeatsAndAccentsBeatOne() throws Exception {
         Beat beat = Beat.drumKit("t");
         beat.setSwing(75);

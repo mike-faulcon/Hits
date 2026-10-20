@@ -1,8 +1,39 @@
 package hits;
 
+import java.util.function.Consumer;
+
 /** Mixer math shared by playback, export, and the mixer view. */
 public final class Mix {
     private Mix() {}
+
+    /**
+     * Sets one row's level. {@code allPatterns} writes every pattern A–H.
+     * Otherwise only {@code slot} changes, which is how a section can have its own mix.
+     */
+    public static void setLevel(Beat beat, char slot, int row, int level, boolean allPatterns) {
+        apply(beat, slot, row, allPatterns, track -> track.setLevel(level));
+    }
+
+    /**
+     * Sets one row's pan. {@code allPatterns} writes every pattern A–H.
+     * Otherwise only {@code slot} changes.
+     */
+    public static void setPan(Beat beat, char slot, int row, int pan, boolean allPatterns) {
+        apply(beat, slot, row, allPatterns, track -> track.setPan(pan));
+    }
+
+    private static void apply(Beat beat, char slot, int row, boolean allPatterns, Consumer<Track> edit) {
+        if (beat == null || row < 0 || row >= Beat.TRACKS) {
+            return;
+        }
+        if (allPatterns) {
+            for (int i = 0; i < Beat.SLOT_COUNT; i++) {
+                edit.accept(beat.slot(Beat.slotLetter(i))[row]);
+            }
+            return;
+        }
+        edit.accept(beat.slot(slot)[row]);
+    }
 
     /**
      * Hit velocity after the track fader and the master fader.

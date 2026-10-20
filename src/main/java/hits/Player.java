@@ -249,6 +249,12 @@ public final class Player implements AutoCloseable {
         int sounding = Notes.clamp(note);
         try {
             if (track.mode() == TrackMode.NOTE) {
+                ShortMessage bank = new ShortMessage();
+                bank.setMessage(ShortMessage.CONTROL_CHANGE, channel, 0, 0);
+                current.send(bank, -1);
+                ShortMessage bankLsb = new ShortMessage();
+                bankLsb.setMessage(ShortMessage.CONTROL_CHANGE, channel, 32, 0);
+                current.send(bankLsb, -1);
                 ShortMessage program = new ShortMessage();
                 program.setMessage(ShortMessage.PROGRAM_CHANGE, channel, track.program(), 0);
                 current.send(program, -1);
@@ -382,9 +388,12 @@ public final class Player implements AutoCloseable {
         }
         sequencer.setLoopCount(Sequencer.LOOP_CONTINUOUSLY);
         sequencer.setTempoInBPM(beat.bpm());
+        long at = 0;
         if (loop > 0) {
-            sequencer.setTickPosition(Math.floorMod(position, loop));
+            at = Math.floorMod(position, loop);
+            sequencer.setTickPosition(at);
         }
+        SequenceBuilder.playChannelState(receiver(), beat, song, at);
     }
 
     @Override

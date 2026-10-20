@@ -3,6 +3,7 @@ package hits;
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiEvent;
+import javax.sound.midi.Receiver;
 import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Track;
@@ -15,10 +16,18 @@ import java.util.Random;
 public final class SequenceBuilder {
     public static final int PPQ = 96;
     public static final int STEP_TICKS = PPQ / 4;
-    /** GM high wood block. Playback click on beat 1 of each bar. */
-    public static final int CLICK_ACCENT_NOTE = 76;
-    /** GM low wood block. Playback click on the other beats. */
-    public static final int CLICK_NOTE = 77;
+    /**
+     * GM claves. Playback click on beat 1 of each bar.
+     * Not the high wood block (76), and not one of the kit notes, so a wood-block track
+     * stays separate from the click. GM2 metronome keys 33 and 34 are silent on the JDK's
+     * generated drum kit, which has no samples below note 35.
+     */
+    public static final int CLICK_ACCENT_NOTE = 75;
+    /**
+     * GM open triangle. Playback click on the other beats.
+     * Not the low wood block (77), and not one of the kit notes.
+     */
+    public static final int CLICK_NOTE = 81;
     public static final int CLICK_ACCENT_VELOCITY = 120;
     public static final int CLICK_VELOCITY = 80;
     /** Short enough that a click does not ring into the next beat. */
@@ -167,7 +176,7 @@ public final class SequenceBuilder {
             }
             midiTracks[i] = sequence.createTrack();
             midiTracks[i].add(new MidiEvent(trackName(track.name()), 0));
-            writeSetup(midiTracks[i], track, i, 0, false);
+            writeSetup(midiTracks[i], track, i, 0);
         }
         for (int pass = 0; pass < times; pass++) {
             for (int i = 0; i < tracks.length; i++) {
@@ -232,7 +241,7 @@ public final class SequenceBuilder {
                         midiTracks[i] = sequence.createTrack();
                         midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, span)), 0));
                     }
-                    writeSetup(midiTracks[i], track, i, offset, resetDrumBank(beat, chosen, song, i, section));
+                    writeSetup(midiTracks[i], track, i, offset);
                     writeNotes(midiTracks[i], beat, track, i, steps, offset, sectionTicks, random);
                 }
             }
@@ -272,55 +281,70 @@ public final class SequenceBuilder {
         return String.join(" / ", names);
     }
 
-    /** An earlier section put this row's channel on the drum bank, and this section is a pitched instrument. */
-    private static boolean resetDrumBank(Beat beat, ExportOptions options, boolean song, int row, int section) {
-        char slot = song ? Chain.slotAt(beat.chain(), section) : options.slotAt(section, beat.activeSlot());
-        if (beat.slot(slot)[row].mode() != TrackMode.NOTE) {
-            return false;
-        }
-        for (int earlier = 0; earlier < section; earlier++) {
-            char earlierSlot = song ? Chain.slotAt(beat.chain(), earlier) : options.slotAt(earlier, beat.activeSlot());
-            if (Mix.usesDrumBank(beat.slot(earlierSlot)[row])) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void writeSetup(
-        Track midi,
-        hits.Track track,
-        int row,
-        long offset,
-        boolean resetBank
-    ) throws InvalidMidiDataException {
+    /**
+     * Bank, program, and pan for one row, in the order a synth needs them.
+     * Pan is written even at center, so a later pattern does not keep an earlier left or right.
+     * A note always selects bank 0 first. A panned drum leaves the channel on the drum bank,
+     * and a program change alone would then look up a silent drum-kit preset.
+     * Level is not a controller. Each note-on already carries the fader, so it cannot stick.
+     */
+    private static List<ShortMessage> channelSetup(hits.Track track, int row) throws InvalidMidiDataException {
+        List<ShortMessage> messages = new ArrayList<>();
         int channel = Mix.channel(track, row);
         if (Mix.usesDrumBank(track)) {
-            control(midi, channel, offset, 0, Gm.DRUM_BANK);
-            control(midi, channel, offset, 32, 0);
-            program(midi, channel, offset, 0);
+            messages.add(controlMessage(channel, 0, Gm.DRUM_BANK));
+            messages.add(controlMessage(channel, 32, 0));
+            messages.add(programMessage(channel, 0));
         } else if (track.mode() == TrackMode.NOTE) {
-            if (resetBank) {
-                control(midi, channel, offset, 0, 0);
-                control(midi, channel, offset, 32, 0);
-            }
-            program(midi, channel, offset, track.program());
+            messages.add(controlMessage(channel, 0, 0));
+            messages.add(controlMessage(channel, 32, 0));
+            messages.add(programMessage(channel, track.program()));
         }
-        if (track.pan() != hits.Track.PAN_CENTER) {
-            control(midi, channel, offset, 10, track.pan());
+        messages.add(controlMessage(channel, 10, track.pan()));
+        return messages;
+    }
+
+    private static void writeSetup(Track midi, hits.Track track, int row, long offset) throws InvalidMidiDataException {
+        for (ShortMessage message : channelSetup(track, row)) {
+            midi.add(new MidiEvent(message, offset));
         }
     }
 
-    private static void control(Track midi, int channel, long tick, int controller, int value) throws InvalidMidiDataException {
+    /**
+     * Pushes the slot sounding at {@code tick} onto an open synth.
+     * Reloading a sequence does not by itself move pan or bank. Playback calls this on every load,
+     * including a live edit, so center pan and a note after a panned drum are heard immediately.
+     * Looping back to the start replays the same setup from the sequence.
+     */
+    static void playChannelState(Receiver receiver, Beat beat, boolean song, long tick) throws InvalidMidiDataException {
+        if (receiver == null || beat == null) {
+            return;
+        }
+        char slot = song && beat.hasChain()
+            ? Chain.place(beat.chain(), tick, beat.stepCount(), beat.swing()).slot()
+            : beat.activeSlot();
+        hits.Track[] tracks = beat.slot(slot);
+        for (int row = 0; row < tracks.length; row++) {
+            hits.Track track = tracks[row];
+            if (!Beat.audibleIn(tracks, track)) {
+                continue;
+            }
+            for (ShortMessage message : channelSetup(track, row)) {
+                receiver.send(message, -1);
+            }
+        }
+    }
+
+    private static ShortMessage controlMessage(int channel, int controller, int value) throws InvalidMidiDataException {
         ShortMessage message = new ShortMessage();
         message.setMessage(ShortMessage.CONTROL_CHANGE, channel, controller, value);
-        midi.add(new MidiEvent(message, tick));
+        return message;
     }
 
-    private static void program(Track midi, int channel, long tick, int program) throws InvalidMidiDataException {
+    private static ShortMessage programMessage(int channel, int program) throws InvalidMidiDataException {
         ShortMessage message = new ShortMessage();
         message.setMessage(ShortMessage.PROGRAM_CHANGE, channel, program, 0);
-        midi.add(new MidiEvent(message, tick));
+        return message;
     }
 
     private static void writeNotes(
@@ -383,6 +407,7 @@ public final class SequenceBuilder {
 
     /**
      * A click on every quarter note of every bar in the sequence. Beat 1 of each bar is the accent.
+     * The notes are claves and an open triangle, not the wood blocks a drum track can play.
      * {@code bars} is pattern sections times playback passes, so a later pass still clicks.
      * Quarter notes fall on even 16ths, which swing does not move, so the click stays on the beat.
      */

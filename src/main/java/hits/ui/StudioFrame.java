@@ -158,8 +158,12 @@ final class StudioFrame extends JFrame {
 
         JScrollPane inspectorScroll = new JScrollPane(inspector.component());
         inspectorScroll.setBorder(BorderFactory.createEmptyBorder());
-        inspectorScroll.setPreferredSize(new Dimension(280, 400));
+        inspectorScroll.setPreferredSize(new Dimension(320, 400));
+        // The grid's preferred width at 32 steps is wider than the window. Without a floor
+        // the split gives that extra to the grid and the inspector collapses.
+        inspectorScroll.setMinimumSize(new Dimension(300, 160));
         inspectorScroll.getViewport().setBackground(Theme.PANEL);
+        left.setMinimumSize(new Dimension(320, 200));
 
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, inspectorScroll);
         split.setResizeWeight(1);
