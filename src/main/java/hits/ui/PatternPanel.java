@@ -2,6 +2,7 @@ package hits.ui;
 
 import hits.Beat;
 import hits.Editor;
+import hits.NoteSpan;
 import hits.Notes;
 import hits.Step;
 import hits.Track;
@@ -38,7 +39,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         setFocusable(true);
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        setToolTipText("Click a step. Shift-click makes a loud hit. Drag up or down to set velocity. Right-click or Alt-click selects it.");
+        setToolTipText("Click a step. Shift-click makes a loud hit. Drag up or down to set velocity. Drag a lit pad sideways to set its length. Right-click or Alt-click selects it.");
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
@@ -157,6 +158,12 @@ final class PatternPanel extends JPanel implements Scrollable {
                 g.setColor(colorFor(cellStep.shade(track.accent())));
                 g.fillRoundRect(cell.x, cell.y, cell.width, cell.height, 6, 6);
                 g.setClip(clip);
+                paintNudge(g, cell, track.playedNudge(column), cellStep.shade(track.accent()));
+            } else {
+                int holder = NoteSpan.holder(track, column, length);
+                if (holder >= 0) {
+                    paintHold(g, cell, colorFor(track.step(holder).shade(track.accent())));
+                }
             }
             if (cellStep.uncertain()) {
                 String label = Integer.toString(cellStep.probability());
@@ -280,7 +287,16 @@ final class PatternPanel extends JPanel implements Scrollable {
             Track track = editor.viewTrack(row);
             Step step = track.step(column);
             int start = step.on() ? step.velocity() : (event.isShiftDown() ? track.accent() : track.velocity());
-            gesture = Gesture.pad(row, column, event.isShiftDown(), event.getY(), start, editor.viewSlot());
+            gesture = Gesture.pad(
+                row,
+                column,
+                event.isShiftDown(),
+                event.getX(),
+                event.getY(),
+                start,
+                editor.viewSlot(),
+                step.on()
+            );
             return;
         }
         editor.selectTrack(row);
@@ -303,16 +319,24 @@ final class PatternPanel extends JPanel implements Scrollable {
             applyVelocity(gesture.slot, gesture.row, column, VelocityGesture.fromLane(event.getY(), bar.y, bar.height));
             return;
         }
-        int delta = event.getY() - gesture.y;
+        int dx = event.getX() - gesture.x;
+        int dy = event.getY() - gesture.y;
         if (!gesture.dragging) {
-            if (Math.abs(delta) < VelocityGesture.DRAG_SLOP) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) < VelocityGesture.DRAG_SLOP) {
                 return;
             }
             gesture.dragging = true;
+            gesture.stretch = gesture.canStretch && Math.abs(dx) > Math.abs(dy);
             editor.selectStep(gesture.row, gesture.column);
             editor.beginAdjust();
         }
-        applyVelocity(gesture.slot, gesture.row, gesture.column, VelocityGesture.fromDrag(gesture.startVelocity, delta));
+        if (gesture.stretch) {
+            int column = metrics.columnForX(event.getX());
+            int length = NoteSpan.lengthForDrag(gesture.column, column, editor.beat().stepCount(editor.viewSlot()));
+            applyLength(gesture.slot, gesture.row, gesture.column, length);
+            return;
+        }
+        applyVelocity(gesture.slot, gesture.row, gesture.column, VelocityGesture.fromDrag(gesture.startVelocity, dy));
     }
 
     private void released() {
@@ -328,6 +352,15 @@ final class PatternPanel extends JPanel implements Scrollable {
         if (!current.selectOnly && current.column >= 0) {
             editor.tap(current.row, current.column, current.shift);
         }
+    }
+
+    private void applyLength(char slot, int row, int column, int length) {
+        editor.adjust(beat -> {
+            Step step = beat.slot(slot)[row].step(column);
+            if (step.on()) {
+                step.setLength(length);
+            }
+        });
     }
 
     private void applyVelocity(char slot, int row, int column, int velocity) {
@@ -361,11 +394,14 @@ final class PatternPanel extends JPanel implements Scrollable {
             Step step = editor.viewTrack(row).step(column);
             String pitch = step.hasPitch() ? " Step pitch " + Notes.name(step.pitch()) + "." : "";
             String chance = step.uncertain() ? " Chance " + step.probability() + "%." : "";
+            String held = step.extended() ? " Holds " + step.length() + " steps." : "";
+            int offset = editor.viewTrack(row).playedNudge(column);
+            String nudged = offset != 0 ? " Nudge " + offset + "%." : "";
             String past = column >= editor.beat().stepCount(editor.viewSlot())
                 ? " Past this pattern's length, so it does not play."
                 : "";
-            return "Click toggles the step. Shift-click makes a loud hit. Drag up or down to set velocity. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
-                + pitch + chance + past;
+            return "Click toggles the step. Shift-click makes a loud hit. Drag up or down to set velocity. Drag a lit pad sideways to set how many steps it holds. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
+                + pitch + chance + held + nudged + past;
         }
         if (row >= 0) {
             return "Select this track";
@@ -492,6 +528,20 @@ final class PatternPanel extends JPanel implements Scrollable {
             return new Rectangle(cell.x, top, cell.width, 36);
         }
 
+        /** Column under {@code x}, or {@code -1} left of the grid. Gaps between bars belong to the cell on the left. */
+        int columnForX(int x) {
+            if (columns <= 0 || x < stepX(0)) {
+                return -1;
+            }
+            for (int column = 0; column < columns; column++) {
+                int right = column + 1 < columns ? stepX(column + 1) : stepX(column) + cellWidth;
+                if (x < right) {
+                    return column;
+                }
+            }
+            return columns - 1;
+        }
+
         private int columnIn(int x, int y, int top, int height) {
             for (int column = 0; column < columns; column++) {
                 Rectangle hit = new Rectangle(stepX(column), top, cellWidth, height);
@@ -508,39 +558,76 @@ final class PatternPanel extends JPanel implements Scrollable {
         }
     }
 
+    private static void paintHold(Graphics2D g, Rectangle cell, Color color) {
+        g.setColor(color);
+        int bar = Math.max(6, cell.height / 3);
+        int y = cell.y + (cell.height - bar) / 2;
+        g.fillRoundRect(cell.x, y, cell.width, bar, 6, 6);
+    }
+
+    /** A short tick, shifted left or right, so a nudged hit is visible on the pad. */
+    private static void paintNudge(Graphics2D g, Rectangle cell, int percent, Step.Shade shade) {
+        if (percent == 0) {
+            return;
+        }
+        int travel = Math.max(2, cell.width / 2 - 4);
+        int dx = (int) Math.round(travel * (percent / 50.0));
+        int x = cell.x + cell.width / 2 + dx;
+        x = Math.max(cell.x + 2, Math.min(cell.x + cell.width - 4, x));
+        boolean bright = shade == Step.Shade.NORMAL || shade == Step.Shade.ACCENT;
+        g.setColor(bright ? Theme.INK : Theme.LINE);
+        g.fillRect(x, cell.y + 3, 2, Math.max(4, cell.height / 3));
+    }
+
     private static final class Gesture {
         final int row;
         final int column;
         final boolean lane;
         final boolean selectOnly;
         final boolean shift;
+        final boolean canStretch;
+        final int x;
         final int y;
         final int startVelocity;
         final char slot;
         boolean dragging;
+        boolean stretch;
 
-        private Gesture(int row, int column, boolean lane, boolean selectOnly, boolean shift, int y, int startVelocity, char slot) {
+        private Gesture(
+            int row,
+            int column,
+            boolean lane,
+            boolean selectOnly,
+            boolean shift,
+            boolean canStretch,
+            int x,
+            int y,
+            int startVelocity,
+            char slot
+        ) {
             this.row = row;
             this.column = column;
             this.lane = lane;
             this.selectOnly = selectOnly;
             this.shift = shift;
+            this.canStretch = canStretch;
+            this.x = x;
             this.y = y;
             this.startVelocity = startVelocity;
             this.slot = slot;
             this.dragging = lane;
         }
 
-        static Gesture pad(int row, int column, boolean shift, int y, int startVelocity, char slot) {
-            return new Gesture(row, column, false, false, shift, y, startVelocity, slot);
+        static Gesture pad(int row, int column, boolean shift, int x, int y, int startVelocity, char slot, boolean on) {
+            return new Gesture(row, column, false, false, shift, on, x, y, startVelocity, slot);
         }
 
         static Gesture lane(int row, int column, char slot) {
-            return new Gesture(row, column, true, false, false, 0, 0, slot);
+            return new Gesture(row, column, true, false, false, false, 0, 0, 0, slot);
         }
 
         static Gesture selectOnly(int row, int column) {
-            return new Gesture(row, column, false, true, false, 0, 0, 'a');
+            return new Gesture(row, column, false, true, false, false, 0, 0, 0, 'a');
         }
     }
 }

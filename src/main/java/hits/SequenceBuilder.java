@@ -82,7 +82,7 @@ public final class SequenceBuilder {
         if (!beat.hasChain()) {
             return build(beat, metronome);
         }
-        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome);
+        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true);
     }
 
     /**
@@ -124,7 +124,7 @@ public final class SequenceBuilder {
         int passes = playbackPasses(beat, song);
         Random roll = chance ? (random != null ? random : new Random()) : null;
         if (song && beat.hasChain()) {
-            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome);
+            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true);
         }
         return pattern(beat, roll, passes, metronome);
     }
@@ -184,7 +184,7 @@ public final class SequenceBuilder {
                 if (midiTracks[i] == null) {
                     continue;
                 }
-                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random);
+                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true, (pass + 1L) * loop, null);
             }
         }
         if (metronome) {
@@ -204,7 +204,7 @@ public final class SequenceBuilder {
      * The metronome is never written.
      */
     public static Sequence export(Beat beat, ExportOptions options) throws InvalidMidiDataException {
-        return arrangement(beat, options == null ? ExportOptions.matchingPlayback() : options, Chance.exportRandom(), 1, false);
+        return arrangement(beat, options == null ? ExportOptions.matchingPlayback() : options, Chance.exportRandom(), 1, false, false);
     }
 
     private static Sequence arrangement(
@@ -212,7 +212,8 @@ public final class SequenceBuilder {
         ExportOptions options,
         Random random,
         int passes,
-        boolean metronome
+        boolean metronome,
+        boolean clipEnd
     ) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
         boolean song = chosen.song() && beat.hasChain();
@@ -221,18 +222,25 @@ public final class SequenceBuilder {
         List<Timeline.Section> sections = Timeline.export(beat, chosen);
         long span = Timeline.ticks(sections);
         int times = Math.max(1, passes);
+        long sequenceEnd = span * times;
         tempo.add(new MidiEvent(tempoMessage(beat.bpm()), 0));
-        tempo.add(new MidiEvent(marker("end"), span * times));
+        tempo.add(new MidiEvent(marker("end"), sequenceEnd));
 
+        int[] lengths = new int[sections.size()];
+        for (int s = 0; s < sections.size(); s++) {
+            lengths[s] = sections.get(s).steps();
+        }
         List<Character> spanSlots = spanSlots(beat, chosen, song);
         boolean joined = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int pass = 0; pass < times; pass++) {
             long origin = pass * span;
-            for (Timeline.Section section : sections) {
+            for (int s = 0; s < sections.size(); s++) {
+                Timeline.Section section = sections.get(s);
                 char slot = section.slot();
                 hits.Track[] tracks = beat.slot(slot);
                 long offset = origin + section.start();
+                int[] ahead = ahead(lengths, s, pass, times);
                 for (int i = 0; i < tracks.length; i++) {
                     hits.Track track = tracks[i];
                     if (chosen.asHeard() && !Beat.audibleIn(tracks, track)) {
@@ -243,7 +251,19 @@ public final class SequenceBuilder {
                         midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, joined)), 0));
                     }
                     writeSetup(midiTracks[i], track, i, offset);
-                    writeNotes(midiTracks[i], beat, track, i, section.steps(), offset, section.ticks(), random);
+                    writeNotes(
+                        midiTracks[i],
+                        beat,
+                        track,
+                        i,
+                        section.steps(),
+                        offset,
+                        section.ticks(),
+                        random,
+                        false,
+                        clipEnd ? sequenceEnd : -1,
+                        ahead
+                    );
                 }
             }
         }
@@ -251,6 +271,24 @@ public final class SequenceBuilder {
             addClicks(sequence, sections, times);
         }
         return sequence;
+    }
+
+    /** Step counts after {@code sectionIndex} in this pass, then each later pass in full. */
+    private static int[] ahead(int[] lengths, int sectionIndex, int pass, int passes) {
+        int rest = lengths.length - sectionIndex - 1;
+        int laterPasses = Math.max(0, passes - pass - 1);
+        int count = rest + laterPasses * lengths.length;
+        int[] following = new int[count];
+        int cursor = 0;
+        for (int i = sectionIndex + 1; i < lengths.length; i++) {
+            following[cursor++] = lengths[i];
+        }
+        for (int later = 0; later < laterPasses; later++) {
+            for (int length : lengths) {
+                following[cursor++] = length;
+            }
+        }
+        return following;
     }
 
     private static List<Character> spanSlots(Beat beat, ExportOptions options, boolean song) {
@@ -348,6 +386,18 @@ public final class SequenceBuilder {
         return message;
     }
 
+    /**
+     * Writes the hits in one section.
+     * {@code wrapStart} is looped pattern playback: a negative nudge on the first step
+     * lands at the end of this pass, and every note-off stops at {@code clipTick}.
+     * Song playback passes the end of the whole sequence as {@code clipTick} so a note can
+     * cross into the next section and still release before the song loops.
+     * {@code ahead} is each later section's step count, including later passes, so the
+     * continuation uses that pattern's length. Export passes {@code -1} and lets a held
+     * note cross a section or finish after the file.
+     * One roll covers the whole note. A later hit on the same pitch shortens the earlier
+     * note so its note-off does not silence the new one.
+     */
     private static void writeNotes(
         Track midi,
         Beat beat,
@@ -356,35 +406,122 @@ public final class SequenceBuilder {
         int steps,
         long offset,
         long sectionTicks,
-        Random random
+        Random random,
+        boolean wrapStart,
+        long clipTick,
+        int[] ahead
     ) throws InvalidMidiDataException {
         int channel = Mix.channel(track, row);
+        int swing = beat.swing();
+        boolean legato = track.legato() && track.mode() == TrackMode.NOTE;
+        boolean[] play = new boolean[steps];
+        int[] sounding = new int[steps];
+        int[] velocities = new int[steps];
+        int[] nudges = new int[steps];
         for (int step = 0; step < steps; step++) {
             Step cell = track.step(step);
             if (!cell.on() || !Chance.plays(cell.probability(), random)) {
                 continue;
             }
-            long start = offset + tickForStep(step, beat.swing());
-            long boundary = step + 1 < steps
-                ? offset + tickForStep(step + 1, beat.swing())
-                : offset + sectionTicks;
-            long length = Math.max(1, Math.round((boundary - start) * (track.gate() / 100.0)));
-            long end = offset + sectionTicks;
-            if (start + length > end) {
-                length = Math.max(1, end - start);
-            }
-            int note = cell.soundingNote(track.note());
             int velocity = Mix.velocity(cell.velocity(), track.level(), beat.master());
             if (velocity <= 0) {
                 continue;
             }
-            ShortMessage on = new ShortMessage();
-            on.setMessage(ShortMessage.NOTE_ON, channel, note, velocity);
-            midi.add(new MidiEvent(on, start));
-            ShortMessage off = new ShortMessage();
-            off.setMessage(ShortMessage.NOTE_OFF, channel, note, 0);
-            midi.add(new MidiEvent(off, start + length));
+            play[step] = true;
+            sounding[step] = cell.soundingNote(track.note());
+            velocities[step] = velocity;
+            nudges[step] = track.playedNudge(step);
         }
+        List<Placed> placed = new ArrayList<>();
+        for (int step = 0; step < steps; step++) {
+            if (!play[step]) {
+                continue;
+            }
+            int length = track.step(step).length();
+            long tie = -1;
+            if (legato) {
+                int next = nextPlaying(play, step);
+                if (next >= 0) {
+                    tie = NoteTiming.startTick(next, steps, swing, nudges[next], offset, sectionTicks, false, ahead);
+                } else {
+                    length = Math.max(1, steps - step);
+                }
+            }
+            NoteTiming.Sound sound = NoteTiming.place(
+                step,
+                steps,
+                swing,
+                nudges[step],
+                length,
+                track.gate(),
+                tie,
+                offset,
+                sectionTicks,
+                wrapStart,
+                clipTick,
+                ahead
+            );
+            if (sound != null) {
+                placed.add(new Placed(sound, sounding[step], velocities[step]));
+            }
+        }
+        // A negative nudge can put step 0 after a later step. Emit in time order so the
+        // later note-on shortens a same-pitch note that would otherwise overlap it.
+        placed.sort((left, right) -> Long.compare(left.sound.start(), right.sound.start()));
+        for (Placed note : placed) {
+            truncateOverlap(midi, channel, note.note, note.sound.start());
+            ShortMessage on = new ShortMessage();
+            on.setMessage(ShortMessage.NOTE_ON, channel, note.note, note.velocity);
+            midi.add(new MidiEvent(on, note.sound.start()));
+            ShortMessage off = new ShortMessage();
+            off.setMessage(ShortMessage.NOTE_OFF, channel, note.note, 0);
+            midi.add(new MidiEvent(off, note.sound.end()));
+        }
+    }
+
+    private record Placed(NoteTiming.Sound sound, int note, int velocity) {}
+
+    private static int nextPlaying(boolean[] play, int step) {
+        for (int next = step + 1; next < play.length; next++) {
+            if (play[next]) {
+                return next;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Moves an earlier note-off of the same pitch up to {@code start}.
+     * The note-off is removed and added again so it stays in tick order, ahead of the new note-on.
+     */
+    private static void truncateOverlap(Track midi, int channel, int note, long start) throws InvalidMidiDataException {
+        MidiEvent on = null;
+        MidiEvent off = null;
+        for (int i = 0; i < midi.size(); i++) {
+            MidiEvent event = midi.get(i);
+            if (!(event.getMessage() instanceof ShortMessage message)) {
+                continue;
+            }
+            if (message.getChannel() != channel || message.getData1() != note) {
+                continue;
+            }
+            boolean noteOff = message.getCommand() == ShortMessage.NOTE_OFF
+                || (message.getCommand() == ShortMessage.NOTE_ON && message.getData2() == 0);
+            boolean noteOn = message.getCommand() == ShortMessage.NOTE_ON && message.getData2() > 0;
+            if (noteOn && event.getTick() < start && (on == null || event.getTick() >= on.getTick())) {
+                on = event;
+                off = null;
+            } else if (noteOff && on != null && event.getTick() >= on.getTick() && off == null) {
+                off = event;
+            }
+        }
+        if (on == null || off == null || off.getTick() <= start) {
+            return;
+        }
+        midi.remove(off);
+        ShortMessage released = new ShortMessage();
+        released.setMessage(ShortMessage.NOTE_OFF, channel, note, 0);
+        midi.add(new MidiEvent(released, start));
     }
 
     private static MetaMessage tempoMessage(int bpm) throws InvalidMidiDataException {

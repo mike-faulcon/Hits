@@ -4,7 +4,7 @@ import javax.swing.JLabel;
 
 /** The hint line along the bottom of the window. */
 final class StatusLine {
-    static final String HINT = "Space play/stop  ·  T tap tempo  ·  click step  ·  shift-click loud  ·  right-click select  ·  ⌘/Ctrl S save  ·  ⌘/Ctrl Z undo";
+    static final String HINT = "Space play/stop  ·  T tap tempo  ·  , . nudge  ·  click step  ·  shift-click loud  ·  right-click select  ·  ⌘/Ctrl S save  ·  ⌘/Ctrl Z undo";
 
     private final JLabel label = new JLabel(HINT);
 

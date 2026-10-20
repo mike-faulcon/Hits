@@ -10,15 +10,18 @@ import java.util.Map;
  * Version 1 is the original document. Version 2 adds optional fields: {@code pitch} on a step,
  * {@code probability} on a step (0–100, omitted when it is 100), a {@code chain} of pattern entries,
  * a track {@code pan} or mixer {@code level}, a beat {@code master}, pattern slots {@code c} through {@code h},
- * and a per-pattern {@code steps} count. Mute and solo are original track fields.
+ * a per-pattern {@code steps} count, a step {@code len} (note length in steps, omitted at 1),
+ * a track {@code legato} flag (omitted when false), a step {@code nudge} (timing percent, omitted at 0),
+ * and a track {@code shift} (omitted at 0). Mute and solo are original track fields.
  * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
  * A slot {@code steps} key is written only when that pattern's length differs from the root {@code steps},
  * which stays 16 or 32. A beat that uses none of the version 2 fields is still written as version 1.
+ * Keys this version does not know are ignored. An older Hits drops the new keys the next time it saves.
  */
 public final class BeatJson {
     private BeatJson() {}
 
-    /** 1 unless a version 2 field is in use: pitch, probability, the chain, the mixer, pattern C–H, or a pattern length. */
+    /** 1 unless a version 2 field is in use. See {@link Beat#usesFormatV2()}. */
     public static int documentVersion(Beat beat) {
         return beat.usesFormatV2() ? Beat.FORMAT_V2 : Beat.VERSION;
     }
@@ -139,6 +142,12 @@ public final class BeatJson {
         if (track.level() != Track.LEVEL) {
             field(out, 5, "level", track.level(), true);
         }
+        if (track.legato()) {
+            field(out, 5, "legato", true, true);
+        }
+        if (track.shift() != 0) {
+            field(out, 5, "shift", track.shift(), true);
+        }
         out.append("          \"steps\": [");
         for (int i = 0; i < Track.CAPACITY; i++) {
             if (i > 0) {
@@ -151,6 +160,12 @@ public final class BeatJson {
             }
             if (step.probability() != 100) {
                 out.append(",\"probability\":").append(step.probability());
+            }
+            if (step.length() != Step.MIN_LENGTH) {
+                out.append(",\"len\":").append(step.length());
+            }
+            if (step.nudge() != 0) {
+                out.append(",\"nudge\":").append(step.nudge());
             }
             out.append("}");
         }
@@ -230,6 +245,12 @@ public final class BeatJson {
         track.setGate(number(object.get("gate")));
         track.setVelocity(number(object.get("velocity")));
         track.setAccent(number(object.get("accent")));
+        if (object.containsKey("legato") && object.get("legato") != null) {
+            track.setLegato(bool(object.get("legato")));
+        }
+        if (object.containsKey("shift") && object.get("shift") != null) {
+            track.setShift(number(object.get("shift")));
+        }
         List<?> steps = asList(object.get("steps"));
         int count = Math.min(Track.CAPACITY, steps.size());
         for (int i = 0; i < count; i++) {
@@ -241,6 +262,12 @@ public final class BeatJson {
             }
             if (step.containsKey("probability") && step.get("probability") != null) {
                 track.step(i).setProbability(number(step.get("probability")));
+            }
+            if (step.containsKey("len") && step.get("len") != null) {
+                track.step(i).setLength(number(step.get("len")));
+            }
+            if (step.containsKey("nudge") && step.get("nudge") != null) {
+                track.step(i).setNudge(number(step.get("nudge")));
             }
         }
         return track;

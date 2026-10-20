@@ -9,8 +9,9 @@ public final class Beat {
     /**
      * Written when a step stores its own pitch, a step stores a play probability
      * other than 100, the beat has a song chain, the mixer is off its defaults,
-     * a pattern C–H is in use, or a pattern's length differs from the root
-     * {@code steps}. Version 1 files stay version 1.
+     * a pattern C–H is in use, a pattern's length differs from the root {@code steps},
+     * a step is longer than one step, a note track is legato, a step is nudged
+     * off the grid, or a track shift is set. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
     /** Master fader at full. Track levels are not turned down any further. */
@@ -300,9 +301,8 @@ public final class Beat {
     }
 
     /**
-     * True when a step has its own pitch, a probability other than 100,
-     * the song chain is not empty, the mixer is not at its defaults,
-     * a pattern C–H is in use, or a pattern's length differs from the root.
+     * True when a version 2 field is in use. Each check is one feature, so a later
+     * change adds a line instead of rewriting the expression.
      */
     public boolean usesFormatV2() {
         return hasStepPitch()
@@ -310,7 +310,29 @@ public final class Beat {
             || hasChain()
             || hasMixer()
             || usesExtraSlots()
-            || hasCustomLengths();
+            || hasCustomLengths()
+            || hasNoteLength()
+            || hasNudge();
+    }
+
+    /** A step longer than one step, or a legato note track, in any pattern. */
+    public boolean hasNoteLength() {
+        for (Track[] slot : slots) {
+            if (held(slot)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** A step nudge, or a track shift, in any pattern. Off steps count. */
+    public boolean hasNudge() {
+        for (Track[] slot : slots) {
+            if (shifted(slot)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Pan, track level, or the master fader differs from the value a new kit uses, in any pattern. */
@@ -435,6 +457,34 @@ public final class Beat {
         for (Track track : tracks) {
             for (int i = 0; i < Track.CAPACITY; i++) {
                 if (track.step(i).hasPitch()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean held(Track[] tracks) {
+        for (Track track : tracks) {
+            if (track.legato()) {
+                return true;
+            }
+            for (int i = 0; i < Track.CAPACITY; i++) {
+                if (track.step(i).extended()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean shifted(Track[] tracks) {
+        for (Track track : tracks) {
+            if (track.shift() != 0) {
+                return true;
+            }
+            for (int i = 0; i < Track.CAPACITY; i++) {
+                if (track.step(i).nudged()) {
                     return true;
                 }
             }
