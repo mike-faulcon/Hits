@@ -10,6 +10,54 @@ A step sequencer for sketching drum and note patterns. The desktop window follow
 
 You can also install a double-clickable app that includes a Java runtime. See [Install](#install).
 
+## Command line
+
+`render` and `info` run with no display. They do not open the window. The same `HitsApp` entry point still opens the window when it is given no arguments, including the packaged app.
+
+```shell
+./gradlew installDist
+build/install/hits/bin/hits info beats/somefile.json
+build/install/hits/bin/hits render beats/somefile.json --out out.wav
+build/install/hits/bin/hits render beats/somefile.json --song --out out.mid
+```
+
+`./gradlew run --args="info beats/somefile.json"` does the same. Gradle would treat `--out` as its own flag, so pass the whole command in `--args`. On Windows the start script is `build\install\hits\bin\hits.bat`.
+
+`render` writes the active pattern once. `--song` writes the chain, including every pattern A–H that the chain names. The extension picks the file: `.wav`, `.mid`, or `.midi`. Mute and solo match what playback would do. WAV is the built-in General MIDI synth, offline, the same renderer as Export WAV with no SoundFont loaded. The start script and `./gradlew run` pass `--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED`, which that renderer needs.
+
+`info` prints the tempo, swing, the patterns in use, the chain, the track list, and the length of one pattern and of the song in bars and seconds. For the test fixture:
+
+```text
+Sparse groove
+tempo: 120 bpm
+swing: 58%
+patterns: A, D
+chain: A x1, D x1
+tracks:
+  A  Kick             drum   C1  Kick
+  A  Snare            drum   D1  Snare
+  A  Closed Hat       drum  F#1  Hat C
+  A  Open Hat         drum  A#1  Hat O
+  A  Clap             drum  D#1  Clap, muted
+  A  Tom              drum   A1  Tom
+  A  Bass             note   E1  Syn Bass 1
+  A  Ride             drum  D#2  Ride
+  D  Kick             drum   C1  Kick
+  D  Snare            drum   D1  Snare
+  D  Closed Hat       drum  F#1  Hat C
+  D  Open Hat         drum  A#1  Hat O
+  D  Clap             drum  D#1  Clap
+  D  Tom              drum   A1  Tom
+  D  Bass             note   G1  Syn Bass 1
+  D  Ride             drum  D#2  Ride
+length: 1 bar, 2.000 s
+song: 2 bars, 4.000 s
+```
+
+Exit codes are `0` when the command worked, `1` when the beat path is missing, the JSON is invalid, or the file could not be written, and `2` when the command, the `--out` path, or the extension is wrong. `hits shot` is not a command: a picture of the grid needs the window.
+
+A neutral one-bar fixture used by the tests and by CI lives at `src/test/resources/fixtures/sparse-808-groove.json`.
+
 Open a pattern from the beats folder. Until you choose another one, `./gradlew run` uses `beats` next to the directory you started in. A packaged app uses `Hits/beats` in your home directory (`~/Hits/beats` on macOS and Linux, `%USERPROFILE%\Hits\beats` on Windows) and copies the sample patterns there when that folder is empty. **Folder…** stores the absolute path, so it stays put when Hits is started from somewhere else. The first launch stores that path. Older `.btf` files still load. Save writes a versioned `.json` file beside them and leaves the original `.btf` in place.
 
 ## Playing

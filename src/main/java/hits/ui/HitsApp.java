@@ -3,6 +3,7 @@ package hits.ui;
 import hits.Beat;
 import hits.Editor;
 import hits.Player;
+import hits.cli.HitsCli;
 
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -12,7 +13,13 @@ public final class HitsApp {
     private HitsApp() {}
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(HitsApp::start);
+        if (HitsCli.launchesDesktop(args)) {
+            SwingUtilities.invokeLater(HitsApp::start);
+            return;
+        }
+        // Set before any window. render and info never call Swing.
+        System.setProperty("java.awt.headless", "true");
+        System.exit(HitsCli.run(args, System.out, System.err));
     }
 
     private static void start() {

@@ -35,6 +35,23 @@ jobs:
       - name: Test and build
         run: ./gradlew test build --no-daemon
 
+      - name: CLI render smoke
+        run: |
+          set -euo pipefail
+          ./gradlew installDist --no-daemon
+          script="build/install/hits/bin/hits"
+          test -x "$script"
+          grep -q 'com.sun.media.sound=ALL-UNNAMED' "$script"
+          fixture="src/test/resources/fixtures/sparse-808-groove.json"
+          wav="${RUNNER_TEMP}/sparse-808-groove.wav"
+          mid="${RUNNER_TEMP}/sparse-808-groove.mid"
+          "$script" render "$fixture" --out "$wav"
+          "$script" render "$fixture" --song --out "$mid"
+          if [ ! -s "$wav" ] || [ ! -s "$mid" ]; then
+            echo "CLI render produced a missing or empty file"
+            exit 1
+          fi
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v7

@@ -18,8 +18,11 @@ java {
 }
 
 application {
+    applicationName = "hits"
     mainClass = "hits.ui.HitsApp"
     // AudioSynthesizer.openStream is the JDK software synth. The package is not exported.
+    // run, the installDist start script, and the packaged app all pass this flag.
+    // No arguments opens the window. render and info are headless commands.
     applicationDefaultJvmArgs = ["--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED"]
 }
 
@@ -36,6 +39,11 @@ dependencies {
 tasks.named("test") {
     useJUnitPlatform()
     jvmArgs("--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED")
+    // ./gradlew test -Dhits.updateGoldens=true rewrites the CLI MIDI event dumps.
+    def updateGoldens = System.getProperty("hits.updateGoldens")
+    if (updateGoldens != null) {
+        systemProperty("hits.updateGoldens", updateGoldens)
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
