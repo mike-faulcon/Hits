@@ -97,6 +97,43 @@ public final class SoundCatalog {
         return kit.program() + "  " + kit.name();
     }
 
+    /** True when {@code program} is a percussion kit actually in {@code bank}. A null bank has Standard only. */
+    public static boolean hasKit(Soundbank bank, int program) {
+        for (Kit kit : kits(bank)) {
+            if (kit.program() == program) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Kit program to send. A null bank keeps the requested kit, which is what a MIDI file
+     * and an external output do. A loaded bank that lacks the kit plays Standard.
+     */
+    public static int playedKit(Soundbank bank, int kit) {
+        int program = Math.max(0, Math.min(127, kit));
+        if (program == 0 || bank == null || hasKit(bank, program)) {
+            return program;
+        }
+        return 0;
+    }
+
+    /**
+     * Warning when a drum row's kit is not in {@code bank}, or null when the kit will play.
+     * A null bank keeps the stored kit (a MIDI file, or an external output), so there is no warning.
+     * A pitched preset does not use the kit.
+     */
+    public static String kitFallback(Soundbank bank, Track track) {
+        if (bank == null || track == null || track.mode() != TrackMode.DRUM || track.preset() != null || track.kit() == 0) {
+            return null;
+        }
+        if (hasKit(bank, track.kit())) {
+            return null;
+        }
+        return "kit " + track.kit() + " is not in this bank, plays Standard";
+    }
+
     private static String clean(String name) {
         if (name == null || name.isBlank()) {
             return "Instrument";

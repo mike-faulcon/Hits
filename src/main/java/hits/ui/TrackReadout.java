@@ -54,14 +54,14 @@ final class TrackReadout {
         if (step.hasPitch()) {
             return new StepPitch(
                 Notes.name(step.pitch()),
-                "This step plays " + Notes.name(step.pitch()) + ". The track pitch is " + Notes.name(track.note()) + ".",
+                "This step plays " + Notes.name(step.pitch()) + ". The track pitch is " + Notes.name(track.playedNote()) + ".",
                 true,
                 true
             );
         }
         return new StepPitch(
-            Notes.name(track.note()),
-            "Uses the track pitch, " + Notes.name(track.note()) + ".",
+            Notes.name(track.playedNote()),
+            "Uses the track pitch, " + Notes.name(track.playedNote()) + ".",
             true,
             false
         );

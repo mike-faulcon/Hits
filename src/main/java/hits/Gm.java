@@ -104,6 +104,7 @@ public final class Gm {
             case 50 -> "High Tom";
             case 49 -> "Crash";
             case 39 -> "Clap";
+            case 40 -> "Electric Snare";
             case 37 -> "Side Stick";
             case 51 -> "Ride";
             case 54 -> "Tambourine";

@@ -8,7 +8,7 @@ public final class Mix {
 
     /**
      * Sets one row's level. {@code allPatterns} writes every pattern whose row is the same
-     * instrument (name, mode, program, and note). A row that is a different sound is left alone.
+     * instrument (name, mode, program, and the pitch that plays). A row that is a different sound is left alone.
      * Otherwise only {@code slot} changes, which is how a section can have its own mix.
      */
     public static void setLevel(Beat beat, char slot, int row, int level, boolean allPatterns) {
@@ -41,12 +41,15 @@ public final class Mix {
         edit.accept(source);
     }
 
-    /** Name plus the sound. Two rows that only share a number are not the same instrument. */
+    /**
+     * Name plus the sound. Two rows that only share a number are not the same instrument.
+     * A pitched preset compares the pitch that plays, not the hidden drum key.
+     */
     static boolean sameInstrument(Track left, Track right) {
         return left.name().equals(right.name())
             && left.mode() == right.mode()
             && left.program() == right.program()
-            && left.note() == right.note()
+            && left.playedNote() == right.playedNote()
             && left.bank() == right.bank()
             && left.kit() == right.kit()
             && left.preset() == right.preset();

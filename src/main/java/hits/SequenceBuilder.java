@@ -6,6 +6,7 @@ import javax.sound.midi.MidiEvent;
 import javax.sound.midi.Receiver;
 import javax.sound.midi.Sequence;
 import javax.sound.midi.ShortMessage;
+import javax.sound.midi.Soundbank;
 import javax.sound.midi.Track;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -82,7 +83,7 @@ public final class SequenceBuilder {
         if (!beat.hasChain()) {
             return build(beat, metronome);
         }
-        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true);
+        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true, null);
     }
 
     /**
@@ -98,7 +99,7 @@ public final class SequenceBuilder {
      * {@code metronome} adds clicks. {@link #export} never writes them.
      */
     public static Sequence build(Beat beat, boolean metronome) throws InvalidMidiDataException {
-        return pattern(beat, null, 1, metronome);
+        return pattern(beat, null, 1, metronome, null);
     }
 
     /**
@@ -120,13 +121,23 @@ public final class SequenceBuilder {
      * every pass. Export never calls this, so the click is not written to a file.
      */
     public static Sequence playback(Beat beat, boolean song, Random random, boolean metronome) throws InvalidMidiDataException {
+        return playback(beat, song, random, metronome, null);
+    }
+
+    /**
+     * Playback, including every pre-rolled pass. {@code kits} is the bank that will play.
+     * A drum kit that bank does not contain plays Standard. Null keeps the kit number,
+     * which is what a MIDI file does.
+     */
+    public static Sequence playback(Beat beat, boolean song, Random random, boolean metronome, Soundbank kits)
+        throws InvalidMidiDataException {
         boolean chance = usesChance(beat, song);
         int passes = playbackPasses(beat, song);
         Random roll = chance ? (random != null ? random : new Random()) : null;
         if (song && beat.hasChain()) {
-            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true);
+            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true, kits);
         }
-        return pattern(beat, roll, passes, metronome);
+        return pattern(beat, roll, passes, metronome, kits);
     }
 
     /** Tick length of {@link #playback}, including every pre-rolled pass. */
@@ -159,7 +170,8 @@ public final class SequenceBuilder {
         return beat.playingChance(beat.activeSlot());
     }
 
-    private static Sequence pattern(Beat beat, Random random, int passes, boolean metronome) throws InvalidMidiDataException {
+    private static Sequence pattern(Beat beat, Random random, int passes, boolean metronome, Soundbank kits)
+        throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
         int steps = beat.stepCount(beat.activeSlot());
@@ -169,7 +181,7 @@ public final class SequenceBuilder {
         tempo.add(new MidiEvent(marker("end"), loop * times));
 
         hits.Track[] tracks = beat.activeTracks();
-        ChannelPlan plan = ChannelPlan.of(beat, List.of(beat.activeSlot()));
+        ChannelPlan plan = ChannelPlan.of(beat, List.of(beat.activeSlot()), kits);
         Track[] midiTracks = new Track[tracks.length];
         for (int i = 0; i < tracks.length; i++) {
             hits.Track track = tracks[i];
@@ -205,7 +217,23 @@ public final class SequenceBuilder {
      * The metronome is never written.
      */
     public static Sequence export(Beat beat, ExportOptions options) throws InvalidMidiDataException {
-        return arrangement(beat, options == null ? ExportOptions.matchingPlayback() : options, Chance.exportRandom(), 1, false, false);
+        return export(beat, options, null);
+    }
+
+    /**
+     * File export heard on {@code kits}. A drum kit that bank does not contain plays Standard.
+     * Null keeps the kit number, which is what a MIDI file and an external output do.
+     */
+    public static Sequence export(Beat beat, ExportOptions options, Soundbank kits) throws InvalidMidiDataException {
+        return arrangement(
+            beat,
+            options == null ? ExportOptions.matchingPlayback() : options,
+            Chance.exportRandom(),
+            1,
+            false,
+            false,
+            kits
+        );
     }
 
     private static Sequence arrangement(
@@ -214,7 +242,8 @@ public final class SequenceBuilder {
         Random random,
         int passes,
         boolean metronome,
-        boolean clipEnd
+        boolean clipEnd,
+        Soundbank kits
     ) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
         boolean song = chosen.song() && beat.hasChain();
@@ -232,7 +261,7 @@ public final class SequenceBuilder {
             lengths[s] = sections.get(s).steps();
         }
         List<Character> spanSlots = spanSlots(beat, chosen, song);
-        ChannelPlan plan = ChannelPlan.of(beat, spanSlots);
+        ChannelPlan plan = ChannelPlan.of(beat, spanSlots, kits);
         boolean joined = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int pass = 0; pass < times; pass++) {
@@ -331,7 +360,7 @@ public final class SequenceBuilder {
     private static void writeSetup(Track midi, hits.Track track, int row, long offset, ChannelPlan plan)
         throws InvalidMidiDataException {
         int channel = plan.channel(track, row);
-        for (ShortMessage message : plan.setup(track, channel)) {
+        for (ShortMessage message : plan.setup(track, channel, row)) {
             midi.add(new MidiEvent(message, offset));
         }
     }
@@ -343,6 +372,16 @@ public final class SequenceBuilder {
      * Looping back to the start replays the same setup from the sequence.
      */
     static void playChannelState(Receiver receiver, Beat beat, boolean song, long tick) throws InvalidMidiDataException {
+        playChannelState(receiver, beat, song, tick, null);
+    }
+
+    /**
+     * Pushes the slot sounding at {@code tick} onto an open synth.
+     * {@code kits} is the bank that will play. A missing drum kit plays Standard.
+     * Null keeps the kit number.
+     */
+    static void playChannelState(Receiver receiver, Beat beat, boolean song, long tick, Soundbank kits)
+        throws InvalidMidiDataException {
         if (receiver == null || beat == null) {
             return;
         }
@@ -352,7 +391,7 @@ public final class SequenceBuilder {
         char slot = song && beat.hasChain()
             ? Chain.place(beat, tick).slot()
             : beat.activeSlot();
-        ChannelPlan plan = ChannelPlan.of(beat, slots);
+        ChannelPlan plan = ChannelPlan.of(beat, slots, kits);
         hits.Track[] tracks = beat.slot(slot);
         for (int row = 0; row < tracks.length; row++) {
             hits.Track track = tracks[row];
@@ -360,7 +399,7 @@ public final class SequenceBuilder {
                 continue;
             }
             int channel = plan.channel(track, row);
-            for (ShortMessage message : plan.setup(track, channel)) {
+            for (ShortMessage message : plan.setup(track, channel, row)) {
                 receiver.send(message, -1);
             }
         }

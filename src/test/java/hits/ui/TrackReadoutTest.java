@@ -1,6 +1,8 @@
 package hits.ui;
 
 import hits.Beat;
+import hits.Notes;
+import hits.PitchedPreset;
 import hits.Track;
 import org.junit.jupiter.api.Test;
 
@@ -62,5 +64,24 @@ class TrackReadoutTest {
         assertEquals("This step plays D1. The track pitch is C1.", own.tip());
         assertTrue(own.nudgeEnabled());
         assertTrue(own.clearEnabled());
+    }
+
+    @Test
+    void stepPitchUsesThePresetPitchInsteadOfTheHiddenDrumKey() {
+        Beat beat = Beat.drumKit("rim");
+        Track rim = beat.track(0);
+        rim.setNote(37);
+        rim.setPreset(PitchedPreset.RIM);
+        rim.tap(0, false);
+        TrackReadout.StepPitch pitch = TrackReadout.stepPitch(beat, 'a', rim, 0);
+        assertEquals("C7", pitch.text());
+        assertEquals(Notes.name(PitchedPreset.RIM.note()), pitch.text());
+        assertEquals("Uses the track pitch, C7.", pitch.tip());
+        assertFalse(pitch.tip().contains("C#1"));
+
+        rim.step(0).setPitch(60);
+        TrackReadout.StepPitch own = TrackReadout.stepPitch(beat, 'a', rim, 0);
+        assertEquals(Notes.name(60), own.text());
+        assertEquals("This step plays " + Notes.name(60) + ". The track pitch is C7.", own.tip());
     }
 }

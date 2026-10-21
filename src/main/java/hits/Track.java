@@ -112,6 +112,9 @@ public final class Track {
 
     public void setMode(TrackMode mode) {
         this.mode = mode == null ? TrackMode.DRUM : mode;
+        if (this.mode == TrackMode.NOTE) {
+            preset = null;
+        }
     }
 
     public int program() {
@@ -233,6 +236,10 @@ public final class Track {
     }
 
     public void setPreset(PitchedPreset preset) {
+        if (mode == TrackMode.NOTE) {
+            this.preset = null;
+            return;
+        }
         this.preset = preset;
     }
 
