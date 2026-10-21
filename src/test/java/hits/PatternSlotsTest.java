@@ -23,8 +23,9 @@ class PatternSlotsTest {
         assertEquals(golden("ab-round.json"), BeatJson.write(roundTripBeat()));
         assertEquals(golden("ab-pitch.json"), BeatJson.write(pitchedBeat()));
         assertEquals(golden("ab-chain.json"), BeatJson.write(chainBeat()));
+        assertEquals(golden("ab-shape.json"), BeatJson.write(shapeBeat()));
 
-        for (String name : List.of("ab-plain.json", "ab-round.json", "ab-pitch.json", "ab-chain.json")) {
+        for (String name : List.of("ab-plain.json", "ab-round.json", "ab-pitch.json", "ab-chain.json", "ab-shape.json")) {
             String original = golden(name);
             assertFalse(original.contains("\"c\":"));
             assertEquals(original, BeatJson.write(BeatJson.read(original)));
@@ -304,6 +305,21 @@ class PatternSlotsTest {
         chain.addChain('b');
         chain.addChain('a');
         return chain;
+    }
+
+    /** Tune, decay, and effects. Defaults stay out of the file, including a reverb of 0, which is a real send. */
+    private static Beat shapeBeat() {
+        Beat beat = Beat.drumKit("shape");
+        beat.track(0).setTune(-700);
+        beat.track(0).setDecay(150);
+        beat.track(1).setReverb(0);
+        beat.track(1).setChorus(40);
+        beat.track(2).setCutoff(12);
+        beat.track(2).setResonance(110);
+        beat.track(3).setPreset(PitchedPreset.RIM);
+        beat.track(3).setDecay(25);
+        beat.track(3).setReverb(80);
+        return beat;
     }
 
     private static void restoreKit(Beat beat, char slot) {

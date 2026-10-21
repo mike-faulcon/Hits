@@ -212,6 +212,10 @@ public final class HitsCli {
                 if (fallback != null) {
                     sound = sound + " — " + fallback;
                 }
+                String shape = track.shapeText();
+                if (!shape.isEmpty()) {
+                    sound = sound + ", " + shape;
+                }
                 text.append(String.format(
                     Locale.ROOT,
                     "  %s  %-16s %-4s %4s  %s%s%n",

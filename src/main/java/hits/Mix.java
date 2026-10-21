@@ -23,6 +23,34 @@ public final class Mix {
         apply(beat, slot, row, allPatterns, track -> track.setPan(pan));
     }
 
+    /**
+     * Sets one row's reverb send. {@code reverb} below 0 clears it, which sends no controller.
+     * {@code allPatterns} writes every pattern whose row is the same instrument.
+     */
+    public static void setReverb(Beat beat, char slot, int row, int reverb, boolean allPatterns) {
+        apply(beat, slot, row, allPatterns, track -> {
+            if (reverb < 0) {
+                track.clearReverb();
+            } else {
+                track.setReverb(reverb);
+            }
+        });
+    }
+
+    /**
+     * Sets one row's chorus send. {@code chorus} below 0 clears it.
+     * {@code allPatterns} writes every pattern whose row is the same instrument.
+     */
+    public static void setChorus(Beat beat, char slot, int row, int chorus, boolean allPatterns) {
+        apply(beat, slot, row, allPatterns, track -> {
+            if (chorus < 0) {
+                track.clearChorus();
+            } else {
+                track.setChorus(chorus);
+            }
+        });
+    }
+
     private static void apply(Beat beat, char slot, int row, boolean allPatterns, Consumer<Track> edit) {
         if (beat == null || row < 0 || row >= Beat.TRACKS) {
             return;
@@ -71,7 +99,7 @@ public final class Mix {
     /**
      * Channel for one row looked at on its own.
      * A song or export uses {@link ChannelPlan} so the number stays put across patterns.
-     * Center drums with no kit, bank, or pitched preset share the General MIDI drum channel.
+     * Center drums with no kit, bank, pitched preset, tune, decay, or effect share the General MIDI drum channel.
      */
     public static int channel(Track track, int row) {
         if (ChannelPlan.sharesDrumChannel(track)) {
@@ -86,6 +114,7 @@ public final class Mix {
     /**
      * This drum needs the drum kit selected on its own channel.
      * A pitched preset uses a melodic program instead, and a non-zero bank uses that bank.
+     * Tune, decay, a send, or a filter does the same, on the GM drum bank.
      */
     public static boolean usesDrumBank(Track track) {
         return track.mode() == TrackMode.DRUM

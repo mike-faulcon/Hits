@@ -20,7 +20,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Insets;
 
-/** Per-track level, pan, mute, and solo, plus the master fader. */
+/** Per-track level, pan, reverb, chorus, mute, and solo, plus the master fader. */
 final class MixerPanel {
     private final Editor editor;
     private final Sync sync;
@@ -36,8 +36,16 @@ final class MixerPanel {
     private final JLabel[] levelValues = new JLabel[Beat.TRACKS];
     private final JSlider[] pans = new JSlider[Beat.TRACKS];
     private final JLabel[] panValues = new JLabel[Beat.TRACKS];
+    private final JCheckBox[] reverbOn = new JCheckBox[Beat.TRACKS];
+    private final JSlider[] reverbs = new JSlider[Beat.TRACKS];
+    private final JLabel[] reverbValues = new JLabel[Beat.TRACKS];
+    private final JCheckBox[] chorusOn = new JCheckBox[Beat.TRACKS];
+    private final JSlider[] choruses = new JSlider[Beat.TRACKS];
+    private final JLabel[] chorusValues = new JLabel[Beat.TRACKS];
     private final SliderDrag[] levelDrags = new SliderDrag[Beat.TRACKS];
     private final SliderDrag[] panDrags = new SliderDrag[Beat.TRACKS];
+    private final SliderDrag[] reverbDrags = new SliderDrag[Beat.TRACKS];
+    private final SliderDrag[] chorusDrags = new SliderDrag[Beat.TRACKS];
 
     MixerPanel(Editor editor, Sync sync) {
         this.editor = editor;
@@ -46,6 +54,8 @@ final class MixerPanel {
         for (int row = 0; row < Beat.TRACKS; row++) {
             levelDrags[row] = new SliderDrag(editor, sync);
             panDrags[row] = new SliderDrag(editor, sync);
+            reverbDrags[row] = new SliderDrag(editor, sync);
+            chorusDrags[row] = new SliderDrag(editor, sync);
         }
         this.panel = build();
     }
@@ -57,17 +67,51 @@ final class MixerPanel {
     void wire() {
         master.setToolTipText("Master volume. 127 is full. This turns every track down together.");
         masterDrag.wire(master, beat -> beat.setMaster(master.getValue()));
-        allPatterns.setToolTipText("Level and pan apply to every pattern whose row has the same name and sound. A different instrument on that row is left alone. Turn this off to edit only the pattern on screen. Mute and solo stay on this pattern.");
+        allPatterns.setToolTipText("Level, pan, reverb, and chorus apply to every pattern whose row has the same name and sound. A different instrument on that row is left alone. Turn this off to edit only the pattern on screen. Mute and solo stay on this pattern.");
         for (int row = 0; row < Beat.TRACKS; row++) {
             int index = row;
             levels[row].setToolTipText("Track level. 100 leaves each hit as programmed. 0 is silent.");
             pans[row].setToolTipText("Pan. C is center. L is left, R is right.");
+            String reverbTip = "Reverb send. Off leaves the controller unset, which keeps today's sound. On a pitched preset, a send replaces the reverb the length was sending. Built-in synth only. A DAW may ignore this.";
+            String chorusTip = "Chorus send. Off leaves the controller unset. Built-in synth only. A DAW may ignore this.";
+            reverbs[row].setToolTipText(reverbTip);
+            reverbOn[row].setToolTipText(reverbTip);
+            choruses[row].setToolTipText(chorusTip);
+            chorusOn[row].setToolTipText(chorusTip);
             mutes[row].setToolTipText("Mute this track.");
             solos[row].setToolTipText("Solo this track. While any solo is on, only soloed tracks play.");
             levelDrags[row].wire(levels[row], beat -> Mix.setLevel(
                 beat, editor.viewSlot(), index, levels[index].getValue(), allPatterns.isSelected()));
             panDrags[row].wire(pans[row], beat -> Mix.setPan(
                 beat, editor.viewSlot(), index, pans[index].getValue(), allPatterns.isSelected()));
+            reverbDrags[row].wire(reverbs[row], beat -> Mix.setReverb(
+                beat, editor.viewSlot(), index, reverbs[index].getValue(), allPatterns.isSelected()));
+            chorusDrags[row].wire(choruses[row], beat -> Mix.setChorus(
+                beat, editor.viewSlot(), index, choruses[index].getValue(), allPatterns.isSelected()));
+            reverbOn[row].addActionListener(event -> {
+                if (sync.on()) {
+                    return;
+                }
+                editor.edit(beat -> Mix.setReverb(
+                    beat,
+                    editor.viewSlot(),
+                    index,
+                    reverbOn[index].isSelected() ? reverbs[index].getValue() : Track.UNSET,
+                    allPatterns.isSelected()
+                ));
+            });
+            chorusOn[row].addActionListener(event -> {
+                if (sync.on()) {
+                    return;
+                }
+                editor.edit(beat -> Mix.setChorus(
+                    beat,
+                    editor.viewSlot(),
+                    index,
+                    chorusOn[index].isSelected() ? choruses[index].getValue() : Track.UNSET,
+                    allPatterns.isSelected()
+                ));
+            });
             mutes[row].addActionListener(event -> editor.toggleMute(index));
             solos[row].addActionListener(event -> editor.toggleSolo(index));
         }
@@ -92,6 +136,8 @@ final class MixerPanel {
                 pans[row].setValue(track.pan());
             }
             panValues[row].setText(Mix.panText(track.pan()));
+            showSend(reverbOn[row], reverbs[row], reverbValues[row], track.hasReverb(), track.reverb(), Track.REVERB_NEUTRAL);
+            showSend(chorusOn[row], choruses[row], chorusValues[row], track.hasChorus(), track.chorus(), Track.CHORUS_NEUTRAL);
             paintChip(mutes[row], track.mute(), Theme.MUTE_ON);
             paintChip(solos[row], track.solo(), Theme.SOLO);
         }
@@ -150,30 +196,69 @@ final class MixerPanel {
         panValues[row] = Widgets.label("C");
         JLabel level = Widgets.label("Level");
         JLabel pan = Widgets.label("Pan");
-        pin(names[row], 128, 32);
-        pin(mutes[row], 44, 32);
-        pin(solos[row], 44, 32);
-        pin(level, 44, 32);
-        pin(pan, 36, 32);
-        pin(levelValues[row], 36, 32);
-        pin(panValues[row], 40, 32);
+        reverbOn[row] = sendToggle("Rev");
+        reverbs[row] = Widgets.slider(0, 127, Track.REVERB_NEUTRAL);
+        reverbs[row].setName("reverb-" + row);
+        reverbValues[row] = Widgets.label("—");
+        chorusOn[row] = sendToggle("Cho");
+        choruses[row] = Widgets.slider(0, 127, Track.CHORUS_NEUTRAL);
+        choruses[row].setName("chorus-" + row);
+        chorusValues[row] = Widgets.label("—");
+        pin(names[row], 96, 32);
+        pin(mutes[row], 36, 32);
+        pin(solos[row], 36, 32);
+        pin(level, 40, 32);
+        pin(pan, 32, 32);
+        pin(levelValues[row], 32, 32);
+        pin(panValues[row], 36, 32);
+        pin(reverbOn[row], 52, 32);
+        pin(chorusOn[row], 52, 32);
+        pin(reverbValues[row], 28, 32);
+        pin(chorusValues[row], 28, 32);
         grow(levels[row]);
         grow(pans[row]);
+        grow(reverbs[row]);
+        grow(choruses[row]);
         JPanel strip = strip();
         strip.add(names[row]);
-        strip.add(Box.createHorizontalStrut(8));
+        strip.add(Box.createHorizontalStrut(6));
         strip.add(mutes[row]);
         strip.add(Box.createHorizontalStrut(4));
         strip.add(solos[row]);
-        strip.add(Box.createHorizontalStrut(10));
+        strip.add(Box.createHorizontalStrut(8));
         strip.add(level);
         strip.add(levels[row]);
         strip.add(levelValues[row]);
-        strip.add(Box.createHorizontalStrut(8));
+        strip.add(Box.createHorizontalStrut(6));
         strip.add(pan);
         strip.add(pans[row]);
         strip.add(panValues[row]);
+        strip.add(Box.createHorizontalStrut(6));
+        strip.add(reverbOn[row]);
+        strip.add(reverbs[row]);
+        strip.add(reverbValues[row]);
+        strip.add(Box.createHorizontalStrut(6));
+        strip.add(chorusOn[row]);
+        strip.add(choruses[row]);
+        strip.add(chorusValues[row]);
         return strip;
+    }
+
+    private static void showSend(JCheckBox toggle, JSlider slider, JLabel value, boolean set, int amount, int parked) {
+        toggle.setSelected(set);
+        slider.setEnabled(set);
+        if (!slider.getValueIsAdjusting()) {
+            slider.setValue(set ? amount : parked);
+        }
+        value.setText(set ? Integer.toString(amount) : "—");
+    }
+
+    private static JCheckBox sendToggle(String text) {
+        JCheckBox box = new JCheckBox(text);
+        box.setOpaque(false);
+        box.setForeground(Theme.TEXT);
+        box.setFocusable(false);
+        return box;
     }
 
     private static JPanel strip() {
@@ -190,7 +275,8 @@ final class MixerPanel {
     }
 
     private static void grow(JSlider slider) {
-        slider.setPreferredSize(new Dimension(140, 32));
+        slider.setMinimumSize(new Dimension(48, 32));
+        slider.setPreferredSize(new Dimension(72, 32));
         slider.setMaximumSize(new Dimension(Short.MAX_VALUE, 32));
         slider.setAlignmentY(Component.CENTER_ALIGNMENT);
     }
