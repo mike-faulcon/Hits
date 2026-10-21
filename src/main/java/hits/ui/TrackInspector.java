@@ -87,6 +87,7 @@ final class TrackInspector {
     private final JSpinner tuneSemi = new JSpinner(new SpinnerNumberModel(0, -24, 24, 1));
     private final JSpinner tuneCents = new JSpinner(new SpinnerNumberModel(0, -50, 50, 1));
     private final JSlider decay = Widgets.slider(Track.DECAY_MIN, Track.DECAY_MAX, Track.DECAY);
+    private final JLabel decayTitle = Widgets.label("Decay");
     private final JLabel decayValue = Widgets.label(Track.DECAY + "%");
     private final JCheckBox cutoffOn = new JCheckBox("Cutoff");
     private final JSlider cutoff = Widgets.slider(0, 127, Track.FILTER_NEUTRAL);
@@ -120,6 +121,7 @@ final class TrackInspector {
     }
 
     JPanel component() {
+        noteValue.setName("note-heading");
         noteValue.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
         noteValue.setForeground(Theme.TEXT);
         drums.setName("drum-sound");
@@ -171,7 +173,7 @@ final class TrackInspector {
         stepPitchValue.setName("step-pitch");
         stepPitchValue.setForeground(Theme.TEXT);
         stepPitchValue.setFont(stepPitchValue.getFont().deriveFont(Font.BOLD, 16f));
-        stepPitchValue.setPreferredSize(new Dimension(52, 32));
+        stepPitchValue.setPreferredSize(new Dimension(148, 32));
         stepPitchDown.setToolTipText("Lower this step by one semitone.");
         stepPitchUp.setToolTipText("Raise this step by one semitone.");
         stepPitchTrack.setToolTipText("Clear this step's pitch and use the track pitch.");
@@ -214,7 +216,9 @@ final class TrackInspector {
         tuneCents.setName("tune-cents");
         addRow(panel, constraints, tuneRow(tuneTip));
         decay.setName("decay");
-        addRow(panel, constraints, labeled("Decay", "How long the built-in synth lets the hit ring, from 10% to 200%. 100% is the instrument's own release and replaces nothing. A decay other than 100% replaces the release a pitched preset's length was sending. Some kit drums ignore it. Built-in synth only. A DAW may ignore this.", decay, decayValue));
+        decayValue.setName("decay-value");
+        addRow(panel, constraints, labeled(decayTitle, DECAY_TIP, decay, decayValue));
+        decayValue.setPreferredSize(new Dimension(72, 32));
         cutoff.setName("cutoff");
         addRow(panel, constraints, effectRow(cutoffOn, cutoff, cutoffValue, "Low-pass filter, from dull to bright. 64 is the synth's own tone. Off leaves the controller unset, so the sound stays as it is. Built-in synth only. A DAW may ignore this."));
         resonance.setName("resonance");
@@ -397,7 +401,11 @@ final class TrackInspector {
         for (JButton button : noteButtons) {
             button.setEnabled(!pitched);
         }
-        noteValue.setText(Notes.name(track.playedNote()));
+        String heading = TrackReadout.tunedName(track.playedNote(), track.tune());
+        noteValue.setText(heading);
+        noteValue.setToolTipText(track.tune() == 0
+            ? "Pitch of this row."
+            : "Pitch of this row, including tune: " + heading + ".");
         ((CardLayout) soundPicker.getLayout()).show(soundPicker, track.mode() == TrackMode.DRUM ? "drum" : "note");
         refillDrums(track);
         refillKits(track);
@@ -477,8 +485,8 @@ final class TrackInspector {
         if (!decay.getValueIsAdjusting()) {
             decay.setValue(track.decay());
         }
-        decayValue.setText(track.decay() + "%");
-        showEffect(cutoffOn, cutoff, cutoffValue, track.hasCutoff(), track.cutoff());
+        showDecay(track);
+        showCutoff(track);
         showEffect(resonanceOn, resonance, resonanceValue, track.hasResonance(), track.resonance());
     }
 
@@ -502,7 +510,7 @@ final class TrackInspector {
         editor.edit(beat -> {
             Track track = onScreen(beat);
             if (cutoffOn.isSelected()) {
-                track.setCutoff(cutoff.getValue());
+                track.setCutoff(cutoffValueInRange(track));
             } else {
                 track.clearCutoff();
             }
@@ -521,6 +529,59 @@ final class TrackInspector {
                 track.clearResonance();
             }
         });
+    }
+
+    private static final String DECAY_TIP = "How long the built-in synth lets the hit ring, from 10% to 200%. "
+        + "100% is the instrument's own release and sends nothing. A decay other than 100% replaces the release a pitched preset's length was sending. "
+        + "Kick, snare, closed hat, toms, clap, side stick, Woodblock click, and Snare crack ignore it. Snare crack's tail is reverb. "
+        + "Built-in synth only. A DAW may ignore this.";
+
+    private void showDecay(Track track) {
+        boolean applies = track.decayApplies();
+        decay.setEnabled(applies);
+        decayTitle.setForeground(applies ? Theme.TEXT : Theme.MUTED);
+        decayValue.setForeground(applies ? Theme.TEXT : Theme.MUTED);
+        String tip = DECAY_TIP;
+        if (!applies) {
+            tip = track.decayNote();
+            if (track.decay() != Track.DECAY) {
+                tip = "Stored at " + track.decay() + "%. " + tip;
+            }
+            decayValue.setText("ignored");
+        } else {
+            decayValue.setText(track.decay() + "%");
+        }
+        decayTitle.setToolTipText(tip);
+        decay.setToolTipText(tip);
+        decayValue.setToolTipText(tip);
+    }
+
+    private void showCutoff(Track track) {
+        int low = Track.cutoffSliderMin(track);
+        int high = Track.cutoffSliderMax(track);
+        cutoff.setMinimum(Math.min(cutoff.getMinimum(), low));
+        cutoff.setMaximum(Math.max(cutoff.getMaximum(), high));
+        cutoff.setMinimum(low);
+        cutoff.setMaximum(high);
+        showEffect(cutoffOn, cutoff, cutoffValue, track.hasCutoff(), track.cutoff());
+        String tip = "Low-pass filter. This slider covers controller " + low + "–" + high
+            + ", which is where this sound changes on the built-in synth. The number is the controller saved in the file. "
+            + "Off leaves it unset, so nothing is sent. A saved value outside the slider is kept until you move it. "
+            + "Built-in synth only. A DAW may ignore this.";
+        cutoffOn.setToolTipText(tip);
+        cutoff.setToolTipText(tip);
+        cutoffValue.setToolTipText(tip);
+    }
+
+    /** Thumb position when cutoff is turned on. Neutral 64 when this sound's slider includes it. */
+    private int cutoffValueInRange(Track track) {
+        int low = Track.cutoffSliderMin(track);
+        int high = Track.cutoffSliderMax(track);
+        int value = cutoff.getValue();
+        if (value < low || value > high) {
+            return Math.max(low, Math.min(high, Track.FILTER_NEUTRAL));
+        }
+        return value;
     }
 
     private static void showEffect(JCheckBox toggle, JSlider slider, JLabel value, boolean set, int amount) {
@@ -865,9 +926,12 @@ final class TrackInspector {
     }
 
     private static JPanel labeled(String name, String tip, JSlider slider, JLabel value) {
+        return labeled(Widgets.label(name), tip, slider, value);
+    }
+
+    private static JPanel labeled(JLabel title, String tip, JSlider slider, JLabel value) {
         JPanel panel = new JPanel(new BorderLayout(8, 0));
         panel.setOpaque(false);
-        JLabel title = Widgets.label(name);
         title.setToolTipText(tip);
         title.setPreferredSize(new Dimension(88, 32));
         panel.add(title, BorderLayout.WEST);

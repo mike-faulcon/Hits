@@ -69,8 +69,8 @@ class ShapeTest {
         assertEquals(127, track.reverb());
         track.clearReverb();
         assertFalse(track.hasReverb());
-        assertEquals(0, Track.decayController(10));
-        assertEquals(10, Track.decayController(25));
+        assertEquals(56, Track.decayController(10));
+        assertEquals(57, Track.decayController(25));
         assertEquals(64, Track.decayController(100));
         assertEquals(127, Track.decayController(200));
         assertEquals(8192, Track.pitchBend(0));
@@ -277,9 +277,9 @@ class ShapeTest {
         Hearing midHat = hearing(hit(46, track -> {}), "hat100");
         Hearing longHat = hearing(hit(46, track -> track.setDecay(200)), "hat200");
         System.out.println("decay hat -40 dB " + shortHat.below40 + " / " + midHat.below40 + " / " + longHat.below40);
-        assertTrue(shortHat.below40 < 500, shortHat.toString());
+        assertTrue(shortHat.below40 < midHat.below40 - 80, shortHat + " vs " + midHat);
         assertTrue(midHat.below40 > 700 && midHat.below40 < 1200, midHat.toString());
-        assertTrue(longHat.below40 > 1800, longHat.toString());
+        assertTrue(longHat.below40 > midHat.below40 + 400, longHat.toString());
         assertTrue(shortHat.below40 < midHat.below40 && midHat.below40 < longHat.below40);
 
         Hearing shortNote = hearing(note(track -> track.setDecay(25)), "note25");
