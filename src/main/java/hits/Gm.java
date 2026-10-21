@@ -44,9 +44,13 @@ public final class Gm {
         "Telephone", "Helicopter", "Applause", "Gunshot"
     };
 
-    /** Common kit notes, in the order shown in the inspector. */
+    /**
+     * Drum keys that are different sounds on the JDK emergency bank, in inspector order.
+     * Keys that share a sample (side stick, ride, the second closed hat) stay out of this
+     * list. A row already set to one of those keys still shows it.
+     */
     public static final int[] DRUM_NOTES = {
-        36, 38, 37, 39, 42, 46, 45, 47, 48, 50, 49, 51, 54, 56
+        36, 38, 42, 46, 41, 45, 50, 49, 39
     };
 
     private static final Map<Integer, String> DRUMS = new LinkedHashMap<>();
@@ -58,16 +62,16 @@ public final class Gm {
         DRUMS.put(38, "Snare");
         DRUMS.put(39, "Clap");
         DRUMS.put(40, "Snare");
-        DRUMS.put(41, "Tom");
+        DRUMS.put(41, "Low Tom");
         DRUMS.put(42, "Hat C");
         DRUMS.put(43, "Tom");
         DRUMS.put(44, "Hat C");
-        DRUMS.put(45, "Tom");
+        DRUMS.put(45, "Mid Tom");
         DRUMS.put(46, "Hat O");
         DRUMS.put(47, "Tom");
         DRUMS.put(48, "Tom");
         DRUMS.put(49, "Crash");
-        DRUMS.put(50, "Tom");
+        DRUMS.put(50, "High Tom");
         DRUMS.put(51, "Ride");
         DRUMS.put(54, "Tambourine");
         DRUMS.put(56, "Cowbell");
@@ -93,15 +97,14 @@ public final class Gm {
         String specific = switch (note) {
             case 36 -> "Kick";
             case 38 -> "Snare";
-            case 37 -> "Side Stick";
-            case 39 -> "Clap";
             case 42 -> "Closed Hat";
             case 46 -> "Open Hat";
-            case 45 -> "Low Tom";
-            case 47 -> "Mid Tom";
-            case 48 -> "High Tom";
-            case 50 -> "High Tom 2";
+            case 41 -> "Low Tom";
+            case 45 -> "Mid Tom";
+            case 50 -> "High Tom";
             case 49 -> "Crash";
+            case 39 -> "Clap";
+            case 37 -> "Side Stick";
             case 51 -> "Ride";
             case 54 -> "Tambourine";
             case 56 -> "Cowbell";

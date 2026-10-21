@@ -169,6 +169,7 @@ public final class SequenceBuilder {
         tempo.add(new MidiEvent(marker("end"), loop * times));
 
         hits.Track[] tracks = beat.activeTracks();
+        ChannelPlan plan = ChannelPlan.of(beat, List.of(beat.activeSlot()));
         Track[] midiTracks = new Track[tracks.length];
         for (int i = 0; i < tracks.length; i++) {
             hits.Track track = tracks[i];
@@ -177,14 +178,14 @@ public final class SequenceBuilder {
             }
             midiTracks[i] = sequence.createTrack();
             midiTracks[i].add(new MidiEvent(trackName(track.name()), 0));
-            writeSetup(midiTracks[i], track, i, 0);
+            writeSetup(midiTracks[i], track, i, 0, plan);
         }
         for (int pass = 0; pass < times; pass++) {
             for (int i = 0; i < tracks.length; i++) {
                 if (midiTracks[i] == null) {
                     continue;
                 }
-                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true, (pass + 1L) * loop, null);
+                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true, (pass + 1L) * loop, null, plan);
             }
         }
         if (metronome) {
@@ -231,6 +232,7 @@ public final class SequenceBuilder {
             lengths[s] = sections.get(s).steps();
         }
         List<Character> spanSlots = spanSlots(beat, chosen, song);
+        ChannelPlan plan = ChannelPlan.of(beat, spanSlots);
         boolean joined = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int pass = 0; pass < times; pass++) {
@@ -260,7 +262,8 @@ public final class SequenceBuilder {
                         section.ticks(),
                         random,
                         clipEnd ? sequenceEnd : -1,
-                        ahead
+                        ahead,
+                        plan
                     );
                 }
             }
@@ -321,28 +324,14 @@ public final class SequenceBuilder {
     /**
      * Bank, program, and pan for one row, in the order a synth needs them.
      * Pan is written even at center, so a later pattern does not keep an earlier left or right.
-     * A note always selects bank 0 first. A panned drum leaves the channel on the drum bank,
-     * and a program change alone would then look up a silent drum-kit preset.
+     * A shared drum sends pan only. A private drum selects the drum bank before its kit,
+     * because a program change alone would look up a silent drum-kit preset.
      * Level is not a controller. Each note-on already carries the fader, so it cannot stick.
      */
-    private static List<ShortMessage> channelSetup(hits.Track track, int row) throws InvalidMidiDataException {
-        List<ShortMessage> messages = new ArrayList<>();
-        int channel = Mix.channel(track, row);
-        if (Mix.usesDrumBank(track)) {
-            messages.add(controlMessage(channel, 0, Gm.DRUM_BANK));
-            messages.add(controlMessage(channel, 32, 0));
-            messages.add(programMessage(channel, 0));
-        } else if (track.mode() == TrackMode.NOTE) {
-            messages.add(controlMessage(channel, 0, 0));
-            messages.add(controlMessage(channel, 32, 0));
-            messages.add(programMessage(channel, track.program()));
-        }
-        messages.add(controlMessage(channel, 10, track.pan()));
-        return messages;
-    }
-
-    private static void writeSetup(Track midi, hits.Track track, int row, long offset) throws InvalidMidiDataException {
-        for (ShortMessage message : channelSetup(track, row)) {
+    private static void writeSetup(Track midi, hits.Track track, int row, long offset, ChannelPlan plan)
+        throws InvalidMidiDataException {
+        int channel = plan.channel(track, row);
+        for (ShortMessage message : plan.setup(track, channel)) {
             midi.add(new MidiEvent(message, offset));
         }
     }
@@ -357,16 +346,21 @@ public final class SequenceBuilder {
         if (receiver == null || beat == null) {
             return;
         }
+        List<Character> slots = song && beat.hasChain()
+            ? Chain.distinctSlots(beat.chain())
+            : List.of(beat.activeSlot());
         char slot = song && beat.hasChain()
             ? Chain.place(beat, tick).slot()
             : beat.activeSlot();
+        ChannelPlan plan = ChannelPlan.of(beat, slots);
         hits.Track[] tracks = beat.slot(slot);
         for (int row = 0; row < tracks.length; row++) {
             hits.Track track = tracks[row];
             if (!Beat.audibleIn(tracks, track)) {
                 continue;
             }
-            for (ShortMessage message : channelSetup(track, row)) {
+            int channel = plan.channel(track, row);
+            for (ShortMessage message : plan.setup(track, channel)) {
                 receiver.send(message, -1);
             }
         }
@@ -399,7 +393,8 @@ public final class SequenceBuilder {
         long sectionTicks,
         Random random,
         long clipTick,
-        int[] ahead
+        int[] ahead,
+        ChannelPlan plan
     ) throws InvalidMidiDataException {
         List<Placed> notes = placedNotes(
             beat, track, steps, offset, sectionTicks, random, false, clipTick, ahead
@@ -410,8 +405,8 @@ public final class SequenceBuilder {
                 setupAt = note.sound.start();
             }
         }
-        writeSetup(midi, track, row, setupAt);
-        emitNotes(midi, Mix.channel(track, row), notes);
+        writeSetup(midi, track, row, setupAt, plan);
+        emitNotes(midi, plan.channel(track, row), notes);
     }
 
     /**
@@ -437,9 +432,10 @@ public final class SequenceBuilder {
         Random random,
         boolean wrapStart,
         long clipTick,
-        int[] ahead
+        int[] ahead,
+        ChannelPlan plan
     ) throws InvalidMidiDataException {
-        int channel = Mix.channel(track, row);
+        int channel = plan.channel(track, row);
         emitNotes(midi, channel, placedNotes(
             beat, track, steps, offset, sectionTicks, random, wrapStart, clipTick, ahead
         ));
@@ -472,7 +468,7 @@ public final class SequenceBuilder {
                 continue;
             }
             play[step] = true;
-            sounding[step] = cell.soundingNote(track.note());
+            sounding[step] = cell.soundingNote(track.playedNote());
             velocities[step] = velocity;
             nudges[step] = track.playedNudge(step);
         }

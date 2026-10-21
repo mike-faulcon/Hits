@@ -46,7 +46,10 @@ public final class Mix {
         return left.name().equals(right.name())
             && left.mode() == right.mode()
             && left.program() == right.program()
-            && left.note() == right.note();
+            && left.note() == right.note()
+            && left.bank() == right.bank()
+            && left.kit() == right.kit()
+            && left.preset() == right.preset();
     }
 
     /**
@@ -63,19 +66,29 @@ public final class Mix {
     }
 
     /**
-     * Drums at center pan share the General MIDI drum channel.
-     * A panned drum takes the track's own channel so its pan is not stuck to the rest of the kit.
+     * Channel for one row looked at on its own.
+     * A song or export uses {@link ChannelPlan} so the number stays put across patterns.
+     * Center drums with no kit, bank, or pitched preset share the General MIDI drum channel.
      */
     public static int channel(Track track, int row) {
-        if (track.mode() == TrackMode.DRUM && track.pan() == Track.PAN_CENTER) {
+        if (ChannelPlan.sharesDrumChannel(track)) {
             return Gm.DRUM_CHANNEL;
         }
-        return row;
+        if (row >= 0 && row <= 15 && row != Gm.DRUM_CHANNEL) {
+            return row;
+        }
+        return Gm.DRUM_CHANNEL;
     }
 
-    /** This drum is panned, so it needs the drum kit on its own channel. */
+    /**
+     * This drum needs the drum kit selected on its own channel.
+     * A pitched preset uses a melodic program instead, and a non-zero bank uses that bank.
+     */
     public static boolean usesDrumBank(Track track) {
-        return track.mode() == TrackMode.DRUM && track.pan() != Track.PAN_CENTER;
+        return track.mode() == TrackMode.DRUM
+            && track.preset() == null
+            && track.bank() == 0
+            && !ChannelPlan.sharesDrumChannel(track);
     }
 
     /** {@code C} at center, otherwise {@code L} or {@code R} and how far from the middle. */
