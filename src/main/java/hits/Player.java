@@ -30,6 +30,8 @@ public final class Player implements AutoCloseable {
     private String failure;
     private Soundbank defaultBank;
     private Soundbank loadedBank;
+    /** JDK bank used before the built-in line has opened. */
+    private Soundbank builtinBank;
     private boolean song;
     /** Clicks on the beat while playing. Exports do not read this. */
     private boolean metronome;
@@ -75,10 +77,26 @@ public final class Player implements AutoCloseable {
         return synthesizer != null && synthesizer.isOpen();
     }
 
-    /** The bank on the built-in synth, or null on an external output. */
+    /**
+     * The bank on the built-in synth, or null on an external output.
+     * Before the line is open, the built-in output still reports the JDK bank,
+     * so a missing kit can be named before the first note.
+     */
     public Soundbank soundbank() {
         synchronized (midiLock) {
-            return loadedBank != null ? loadedBank : defaultBank;
+            if (loadedBank != null) {
+                return loadedBank;
+            }
+            if (defaultBank != null) {
+                return defaultBank;
+            }
+            if (external == null && MidiOutputs.BUILTIN_ID.equals(outputId)) {
+                if (builtinBank == null) {
+                    builtinBank = SoundCatalog.builtin();
+                }
+                return builtinBank;
+            }
+            return null;
         }
     }
 
@@ -261,7 +279,8 @@ public final class Player implements AutoCloseable {
             return;
         }
         Track track = beat.slot(slot)[row];
-        ChannelPlan plan = ChannelPlan.of(beat, List.of(Beat.normalizeSlot(slot)));
+        Soundbank kits = soundbank();
+        ChannelPlan plan = ChannelPlan.of(beat, List.of(Beat.normalizeSlot(slot)), kits);
         int channel = plan.channel(track, row);
         int sounding = Notes.clamp(note);
         try {
@@ -272,7 +291,7 @@ public final class Player implements AutoCloseable {
             if (auditionChannel >= 0) {
                 silence(auditionChannel, auditionNote);
             }
-            for (ShortMessage message : plan.setup(track, channel)) {
+            for (ShortMessage message : plan.setup(track, channel, row)) {
                 current.send(message, -1);
             }
             ShortMessage on = new ShortMessage();
@@ -393,7 +412,8 @@ public final class Player implements AutoCloseable {
     }
 
     private void load(Beat beat, long position) throws InvalidMidiDataException {
-        var sequence = SequenceBuilder.playback(beat, song, null, metronome);
+        Soundbank kits = soundbank();
+        var sequence = SequenceBuilder.playback(beat, song, null, metronome, kits);
         sequencer.setSequence(sequence);
         long loop = SequenceBuilder.playbackTicks(beat, song);
         long end = Math.min(loop, sequence.getTickLength());
@@ -408,7 +428,7 @@ public final class Player implements AutoCloseable {
             at = Math.floorMod(position, loop);
             sequencer.setTickPosition(at);
         }
-        SequenceBuilder.playChannelState(receiver(), beat, song, at);
+        SequenceBuilder.playChannelState(receiver(), beat, song, at, kits);
     }
 
     @Override

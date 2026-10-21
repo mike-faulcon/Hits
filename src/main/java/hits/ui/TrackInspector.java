@@ -50,6 +50,7 @@ final class TrackInspector {
     private final JComboBox<String> kits = new JComboBox<>();
     private final JComboBox<String> programs = new JComboBox<>();
     private final JLabel channelNote = Widgets.label("Out of channels.");
+    private final JLabel kitNote = Widgets.label(" ");
     private final List<DrumPick> drumPicks = new ArrayList<>();
     private final List<Integer> kitPrograms = new ArrayList<>();
     private List<SoundCatalog.Voice> voices = List.of();
@@ -151,6 +152,7 @@ final class TrackInspector {
             buttonPair("Oct +", "One octave up", 12, 72)
         );
         addRow(panel, constraints, noteButtons);
+        stepPitchValue.setName("step-pitch");
         stepPitchValue.setForeground(Theme.TEXT);
         stepPitchValue.setFont(stepPitchValue.getFont().deriveFont(Font.BOLD, 16f));
         stepPitchValue.setPreferredSize(new Dimension(52, 32));
@@ -179,11 +181,15 @@ final class TrackInspector {
         channelNote.setForeground(Theme.MUTED);
         channelNote.setVisible(false);
         channelNote.setToolTipText("Every other channel is in use, so this drum shares the drum channel.");
+        kitNote.setName("kit-warning");
+        kitNote.setForeground(Theme.MUTED);
+        kitNote.setVisible(false);
         soundPicker.setOpaque(false);
         soundPicker.add(drums, "drum");
         soundPicker.add(programs, "note");
         addRow(panel, constraints, soundPicker);
         addRow(panel, constraints, kits);
+        addRow(panel, constraints, kitNote);
         addRow(panel, constraints, channelNote);
         addRow(panel, constraints, labeled("Length", "How long the last step of a hit holds, as a percent of that step. A one-step hit uses the whole step this way.", gate, gateValue));
         addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
@@ -360,9 +366,15 @@ final class TrackInspector {
         selectProgram(track);
         boolean drum = track.mode() == TrackMode.DRUM;
         kits.setVisible(drum);
-        ChannelPlan plan = ChannelPlan.of(beat, everySlot());
-        boolean overflow = drum && !ChannelPlan.sharesDrumChannel(track) && plan.overflow(editor.trackIndex());
+        Soundbank bank = player.soundbank();
+        ChannelPlan plan = ChannelPlan.of(beat, everySlot(), bank);
+        boolean overflow = drum && !ChannelPlan.sharesDrumChannel(track, bank) && plan.overflow(editor.trackIndex());
         channelNote.setVisible(overflow);
+        String fallback = SoundCatalog.kitFallback(bank, track);
+        kitNote.setVisible(fallback != null);
+        if (fallback != null) {
+            kitNote.setText("Kit " + track.kit() + " is not in this bank, so this row plays Standard.");
+        }
         if (kits.getParent() != null) {
             kits.getParent().revalidate();
         }
@@ -523,7 +535,8 @@ final class TrackInspector {
         }
         if (!listed) {
             kitPrograms.add(track.kit());
-            kits.addItem(track.kit() + "  Kit " + track.kit());
+            boolean missing = SoundCatalog.kitFallback(player.soundbank(), track) != null;
+            kits.addItem(missing ? track.kit() + "  Not in this bank" : track.kit() + "  Kit " + track.kit());
         }
         int select = 0;
         for (int i = 0; i < kitPrograms.size(); i++) {

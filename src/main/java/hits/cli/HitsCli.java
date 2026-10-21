@@ -7,12 +7,14 @@ import hits.ExportOptions;
 import hits.GrooveGenerator;
 import hits.Notes;
 import hits.SequenceBuilder;
+import hits.SoundCatalog;
 import hits.Timeline;
 import hits.Track;
 import hits.WavAudio;
 
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.Sequence;
+import javax.sound.midi.Soundbank;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -194,6 +196,7 @@ public final class HitsCli {
         text.append("lengths: ").append(lengthsText(beat)).append('\n');
         text.append("chain: ").append(chainText(beat)).append('\n');
         text.append("tracks:\n");
+        Soundbank bank = SoundCatalog.builtin();
         for (char slot : usedSlots(beat)) {
             Track[] tracks = beat.slot(slot);
             for (int row = 0; row < tracks.length; row++) {
@@ -204,6 +207,11 @@ public final class HitsCli {
                 } else if (track.solo()) {
                     flags = ", solo";
                 }
+                String sound = track.soundName();
+                String fallback = SoundCatalog.kitFallback(bank, track);
+                if (fallback != null) {
+                    sound = sound + " — " + fallback;
+                }
                 text.append(String.format(
                     Locale.ROOT,
                     "  %s  %-16s %-4s %4s  %s%s%n",
@@ -211,7 +219,7 @@ public final class HitsCli {
                     track.name(),
                     track.mode().json(),
                     Notes.name(track.playedNote()),
-                    track.soundName(),
+                    sound,
                     flags
                 ));
             }

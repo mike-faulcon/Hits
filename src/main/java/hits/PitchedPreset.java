@@ -9,9 +9,16 @@ package hits;
 public enum PitchedPreset {
     /** Woodblock, G5. A short click around 800 Hz. */
     CLICK("click", "Woodblock click", 115, 91),
-    /** Timpani, E5. The crack the kit snare does not have, around 1.3 kHz. */
+    /**
+     * Timpani, E5. The crack the kit snare does not have, around 1.3 kHz.
+     * On the built-in bank the long tail is reverb, so the drum gate scales the reverb send.
+     */
     CRACK("crack", "Snare crack", 47, 88),
-    /** Xylophone, C7. A bright tick above 3 kHz. The short drum gate cuts the ring. */
+    /**
+     * Xylophone, C7. A bright tick above 3 kHz.
+     * Note-off alone does not cut the ring on the built-in bank. The drum gate shortens it
+     * by sending a release controller on this row's channel.
+     */
     RIM("rim", "Rimshot", 13, 108);
 
     private final String json;

@@ -135,7 +135,8 @@ public final class BeatFiles {
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException, InvalidMidiDataException {
-        WavRenderer.render(SequenceBuilder.export(beat, options), path, soundbank, progress, cancelled);
+        Soundbank playing = soundbank != null ? soundbank : SoundCatalog.builtin();
+        WavRenderer.render(SequenceBuilder.export(beat, options, playing), path, soundbank, progress, cancelled);
     }
 
     public static String safeName(String name) {
