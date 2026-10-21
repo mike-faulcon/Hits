@@ -84,7 +84,20 @@ final class TrackInspector {
     private final JCheckBox legato = new JCheckBox("Legato");
     private final JSpinner shift = new JSpinner(new SpinnerNumberModel(0, Step.MIN_NUDGE, Step.MAX_NUDGE, 1));
     private final JLabel shiftUnit = Widgets.label("%");
+    private final JSpinner tuneSemi = new JSpinner(new SpinnerNumberModel(0, -24, 24, 1));
+    private final JSpinner tuneCents = new JSpinner(new SpinnerNumberModel(0, -50, 50, 1));
+    private final JSlider decay = Widgets.slider(Track.DECAY_MIN, Track.DECAY_MAX, Track.DECAY);
+    private final JLabel decayValue = Widgets.label(Track.DECAY + "%");
+    private final JCheckBox cutoffOn = new JCheckBox("Cutoff");
+    private final JSlider cutoff = Widgets.slider(0, 127, Track.FILTER_NEUTRAL);
+    private final JLabel cutoffValue = Widgets.label("—");
+    private final JCheckBox resonanceOn = new JCheckBox("Resonance");
+    private final JSlider resonance = Widgets.slider(0, 127, Track.FILTER_NEUTRAL);
+    private final JLabel resonanceValue = Widgets.label("—");
     private final SliderDrag gateDrag;
+    private final SliderDrag decayDrag;
+    private final SliderDrag cutoffDrag;
+    private final SliderDrag resonanceDrag;
     private final SliderDrag velocityDrag;
     private final SliderDrag chanceDrag;
     private final SliderDrag accentDrag;
@@ -94,6 +107,9 @@ final class TrackInspector {
         this.player = player;
         this.sync = sync;
         this.gateDrag = new SliderDrag(editor, sync);
+        this.decayDrag = new SliderDrag(editor, sync);
+        this.cutoffDrag = new SliderDrag(editor, sync);
+        this.resonanceDrag = new SliderDrag(editor, sync);
         this.velocityDrag = new SliderDrag(editor, sync);
         this.chanceDrag = new SliderDrag(editor, sync);
         this.accentDrag = new SliderDrag(editor, sync);
@@ -174,7 +190,9 @@ final class TrackInspector {
         addRow(panel, constraints, legato);
         String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. Swing cannot push that onto the next step. 0 is left out of the file.";
         addRow(panel, constraints, spun("Shift", shiftTip, shift, shiftUnit));
-        addRow(panel, constraints, Widgets.label("Sound"));
+        JLabel soundHeading = Widgets.label("Sound");
+        soundHeading.setName("sound-heading");
+        addRow(panel, constraints, soundHeading);
         drums.setToolTipText("Drum key, or a pitched percussion preset. A preset plays a melodic instrument at its own pitch, on this row's channel.");
         kits.setToolTipText("Drum kit on this row. Standard is the kit in the loaded bank. Another kit uses its own channel. A pitched preset replaces the kit.");
         programs.setToolTipText("Instrument from the loaded soundbank. The numbers are bank and program.");
@@ -191,6 +209,16 @@ final class TrackInspector {
         addRow(panel, constraints, kits);
         addRow(panel, constraints, kitNote);
         addRow(panel, constraints, channelNote);
+        String tuneTip = "Pitch of this row, from −24 to +24 semitones, plus or minus 50 cents. A tuned drum uses its own channel. Built-in synth only. A DAW may ignore this.";
+        tuneSemi.setName("tune-semitone");
+        tuneCents.setName("tune-cents");
+        addRow(panel, constraints, tuneRow(tuneTip));
+        decay.setName("decay");
+        addRow(panel, constraints, labeled("Decay", "How long the built-in synth lets the hit ring, from 10% to 200%. 100% is the instrument's own release and replaces nothing. A decay other than 100% replaces the release a pitched preset's length was sending. Some kit drums ignore it. Built-in synth only. A DAW may ignore this.", decay, decayValue));
+        cutoff.setName("cutoff");
+        addRow(panel, constraints, effectRow(cutoffOn, cutoff, cutoffValue, "Low-pass filter, from dull to bright. 64 is the synth's own tone. Off leaves the controller unset, so the sound stays as it is. Built-in synth only. A DAW may ignore this."));
+        resonance.setName("resonance");
+        addRow(panel, constraints, effectRow(resonanceOn, resonance, resonanceValue, "Filter emphasis. 64 is the synth's own resonance. Off leaves the controller unset. Built-in synth only. A DAW may ignore this."));
         addRow(panel, constraints, labeled("Length", "How long the last step of a hit holds, as a percent of that step. A one-step hit uses the whole step this way.", gate, gateValue));
         addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
         addRow(panel, constraints, labeled("Chance", "Percent chance the selected step plays. 100% always plays. Playback rolls each pass. Export uses a fixed seed.", chance, chanceValue));
@@ -218,6 +246,16 @@ final class TrackInspector {
 
     void wire() {
         gateDrag.wire(gate, beat -> onScreen(beat).setGate(gate.getValue()));
+        decayDrag.wire(decay, beat -> onScreen(beat).setDecay(decay.getValue()));
+        cutoffDrag.wire(cutoff, beat -> {
+            Track track = onScreen(beat);
+            track.setCutoff(cutoff.getValue());
+        });
+        resonanceDrag.wire(resonance, beat -> onScreen(beat).setResonance(resonance.getValue()));
+        tuneSemi.addChangeListener(event -> applyTune());
+        tuneCents.addChangeListener(event -> applyTune());
+        cutoffOn.addActionListener(event -> applyCutoffToggle());
+        resonanceOn.addActionListener(event -> applyResonanceToggle());
         velocityDrag.wire(velocity, this::applyVelocity);
         chanceDrag.wire(chance, this::applyChance);
         accentDrag.wire(accent, beat -> onScreen(beat).setAccent(accent.getValue()));
@@ -434,6 +472,64 @@ final class TrackInspector {
         legato.setSelected(track.legato());
         shift.setValue(track.shift());
         shiftUnit.setText(signedPercent(track.shift()));
+        tuneSemi.setValue(track.tuneSemitones());
+        tuneCents.setValue(track.tuneCents());
+        if (!decay.getValueIsAdjusting()) {
+            decay.setValue(track.decay());
+        }
+        decayValue.setText(track.decay() + "%");
+        showEffect(cutoffOn, cutoff, cutoffValue, track.hasCutoff(), track.cutoff());
+        showEffect(resonanceOn, resonance, resonanceValue, track.hasResonance(), track.resonance());
+    }
+
+    private void applyTune() {
+        if (sync.on()) {
+            return;
+        }
+        int semi = ((Number) tuneSemi.getValue()).intValue();
+        int cents = ((Number) tuneCents.getValue()).intValue();
+        Track current = editor.selectedTrack();
+        if (current.tuneSemitones() == semi && current.tuneCents() == cents) {
+            return;
+        }
+        editor.edit(beat -> onScreen(beat).setTuneParts(semi, cents));
+    }
+
+    private void applyCutoffToggle() {
+        if (sync.on()) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (cutoffOn.isSelected()) {
+                track.setCutoff(cutoff.getValue());
+            } else {
+                track.clearCutoff();
+            }
+        });
+    }
+
+    private void applyResonanceToggle() {
+        if (sync.on()) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (resonanceOn.isSelected()) {
+                track.setResonance(resonance.getValue());
+            } else {
+                track.clearResonance();
+            }
+        });
+    }
+
+    private static void showEffect(JCheckBox toggle, JSlider slider, JLabel value, boolean set, int amount) {
+        toggle.setSelected(set);
+        slider.setEnabled(set);
+        if (!slider.getValueIsAdjusting()) {
+            slider.setValue(set ? amount : Track.FILTER_NEUTRAL);
+        }
+        value.setText(set ? Integer.toString(amount) : "—");
     }
 
     private static String signedPercent(int value) {
@@ -721,6 +817,50 @@ final class TrackInspector {
         unit.setPreferredSize(new Dimension(52, 32));
         unit.setMinimumSize(new Dimension(36, 28));
         panel.add(unit, BorderLayout.EAST);
+        return panel;
+    }
+
+    private JPanel tuneRow(String tip) {
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        JLabel title = Widgets.label("Tune");
+        title.setToolTipText(tip);
+        title.setPreferredSize(new Dimension(72, 32));
+        title.setMinimumSize(new Dimension(56, 28));
+        panel.add(title, BorderLayout.WEST);
+        JPanel spins = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        spins.setOpaque(false);
+        tuneSemi.setToolTipText(tip);
+        tuneCents.setToolTipText(tip);
+        Widgets.fix(tuneSemi, 64, 32);
+        Widgets.fix(tuneCents, 64, 32);
+        JLabel semis = Widgets.label("st");
+        JLabel cents = Widgets.label("¢");
+        semis.setToolTipText(tip);
+        cents.setToolTipText(tip);
+        spins.add(tuneSemi);
+        spins.add(semis);
+        spins.add(tuneCents);
+        spins.add(cents);
+        panel.add(spins, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private static JPanel effectRow(JCheckBox toggle, JSlider slider, JLabel value, String tip) {
+        toggle.setOpaque(false);
+        toggle.setForeground(Theme.TEXT);
+        toggle.setFocusable(false);
+        toggle.setToolTipText(tip);
+        slider.setToolTipText(tip);
+        value.setToolTipText(tip);
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        toggle.setPreferredSize(new Dimension(108, 32));
+        toggle.setMinimumSize(new Dimension(96, 28));
+        panel.add(toggle, BorderLayout.WEST);
+        panel.add(slider, BorderLayout.CENTER);
+        value.setPreferredSize(new Dimension(36, 32));
+        panel.add(value, BorderLayout.EAST);
         return panel;
     }
 

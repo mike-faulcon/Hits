@@ -314,7 +314,20 @@ public final class Beat {
             || hasCustomLengths()
             || hasNoteLength()
             || hasNudge()
-            || hasSoundChoice();
+            || hasSoundChoice()
+            || hasShape();
+    }
+
+    /** Tune, decay, or a send or filter, in any pattern. */
+    public boolean hasShape() {
+        for (Track[] slot : slots) {
+            for (Track track : slot) {
+                if (track.shapesSound()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** A bank, a drum kit, or a pitched preset, in any pattern. */

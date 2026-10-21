@@ -241,7 +241,7 @@ final class StudioFrame extends JFrame {
 
     private JPanel viewBar() {
         stepsView.setToolTipText("The step grid.");
-        mixerView.setToolTipText("Level, pan, mute, and solo for every track, and the master volume.");
+        mixerView.setToolTipText("Level, pan, reverb, and chorus for every track, and the master volume.");
         Widgets.fix(stepsView, 72, 32);
         Widgets.fix(mixerView, 80, 32);
         JPanel bar = Widgets.row(stepsView, mixerView);

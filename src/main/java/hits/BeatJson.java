@@ -12,7 +12,10 @@ import java.util.Map;
  * a track {@code pan} or mixer {@code level}, a beat {@code master}, pattern slots {@code c} through {@code h},
  * a per-pattern {@code steps} count, a step {@code len} (note length in steps, omitted at 1),
  * a track {@code legato} flag (omitted when false), a step {@code nudge} (timing percent, omitted at 0),
- * and a track {@code shift} (omitted at 0). Mute and solo are original track fields.
+ * a track {@code shift} (omitted at 0), a track {@code tune} (cents, omitted at 0),
+ * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
+ * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent).
+ * Mute and solo are original track fields.
  * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
  * A slot {@code steps} key is written only when that pattern's length differs from the root {@code steps},
  * which stays 16 or 32. A beat that uses none of the version 2 fields is still written as version 1.
@@ -157,6 +160,24 @@ public final class BeatJson {
         if (track.preset() != null) {
             field(out, 5, "preset", track.preset().json(), true);
         }
+        if (track.tune() != 0) {
+            field(out, 5, "tune", track.tune(), true);
+        }
+        if (track.decay() != Track.DECAY) {
+            field(out, 5, "decay", track.decay(), true);
+        }
+        if (track.hasReverb()) {
+            field(out, 5, "reverb", track.reverb(), true);
+        }
+        if (track.hasChorus()) {
+            field(out, 5, "chorus", track.chorus(), true);
+        }
+        if (track.hasCutoff()) {
+            field(out, 5, "cutoff", track.cutoff(), true);
+        }
+        if (track.hasResonance()) {
+            field(out, 5, "resonance", track.resonance(), true);
+        }
         out.append("          \"steps\": [");
         for (int i = 0; i < Track.CAPACITY; i++) {
             if (i > 0) {
@@ -268,6 +289,24 @@ public final class BeatJson {
         }
         if (object.get("preset") instanceof String preset) {
             track.setPreset(PitchedPreset.parse(preset));
+        }
+        if (object.containsKey("tune") && object.get("tune") != null) {
+            track.setTune(number(object.get("tune")));
+        }
+        if (object.containsKey("decay") && object.get("decay") != null) {
+            track.setDecay(number(object.get("decay")));
+        }
+        if (object.containsKey("reverb") && object.get("reverb") != null) {
+            track.setReverb(number(object.get("reverb")));
+        }
+        if (object.containsKey("chorus") && object.get("chorus") != null) {
+            track.setChorus(number(object.get("chorus")));
+        }
+        if (object.containsKey("cutoff") && object.get("cutoff") != null) {
+            track.setCutoff(number(object.get("cutoff")));
+        }
+        if (object.containsKey("resonance") && object.get("resonance") != null) {
+            track.setResonance(number(object.get("resonance")));
         }
         List<?> steps = asList(object.get("steps"));
         int count = Math.min(Track.CAPACITY, steps.size());

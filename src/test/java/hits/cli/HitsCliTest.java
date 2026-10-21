@@ -202,6 +202,22 @@ class HitsCliTest {
     }
 
     @Test
+    void infoShowsTuneDecayAndEffects() throws Exception {
+        Beat beat = Beat.drumKit("shaped");
+        beat.track(0).setTune(700);
+        beat.track(0).setDecay(25);
+        beat.track(1).setCutoff(12);
+        beat.track(1).setResonance(80);
+        beat.track(2).setReverb(90);
+        beat.track(2).setChorus(40);
+        String described = HitsCli.describe(beat);
+        assertTrue(described.contains("tune +700 cents, decay 25%"), described);
+        assertTrue(described.contains("cutoff 12, resonance 80"), described);
+        assertTrue(described.contains("reverb 90, chorus 40"), described);
+        assertFalse(HitsCli.describe(Beat.drumKit("plain")).contains("tune "));
+    }
+
+    @Test
     void fixtureRoundTripsAndInfoDescribesIt() throws Exception {
         String text = Files.readString(FIXTURE);
         assertEquals(BeatJson.write(referenceBeat()), text);
