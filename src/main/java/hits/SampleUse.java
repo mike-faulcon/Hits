@@ -1,20 +1,26 @@
 package hits;
 
 import javax.sound.midi.Soundbank;
+import java.util.List;
 
 /**
- * Which rows of this playback or export actually play a sample.
- * A row that is not listed falls back to its General MIDI note.
+ * Which sample presets this playback or export actually loaded.
+ * A row that is not listed falls back to its General MIDI drum, on channel 9.
  * External MIDI outputs use {@link #none()} so every sample track does that.
+ * One row can load more than one preset when two patterns name different samples,
+ * or the same sample at a different decay, gain, or polarity.
  */
 public final class SampleUse {
-    private static final SampleUse NONE = new SampleUse(new SampleRef[Beat.TRACKS], null);
+    private static final SampleUse NONE = new SampleUse(List.of(), null);
 
-    private final SampleRef[] loaded;
+    /** One loaded preset. {@code decay} is the track percent baked into the envelope. */
+    public record Play(int row, SampleRef sample, int decay, int program) {}
+
+    private final List<Play> plays;
     private final Soundbank bank;
 
-    public SampleUse(SampleRef[] loaded, Soundbank bank) {
-        this.loaded = loaded == null ? new SampleRef[Beat.TRACKS] : loaded;
+    public SampleUse(List<Play> plays, Soundbank bank) {
+        this.plays = plays == null ? List.of() : List.copyOf(plays);
         this.bank = bank;
     }
 
@@ -26,14 +32,28 @@ public final class SampleUse {
         return bank;
     }
 
-    /** True when this track's sample is the one loaded for its row. */
+    public List<Play> plays() {
+        return plays;
+    }
+
+    /** True when this track's sample, decay, gain, and polarity were loaded. */
     public boolean plays(Track track, int row) {
-        if (track == null || track.mode() != TrackMode.SAMPLE) {
-            return false;
+        return program(track, row) >= 0;
+    }
+
+    /**
+     * Program in bank {@link SampleBank#SF2_BANK} for this pattern's sample, or -1 when
+     * the row falls back to its drum note.
+     */
+    public int program(Track track, int row) {
+        if (track == null || track.mode() != TrackMode.SAMPLE || track.sample() == null) {
+            return -1;
         }
-        if (row < 0 || row >= loaded.length || loaded[row] == null) {
-            return false;
+        for (Play play : plays) {
+            if (play.row == row && play.decay == track.decay() && play.sample.same(track.sample())) {
+                return play.program;
+            }
         }
-        return loaded[row].same(track.sample());
+        return -1;
     }
 }

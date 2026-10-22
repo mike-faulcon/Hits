@@ -16,7 +16,9 @@ import java.util.Map;
  * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
  * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent),
  * and a track {@code sample} object when {@code mode} is {@code sample}
- * ({@code path}, {@code root}, {@code start}, {@code oneShot}).
+ * ({@code path}, {@code root}, {@code start}, {@code oneShot},
+ * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN},
+ * and optional {@code invert} omitted when false).
  * Mute and solo are original track fields.
  * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
  * A slot {@code steps} key is written only when that pattern's length differs from the root {@code steps},
@@ -214,8 +216,14 @@ public final class BeatJson {
         out.append("\"sample\": {\"path\": \"").append(escape(sample.path()))
             .append("\", \"root\": ").append(sample.root())
             .append(", \"start\": ").append(sample.start())
-            .append(", \"oneShot\": ").append(sample.oneShot())
-            .append("},\n");
+            .append(", \"oneShot\": ").append(sample.oneShot());
+        if (sample.gain() != SampleRef.GAIN) {
+            out.append(", \"gain\": ").append(sample.gain());
+        }
+        if (sample.invert()) {
+            out.append(", \"invert\": true");
+        }
+        out.append("},\n");
     }
 
     private static void field(StringBuilder out, int indent, String key, String value, boolean comma) {
@@ -358,7 +366,11 @@ public final class BeatJson {
             ? number(object.get("start"))
             : 0;
         boolean oneShot = !object.containsKey("oneShot") || object.get("oneShot") == null || bool(object.get("oneShot"));
-        return new SampleRef(path, root, start, oneShot);
+        int gain = object.containsKey("gain") && object.get("gain") != null
+            ? number(object.get("gain"))
+            : SampleRef.GAIN;
+        boolean invert = object.containsKey("invert") && object.get("invert") != null && bool(object.get("invert"));
+        return new SampleRef(path, root, start, oneShot, gain, invert);
     }
 
     @SuppressWarnings("unchecked")

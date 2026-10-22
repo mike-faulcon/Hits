@@ -62,19 +62,45 @@ public final class BuiltinSamples {
     }
 
     /**
-     * Sine with a pitch drop from 80 Hz to 68 Hz over the first 200 ms,
-     * then a ring that falls to about −40 dB near 400 ms.
+     * What the built-in is, measured the way the retest measured it.
+     * 808: time from the start until the wave stays under −20 dB of its peak, about 400 ms.
+     * The old “406 ms ring” was the −40 dB point, and the −20 dB point was about 205 ms.
+     * Click: a render's power-weighted centroid over the onset is about 1.4 kHz, not 1.7 kHz.
+     * Snap: 300 Hz high-pass, power-weighted centroid from 5 ms before the onset to 70 ms after, about 2.2 kHz.
+     * The unfiltered full-file centroid sits lower because of the quiet low body.
+     */
+    public static String description(String path) {
+        if (EIGHT_OH_EIGHT.equals(path)) {
+            return "Sine from 80 Hz down to 68 Hz over the first 200 ms. "
+                + "The ring is the time from the start until the wave stays under −20 dB of its peak, about 400 ms.";
+        }
+        if (CLICK.equals(path)) {
+            return "A short knock plus noise near 480 Hz and 3.4 kHz. "
+                + "Rendered through the built-in synth, the power-weighted centroid over the onset is about 1.4 kHz.";
+        }
+        if (SNAP.equals(path)) {
+            return "Noise with a quiet low body. "
+                + "With a 300 Hz high-pass, the power-weighted centroid from 5 ms before the onset to 70 ms after is about 2.2 kHz.";
+        }
+        return "";
+    }
+
+    /**
+     * Sine with a pitch drop from 80 Hz to 68 Hz over the first 200 ms.
+     * The envelope time constant is 172 ms, so the wave crosses −20 dB of its peak near 400 ms
+     * (last sample at or above that threshold, measured from the start).
      */
     static short[] eightOhEight() {
-        int count = (int) Math.round(RATE * 0.45);
+        int count = (int) Math.round(RATE * 0.85);
         double[] raw = new double[count];
         double phase = 0;
+        double attack = 0.004;
+        double tau = 0.172;
         for (int i = 0; i < count; i++) {
             double t = i / (double) RATE;
             double freq = t < 0.200 ? 80 + (68 - 80) * (t / 0.200) : 68;
             phase += 2 * Math.PI * freq / RATE;
-            double attack = 0.004;
-            double env = t < attack ? t / attack : Math.exp(-(t - attack) / 0.087);
+            double env = t < attack ? t / attack : Math.exp(-(t - attack) / tau);
             raw[i] = Math.sin(phase) * env;
         }
         return normalize(raw);
@@ -83,6 +109,7 @@ public final class BuiltinSamples {
     /**
      * A short wood knock plus two noise bands, around 480 Hz and around 3.4 kHz.
      * Each band is two filters deep so the click is not a pure tone and not a hiss.
+     * A render's power-weighted centroid over the onset is about 1.4 kHz.
      */
     static short[] click() {
         int count = (int) Math.round(RATE * 0.07);
@@ -108,7 +135,8 @@ public final class BuiltinSamples {
 
     /**
      * Noise centred near 2.1 kHz, three filters deep, plus a quiet low body.
-     * The power-weighted spectral centroid stays near 1.8 kHz.
+     * With a 300 Hz high-pass, the power-weighted centroid from 5 ms before the onset
+     * to 70 ms after is about 2.2 kHz. The unfiltered full-file centroid is lower.
      */
     static short[] snap() {
         int count = (int) Math.round(RATE * 0.20);
