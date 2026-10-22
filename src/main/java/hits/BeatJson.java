@@ -15,6 +15,8 @@ import java.util.Map;
  * a track {@code shift} (omitted at 0), a track {@code tune} (cents, omitted at 0),
  * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
  * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent),
+ * a track {@code lowCut} object ({@code hz}, {@code slope}) when the high-pass is on,
+ * a track {@code presence} (dB, omitted at 0),
  * and a track {@code sample} object when {@code mode} is {@code sample}
  * ({@code path}, {@code root}, {@code start}, {@code oneShot},
  * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN},
@@ -182,6 +184,12 @@ public final class BeatJson {
         if (track.hasResonance()) {
             field(out, 5, "resonance", track.resonance(), true);
         }
+        if (track.hasLowCut()) {
+            writeLowCut(out, track);
+        }
+        if (track.hasPresence()) {
+            field(out, 5, "presence", track.presence(), true);
+        }
         if (track.mode() == TrackMode.SAMPLE && track.sample() != null) {
             writeSample(out, track.sample());
         }
@@ -209,6 +217,13 @@ public final class BeatJson {
         out.append("]\n");
         out.append("        }");
         out.append(comma ? ",\n" : "\n");
+    }
+
+    private static void writeLowCut(StringBuilder out, Track track) {
+        indent(out, 5);
+        out.append("\"lowCut\": {\"hz\": ").append(track.lowCutHz())
+            .append(", \"slope\": ").append(track.lowCutSlope())
+            .append("},\n");
     }
 
     private static void writeSample(StringBuilder out, SampleRef sample) {
@@ -329,6 +344,17 @@ public final class BeatJson {
         }
         if (object.containsKey("resonance") && object.get("resonance") != null) {
             track.setResonance(number(object.get("resonance")));
+        }
+        if (object.get("lowCut") instanceof Map<?, ?> rawCut) {
+            Map<String, Object> cut = asMap(rawCut);
+            int hz = cut.get("hz") == null ? 0 : number(cut.get("hz"));
+            int slope = cut.get("slope") == null ? Track.LOW_CUT_SLOPE : number(cut.get("slope"));
+            if (hz > 0) {
+                track.setLowCut(hz, slope);
+            }
+        }
+        if (object.containsKey("presence") && object.get("presence") != null) {
+            track.setPresence(number(object.get("presence")));
         }
         if (object.get("sample") instanceof Map<?, ?> raw) {
             track.setSample(readSample(asMap(raw)));

@@ -49,6 +49,7 @@ public final class HitsCli {
         + "render writes the active pattern once, as heard. --song writes the whole chain.\n"
         + "The output type comes from the extension (.wav, .mid, or .midi).\n"
         + "WAV uses the built-in General MIDI synth plus the beat's sample bank, and does not open an audio device.\n"
+        + "Low cut and presence are in the WAV. A MIDI file keeps the ordinary note and does not carry them.\n"
         + "A user SoundFont is not loaded. --samples-sf2 writes <name>-samples.sf2 beside a MIDI file.\n"
         + "Exit codes: 0 ok, 1 the beat or the render failed, 2 the command line was wrong.\n";
 

@@ -30,8 +30,10 @@ final class SliderDrag {
                 editor.adjust(apply);
             } else if (dragging) {
                 dragging = false;
-                editor.adjust(apply);
+                // Clear the gesture before the last apply so playback rebuilds a sample
+                // bank once, when the slider settles, instead of on this same tick.
                 editor.endAdjust();
+                editor.adjust(apply);
             } else {
                 editor.edit(apply);
             }

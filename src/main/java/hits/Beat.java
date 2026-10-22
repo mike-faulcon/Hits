@@ -316,7 +316,20 @@ public final class Beat {
             || hasNudge()
             || hasSoundChoice()
             || hasShape()
-            || hasSamples();
+            || hasSamples()
+            || hasTone();
+    }
+
+    /** Low cut or presence on any row, in any pattern. */
+    public boolean hasTone() {
+        for (Track[] slot : slots) {
+            for (Track track : slot) {
+                if (track.hasTone()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** A sample track in any pattern. The sample object is version 2. */

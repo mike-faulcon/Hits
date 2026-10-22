@@ -25,6 +25,20 @@ public final class Track {
     public static final int CHORUS_NEUTRAL = 0;
     /** GM2 default for cutoff and resonance. 64 is no change on the built-in synth. */
     public static final int FILTER_NEUTRAL = 64;
+    /** Lowest high-pass corner the Low cut slider offers, in Hz. */
+    public static final int LOW_CUT_MIN = 20;
+    /** Highest high-pass corner the Low cut slider offers, in Hz. */
+    public static final int LOW_CUT_MAX = 2000;
+    /** Gentle high-pass, one Butterworth section. */
+    public static final int LOW_CUT_SLOPE = 12;
+    /** Steep high-pass, two Butterworth sections. */
+    public static final int LOW_CUT_STEEP = 24;
+    /** Slider steps across the log low-cut range. 0 is {@link #LOW_CUT_MIN}, this is {@link #LOW_CUT_MAX}. */
+    public static final int LOW_CUT_SLIDER = 1000;
+    /** High-shelf boost, in dB. 0 is off and is left out of the file. */
+    public static final int PRESENCE_MAX = 12;
+    /** High-shelf midpoint, in Hz. The boost is above this. */
+    public static final int PRESENCE_HZ = 3000;
 
     private String name;
     private TrackMode mode;
@@ -55,6 +69,12 @@ public final class Track {
     private int chorus = UNSET;
     private int cutoff = UNSET;
     private int resonance = UNSET;
+    /** High-pass corner in Hz. 0 is off and is left out of the file. */
+    private int lowCutHz;
+    /** 12 or 24 dB per octave. Used while {@link #lowCutHz} is on. */
+    private int lowCutSlope = LOW_CUT_SLOPE;
+    /** High-shelf gain in dB. 0 is off and is left out of the file. */
+    private int presence;
     /** Kept while the row is a drum or a note, and written only in sample mode. */
     private SampleRef sample;
     private final Step[] steps = new Step[CAPACITY];
@@ -99,7 +119,10 @@ public final class Track {
             || reverb != other.reverb
             || chorus != other.chorus
             || cutoff != other.cutoff
-            || resonance != other.resonance) {
+            || resonance != other.resonance
+            || lowCutHz != other.lowCutHz
+            || lowCutSlope != other.lowCutSlope
+            || presence != other.presence) {
             return false;
         }
         if (mode == TrackMode.SAMPLE && !sameSample(sample, other.sample)) {
@@ -133,6 +156,9 @@ public final class Track {
         copy.chorus = chorus;
         copy.cutoff = cutoff;
         copy.resonance = resonance;
+        copy.lowCutHz = lowCutHz;
+        copy.lowCutSlope = lowCutSlope;
+        copy.presence = presence;
         copy.sample = sample;
         for (int i = 0; i < steps.length; i++) {
             copy.steps[i] = steps[i].copy();
@@ -546,9 +572,80 @@ public final class Track {
         resonance = UNSET;
     }
 
+    /** High-pass corner in Hz, or 0 when Low cut is off. */
+    public int lowCutHz() {
+        return lowCutHz;
+    }
+
+    /** 12 or 24. Meaningful while {@link #lowCutHz()} is on. */
+    public int lowCutSlope() {
+        return lowCutSlope;
+    }
+
+    public boolean hasLowCut() {
+        return lowCutHz > 0;
+    }
+
+    /**
+     * Stores a high-pass. {@code hz} of 0 or less clears it.
+     * The corner stays inside {@link #LOW_CUT_MIN}–{@link #LOW_CUT_MAX}.
+     * {@code slope} of {@link #LOW_CUT_STEEP} is 24 dB/oct. Anything else is 12.
+     */
+    public void setLowCut(int hz, int slope) {
+        if (hz <= 0) {
+            clearLowCut();
+            return;
+        }
+        lowCutHz = Math.max(LOW_CUT_MIN, Math.min(LOW_CUT_MAX, hz));
+        lowCutSlope = slope == LOW_CUT_STEEP ? LOW_CUT_STEEP : LOW_CUT_SLOPE;
+    }
+
+    public void clearLowCut() {
+        lowCutHz = 0;
+        lowCutSlope = LOW_CUT_SLOPE;
+    }
+
+    /**
+     * Slider position for {@code hz} on a log scale from {@link #LOW_CUT_MIN} to {@link #LOW_CUT_MAX}.
+     * 0 is 20 Hz. {@link #LOW_CUT_SLIDER} is 2 kHz.
+     */
+    public static int lowCutSlider(int hz) {
+        double clamped = Math.max(LOW_CUT_MIN, Math.min(LOW_CUT_MAX, hz));
+        double t = Math.log(clamped / LOW_CUT_MIN) / Math.log(LOW_CUT_MAX / (double) LOW_CUT_MIN);
+        return (int) Math.round(t * LOW_CUT_SLIDER);
+    }
+
+    /** Hertz for a {@link #lowCutSlider(int)} position. Rounded to the nearest Hz. */
+    public static int lowCutHz(int slider) {
+        double t = Math.max(0, Math.min(LOW_CUT_SLIDER, slider)) / (double) LOW_CUT_SLIDER;
+        double hz = LOW_CUT_MIN * Math.pow(LOW_CUT_MAX / (double) LOW_CUT_MIN, t);
+        return (int) Math.round(hz);
+    }
+
+    /** High-shelf gain in dB, 0 to {@link #PRESENCE_MAX}. 0 is off. */
+    public int presence() {
+        return presence;
+    }
+
+    public boolean hasPresence() {
+        return presence > 0;
+    }
+
+    public void setPresence(int db) {
+        presence = Math.max(0, Math.min(PRESENCE_MAX, db));
+    }
+
+    /** Low cut or presence. Playback bakes this into PCM. It is not a MIDI controller. */
+    public boolean hasTone() {
+        return hasLowCut() || hasPresence();
+    }
+
     /**
      * Tune, decay, or an effect differs from a new row.
      * A center drum that returns true needs its own channel, on the GM drum bank.
+     * Low cut and presence are not included. They are not MIDI controllers, so a drum
+     * that only uses them still shares channel 9 in a MIDI file. Playback gives that
+     * drum a channel only when the rendered voice is actually loaded.
      */
     public boolean shapesSound() {
         return tune != 0
@@ -579,6 +676,12 @@ public final class Track {
         }
         if (resonance != UNSET) {
             join(text, "resonance " + resonance);
+        }
+        if (lowCutHz > 0) {
+            join(text, "low cut " + lowCutHz + " Hz " + lowCutSlope + " dB/oct");
+        }
+        if (presence > 0) {
+            join(text, "presence +" + presence + " dB");
         }
         return text.toString();
     }

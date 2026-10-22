@@ -224,7 +224,7 @@ final class StudioFrame extends JFrame {
         exports.noteChange(musical);
         refresh();
         if (musical && player.isPlaying()) {
-            player.update(editor.beat(), editor.songMode());
+            player.update(editor.beat(), editor.songMode(), editor.isAdjusting());
         }
     }
 

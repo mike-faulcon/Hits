@@ -135,6 +135,88 @@ public final class WavRenderer {
         }
     }
 
+    /**
+     * The same synth path as {@link #render}, mixed to mono and kept in memory.
+     * Used to record one built-in hit so a high-pass can be baked into the sample bank.
+     * {@code soundbank} null leaves the JDK's default bank loaded, matching a WAV export
+     * that was not given a user SoundFont.
+     */
+    public static short[] renderMono(Sequence sequence, Soundbank soundbank, Soundbank samples) throws IOException {
+        Synthesizer synthesizer = openSynthesizer();
+        Receiver receiver = null;
+        AudioInputStream stream = null;
+        try {
+            stream = openStream(synthesizer);
+            if (soundbank != null) {
+                SoundFonts.install(synthesizer, soundbank, synthesizer.getDefaultSoundbank());
+            }
+            if (samples != null) {
+                SoundFonts.install(synthesizer, samples, null);
+            }
+            try {
+                receiver = synthesizer.getReceiver();
+            } catch (MidiUnavailableException exception) {
+                throw unavailable(exception);
+            }
+            WavAudio.send(receiver, sequence);
+            long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence));
+            if (frames > Integer.MAX_VALUE) {
+                throw new IOException("The hit is too long to render.");
+            }
+            return mixMono(stream, (int) frames);
+        } catch (javax.sound.midi.InvalidMidiDataException exception) {
+            throw new IOException(
+                exception.getMessage() == null ? "The beat could not be rendered." : exception.getMessage(),
+                exception
+            );
+        } finally {
+            if (receiver != null) {
+                receiver.close();
+            }
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (IOException ignored) {
+                    // The synth is closed next.
+                }
+            }
+            if (synthesizer.isOpen()) {
+                synthesizer.close();
+            }
+        }
+    }
+
+    private static short[] mixMono(AudioInputStream stream, int frames) throws IOException {
+        short[] mono = new short[frames];
+        byte[] buffer = new byte[WavAudio.BYTES_PER_FRAME * 4096];
+        int frame = 0;
+        int filled = 0;
+        while (frame < frames) {
+            int want = Math.min(buffer.length - filled, (frames - frame) * WavAudio.BYTES_PER_FRAME);
+            int read = stream.read(buffer, filled, want);
+            if (read < 0) {
+                break;
+            }
+            if (read == 0) {
+                throw new IOException("The built-in synth stopped rendering.");
+            }
+            filled += read;
+            int whole = filled / WavAudio.BYTES_PER_FRAME;
+            for (int i = 0; i < whole; i++) {
+                int offset = i * WavAudio.BYTES_PER_FRAME;
+                int left = (buffer[offset] & 0xff) | (buffer[offset + 1] << 8);
+                int right = (buffer[offset + 2] & 0xff) | (buffer[offset + 3] << 8);
+                mono[frame++] = (short) ((((short) left) + ((short) right)) / 2);
+            }
+            int used = whole * WavAudio.BYTES_PER_FRAME;
+            if (used < filled) {
+                System.arraycopy(buffer, used, buffer, 0, filled - used);
+            }
+            filled -= used;
+        }
+        return mono;
+    }
+
     static boolean unavailable(Throwable failure) {
         for (Throwable cursor = failure; cursor != null; cursor = cursor.getCause()) {
             if (cursor instanceof MidiUnavailableException
