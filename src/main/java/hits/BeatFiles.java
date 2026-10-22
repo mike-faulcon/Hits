@@ -124,8 +124,8 @@ public final class BeatFiles {
         Path beatFile,
         boolean writeSamples
     ) throws IOException, InvalidMidiDataException {
-        // Low cut is not a MIDI controller. The file keeps the ordinary note, and the
-        // companion SoundFont is the unfiltered sample.
+        // Low cut is not a MIDI controller. The companion SoundFont keeps gain, invert,
+        // and the envelope, and leaves the PCM unfiltered. A drum stays on its ordinary note.
         SampleLibrary.Ready ready = SampleLibrary.prepare(
             beat, beatFile, SequenceBuilder.exportSlots(beat, options), null, false
         );
@@ -147,6 +147,12 @@ public final class BeatFiles {
      * Writes the same sequence as {@link #exportMidi} as 44.1 kHz 16-bit stereo PCM.
      * {@code soundbank} is the SoundFont loaded on the built-in synth, or null for General MIDI.
      * {@code progress} receives 0–100 from the render thread. A cancelled render leaves {@code path} unchanged.
+     * <p>
+     * There is no beat file here, so a relative sample is resolved against the working directory.
+     * A relative sample that is not in that directory throws {@link IOException} instead of being dropped.
+     * Absolute paths and built-ins are unchanged. Pass the beat file to
+     * {@link #exportWav(Beat, Path, ExportOptions, Soundbank, IntConsumer, BooleanSupplier, Path)}
+     * when the path is relative to that file.
      */
     public static void exportWav(
         Beat beat,
@@ -183,8 +189,16 @@ public final class BeatFiles {
         Path beatFile
     ) throws IOException, InvalidMidiDataException {
         Soundbank playing = soundbank != null ? soundbank : SoundCatalog.builtin();
+        Path samplesFrom = beatFile;
+        if (samplesFrom == null) {
+            samplesFrom = Path.of("").toAbsolutePath().resolve("export.json");
+            String missing = SamplePaths.unresolvedRelative(beat, samplesFrom);
+            if (missing != null) {
+                throw new IOException(missing);
+            }
+        }
         SampleLibrary.Ready ready = SampleLibrary.prepare(
-            beat, beatFile, SequenceBuilder.exportSlots(beat, options), soundbank, true
+            beat, samplesFrom, SequenceBuilder.exportSlots(beat, options), soundbank, true
         );
         WavRenderer.render(
             SequenceBuilder.export(beat, options, playing, ready.use()),

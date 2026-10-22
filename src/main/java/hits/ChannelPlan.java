@@ -12,7 +12,9 @@ import java.util.List;
  * Every other row gets a channel of its own from {@link #POOL}. Channel 15 is last
  * in that pool because the metronome already uses it. Notes, sample tracks, and pitched presets
  * are placed before drums, so a drum is the row that falls back to channel 9
- * when the pool runs out. A sample track never shares channel 9.
+ * when the pool runs out. A sample that loaded keeps its own channel.
+ * A sample that falls back plays its drum note on channel 9, because Gervill
+ * will not switch a melodic channel from the sample bank to the drum bank.
  */
 public final class ChannelPlan {
     /**
@@ -129,6 +131,13 @@ public final class ChannelPlan {
                         presetRow[row] = true;
                     }
                     shapeRow[row] |= shapeFlags(track);
+                    if (track.mode() == TrackMode.SAMPLE) {
+                        if (samples.plays(track, row)) {
+                            needsPrivate[row] = true;
+                            melodic[row] = true;
+                        }
+                        continue;
+                    }
                     boolean rendered = samples.plays(track, row);
                     if (!rendered && sharesDrumChannel(track, kits)) {
                         continue;
@@ -136,7 +145,6 @@ public final class ChannelPlan {
                     needsPrivate[row] = true;
                     if (rendered
                         || track.mode() == TrackMode.NOTE
-                        || track.mode() == TrackMode.SAMPLE
                         || (track.mode() == TrackMode.DRUM && track.preset() != null)) {
                         melodic[row] = true;
                     }
@@ -244,10 +252,12 @@ public final class ChannelPlan {
      * another pattern on the same row reserved a private channel.
      */
     public int channel(Track track, int row) {
-        if (track != null && samples.plays(track, row)) {
+        if (track != null && track.mode() == TrackMode.SAMPLE && !samples.plays(track, row)) {
+            return Gm.DRUM_CHANNEL;
+        }
+        if (track != null && track.mode() != TrackMode.SAMPLE && samples.plays(track, row)) {
             int reservedChannel = reserved(row);
-            boolean drumOverflow = overflow(row) && track.mode() != TrackMode.SAMPLE;
-            if (reservedChannel >= 0 && !drumOverflow) {
+            if (reservedChannel >= 0 && !overflow(row)) {
                 return reservedChannel;
             }
         }
@@ -309,17 +319,17 @@ public final class ChannelPlan {
         // Channel 9 stays pan-only, including when that filtered drum overflowed.
         if (!sharesDrumChannel(track, kits) || (rendered && channel != Gm.DRUM_CHANNEL)) {
             boolean preset = track.preset() != null && track.mode() == TrackMode.DRUM;
-            // A filtered drum that could not get its own channel stays on the kit note.
-            // Channel 9 would play the sample bank as percussion. A sample row already
-            // accepts that overflow, and keeps doing so.
-            boolean bankVoice = rendered && (track.mode() == TrackMode.SAMPLE || channel != Gm.DRUM_CHANNEL);
-            if (bankVoice) {
+            int voice = samples.program(track, row);
+            boolean sampleVoice = track.mode() == TrackMode.SAMPLE && voice >= 0;
+            // A filtered drum that overflowed onto channel 9 stays on the kit note.
+            // Channel 9 would play the sample bank as percussion.
+            boolean renderedVoice = rendered && voice >= 0 && channel != Gm.DRUM_CHANNEL;
+            if (sampleVoice || renderedVoice) {
                 bankSelect(messages, channel, SampleBank.MIDI_BANK);
-                messages.add(program(channel, samples.program(track, row)));
+                messages.add(program(channel, voice));
             } else if (track.mode() == TrackMode.SAMPLE) {
-                messages.add(control(channel, 0, Gm.DRUM_BANK));
-                messages.add(control(channel, 32, 0));
-                messages.add(program(channel, SoundCatalog.playedKit(kits, track.kit())));
+                // Channel 9 is already the drum kit. Bank 120 on that channel would retune every drum.
+                return messages;
             } else if (preset) {
                 bankSelect(messages, channel, track.bank());
                 messages.add(program(channel, track.preset().program()));
@@ -407,6 +417,14 @@ public final class ChannelPlan {
      * release, and a later pattern on that row puts the controller back to 64.
      */
     private Integer releaseValue(Track track, int row, boolean preset) {
+        if (track.mode() == TrackMode.SAMPLE && samples.plays(track, row)) {
+            // The sample preset already has this decay. CC 72 would add to that release.
+            // A previous pattern on the channel may have set it, so put the neutral back.
+            if (shaped(row, SHAPE_DECAY)) {
+                return Track.FILTER_NEUTRAL;
+            }
+            return null;
+        }
         if (track.decay() != Track.DECAY) {
             return Track.decayController(track.decay());
         }
@@ -427,6 +445,11 @@ public final class ChannelPlan {
     private Integer reverbValue(Track track, int row, boolean preset) {
         if (track.hasReverb()) {
             return track.reverb();
+        }
+        if (track.mode() == TrackMode.SAMPLE && samples.plays(track, row)) {
+            // Gervill's channel starts at reverb 40. A sample row sends 0 unless the row sets a send,
+            // so a one-shot does not ring on after the file.
+            return 0;
         }
         if (preset) {
             return presetReverb(track.gate());

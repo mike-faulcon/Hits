@@ -6,10 +6,15 @@ import hits.Chain;
 import hits.ExportOptions;
 import hits.GrooveGenerator;
 import hits.Notes;
+import hits.SampleLibrary;
+import hits.SamplePaths;
+import hits.SampleRef;
+import hits.SampleUse;
 import hits.SequenceBuilder;
 import hits.SoundCatalog;
 import hits.Timeline;
 import hits.Track;
+import hits.TrackMode;
 import hits.WavAudio;
 
 import javax.sound.midi.InvalidMidiDataException;
@@ -128,6 +133,7 @@ public final class HitsCli {
         ExportOptions options = parsed.song
             ? new ExportOptions(true, false, 1, true)
             : ExportOptions.matchingPlayback();
+        warnSamples(beat, parsed.beat, SequenceBuilder.exportSlots(beat, options), err);
         try {
             Path parent = parsed.out.getParent();
             if (parent != null) {
@@ -177,7 +183,10 @@ public final class HitsCli {
             return fail.code;
         }
         try {
-            out.print(describe(beat));
+            List<Character> slots = usedSlots(beat);
+            SampleLibrary.Ready ready = SampleLibrary.prepare(beat, parsed.beat, slots);
+            warnSamples(ready, err);
+            out.print(describe(beat, parsed.beat, ready.use()));
         } catch (InvalidMidiDataException exception) {
             err.println("Could not describe " + parsed.beat + ": " + detail(exception));
             return FAIL;
@@ -191,6 +200,14 @@ public final class HitsCli {
      * Lengths use the same sequences as {@code render}.
      */
     static String describe(Beat beat) throws InvalidMidiDataException {
+        return describe(beat, null, null);
+    }
+
+    /**
+     * Same listing as {@link #describe(Beat)}. {@code beatFile} resolves sample paths.
+     * {@code samples} says which of those paths were loaded. Null treats a readable sample as ready.
+     */
+    static String describe(Beat beat, Path beatFile, SampleUse samples) throws InvalidMidiDataException {
         Sequence pattern = SequenceBuilder.export(beat, ExportOptions.matchingPlayback());
         Sequence song = SequenceBuilder.export(beat, new ExportOptions(true, false, 1, true));
         List<Timeline.Section> patternSections = Timeline.pattern(beat);
@@ -227,6 +244,9 @@ public final class HitsCli {
                 if (!shape.isEmpty()) {
                     sound = sound + ", " + shape;
                 }
+                if (track.mode() == TrackMode.SAMPLE) {
+                    sound = sound + " — " + sampleStatus(track, row, beatFile, samples);
+                }
                 text.append(String.format(
                     Locale.ROOT,
                     "  %s  %-16s %-4s %4s  %s%s%n",
@@ -241,6 +261,40 @@ public final class HitsCli {
         }
         text.append("length: ").append(lengthText(pattern, patternSections)).append('\n');
         text.append("song: ").append(lengthText(song, songSections)).append('\n');
+        return text.toString();
+    }
+
+    private static void warnSamples(Beat beat, Path beatFile, List<Character> slots, PrintStream err) {
+        warnSamples(SampleLibrary.prepare(beat, beatFile, slots), err);
+    }
+
+    private static void warnSamples(SampleLibrary.Ready ready, PrintStream err) {
+        if (ready != null && ready.warning() != null && !ready.warning().isBlank()) {
+            err.println(ready.warning());
+        }
+    }
+
+    /** Source path and whether that pattern's sample loaded. */
+    private static String sampleStatus(Track track, int row, Path beatFile, SampleUse samples) {
+        SampleRef sample = track.sample();
+        String source = sample == null || sample.path().isBlank() ? "(none)" : sample.path();
+        StringBuilder text = new StringBuilder(source);
+        if (sample != null && sample.gain() != SampleRef.GAIN) {
+            text.append(", gain ").append(SampleRef.gainText(sample.gain()));
+        }
+        if (sample != null && sample.invert()) {
+            text.append(", invert");
+        }
+        String problem = SamplePaths.problem(track, beatFile);
+        if (problem != null) {
+            text.append(", missing, plays ").append(Notes.name(track.note()));
+            return text.toString();
+        }
+        if (samples == null || samples.plays(track, row)) {
+            text.append(", ready");
+            return text.toString();
+        }
+        text.append(", plays ").append(Notes.name(track.note()));
         return text.toString();
     }
 

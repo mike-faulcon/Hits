@@ -147,12 +147,61 @@ class LowCutTest {
         beat.slot('b')[0].setLowCut(400, 24);
         SampleLibrary.Ready ready = SampleLibrary.prepare(beat, temp.resolve("two.json"), List.of('a', 'b'));
         assertEquals(0, ready.use().program(beat.track(0), 0));
-        assertEquals(8, ready.use().program(beat.slot('b')[0], 0));
+        int other = ready.use().program(beat.slot('b')[0], 0);
+        assertTrue(other > 0, "second preset " + other);
         int held = ready.use().program(beat.track(0), 0);
         beat.track(0).setLowCut(180, 12);
         assertTrue(ready.use().plays(beat.track(0), 0));
         assertEquals(held, ready.use().program(beat.track(0), 0));
-        assertEquals(8, ready.use().program(beat.slot('b')[0], 0));
+        assertEquals(other, ready.use().program(beat.slot('b')[0], 0));
+    }
+
+    @Test
+    void gainInvertAndLowCutApplyTogether() throws Exception {
+        short[] source = tone(RATE, 80, 400);
+        Path wav = temp.resolve("shaped.wav");
+        SampleAudio.writeWav(wav, RATE, source);
+        Beat shaped = sampleBeat(wav, SampleRef.GAIN, true, 120, 24);
+        SampleLibrary.Ready ready = SampleLibrary.prepare(shaped, temp.resolve("shaped.json"), List.of('a'));
+        assertTrue(ready.use().plays(shaped.track(0), 0), ready.warning());
+        short[] flipped = new short[source.length];
+        for (int i = 0; i < source.length; i++) {
+            flipped[i] = (short) -source[i];
+        }
+        short[] filtered = ToneFilter.apply(flipped, RATE, 120, 24, 0);
+        Path bank = temp.resolve("shaped.sf2");
+        java.nio.file.Files.write(bank, ready.sf2());
+        short[] stored = samplePcm(bank);
+        int compared = Math.min(filtered.length, stored.length);
+        int mismatches = 0;
+        for (int i = 0; i < compared; i++) {
+            if (stored[i] != filtered[i]) {
+                mismatches++;
+            }
+        }
+        assertEquals(0, mismatches, "stored PCM mismatches " + mismatches + " of " + compared);
+
+        Path quietWav = temp.resolve("gain0.wav");
+        Path boostedWav = temp.resolve("gain8.wav");
+        Path uprightWav = temp.resolve("upright.wav");
+        renderWav(sampleBeat(wav, 0, true, 120, 24), quietWav);
+        renderWav(shaped, boostedWav);
+        renderWav(sampleBeat(wav, SampleRef.GAIN, false, 120, 24), uprightWav);
+        double[] quiet = toneBands(mono(quietWav));
+        double[] boosted = toneBands(mono(boostedWav));
+        double gain = boosted[1] - quiet[1];
+        double low = boosted[0] - boosted[1];
+        double phase = correlation(mono(boostedWav), mono(uprightWav));
+        System.out.println(String.format(
+            Locale.ROOT,
+            "gain %+.1f dB, 80 vs 400 %+.1f dB, invert correlation %+.2f",
+            gain,
+            low,
+            phase
+        ));
+        assertEquals(SampleRef.GAIN, gain, 3.0, "400 Hz gain");
+        assertTrue(low < -8, "80 Hz versus 400 Hz is " + low + " dB");
+        assertTrue(phase < -0.5, "invert correlation " + phase);
     }
 
     @Test
@@ -283,6 +332,41 @@ class LowCutTest {
     private static void sampleRow(Track track, Path wav) {
         track.setMode(TrackMode.SAMPLE);
         track.setSample(new SampleRef(wav.toAbsolutePath().toString(), 60, 0, true));
+    }
+
+    private static Beat sampleBeat(Path wav, int gain, boolean invert, int hz, int slope) {
+        Beat beat = Beat.drumKit("shaped");
+        beat.setBpm(120);
+        beat.setStepCount(1);
+        for (int row = 0; row < Beat.TRACKS; row++) {
+            beat.track(row).clearSteps();
+        }
+        Track track = beat.track(0);
+        track.setMode(TrackMode.SAMPLE);
+        track.setNote(60);
+        track.setSample(new SampleRef(wav.toAbsolutePath().toString(), 60, 0, true).withGain(gain).withInvert(invert));
+        track.setLowCut(hz, slope);
+        track.tap(0, false);
+        track.step(0).setVelocity(ToneRender.CAPTURE_VELOCITY);
+        return beat;
+    }
+
+    /** Sign agreement of two renders. Negative means one is inverted. */
+    private static double correlation(double[] left, double[] right) {
+        int from = RATE / 50;
+        int to = Math.min(left.length, Math.min(right.length, RATE / 5));
+        double dot = 0;
+        double leftEnergy = 0;
+        double rightEnergy = 0;
+        for (int i = from; i < to; i++) {
+            dot += left[i] * right[i];
+            leftEnergy += left[i] * left[i];
+            rightEnergy += right[i] * right[i];
+        }
+        if (leftEnergy == 0 || rightEnergy == 0) {
+            return 0;
+        }
+        return dot / Math.sqrt(leftEnergy * rightEnergy);
     }
 
     private static Beat kick(Consumer<Track> edit) {

@@ -165,6 +165,36 @@ public final class SamplePaths {
         throw new IOException("Could not name a collected sample");
     }
 
+    /**
+     * A relative sample that {@code beatFile} cannot see, or null when every relative sample resolves.
+     * Built-ins and absolute paths are not this method's problem.
+     * The six-argument WAV export uses the working directory as {@code beatFile} and throws this text
+     * instead of dropping the file.
+     */
+    public static String unresolvedRelative(Beat beat, Path beatFile) {
+        if (beat == null) {
+            return null;
+        }
+        for (int slot = 0; slot < Beat.SLOT_COUNT; slot++) {
+            Track[] tracks = beat.slot(Beat.slotLetter(slot));
+            for (Track track : tracks) {
+                if (track.mode() != TrackMode.SAMPLE || track.sample() == null) {
+                    continue;
+                }
+                String stored = track.sample().path();
+                if (stored.isBlank() || builtin(stored) || Path.of(stored).isAbsolute()) {
+                    continue;
+                }
+                Path resolved = resolve(stored, beatFile);
+                if (resolved == null || !Files.isRegularFile(resolved)) {
+                    return "Sample \"" + stored + "\" was not found. "
+                        + "A relative path needs the beat file, or the file has to sit in the working directory.";
+                }
+            }
+        }
+        return null;
+    }
+
     /** Why this sample cannot play, or null when it can. */
     public static String problem(Track track, Path beatFile) {
         if (track == null || track.mode() != TrackMode.SAMPLE) {

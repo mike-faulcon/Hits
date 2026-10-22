@@ -84,6 +84,9 @@ final class TrackInspector {
     private final JSpinner sampleStart = new JSpinner(new SpinnerNumberModel(0, 0, 1_000_000, 1));
     private final JButton oneShot = Widgets.button("One-shot");
     private final JButton choke = Widgets.button("Choke");
+    private final JSlider sampleGain = Widgets.slider(SampleRef.GAIN_MIN, SampleRef.GAIN_MAX, SampleRef.GAIN);
+    private final JLabel sampleGainValue = Widgets.label(SampleRef.gainText(SampleRef.GAIN));
+    private final JCheckBox sampleInvert = new JCheckBox("Invert");
     private final JButton collectSamples = Widgets.button("Collect samples");
     private Runnable collectAction = () -> {};
     private Supplier<Path> beatFile = () -> null;
@@ -134,6 +137,7 @@ final class TrackInspector {
     private final SliderDrag velocityDrag;
     private final SliderDrag chanceDrag;
     private final SliderDrag accentDrag;
+    private final SliderDrag sampleGainDrag;
 
     TrackInspector(Editor editor, Player player, Sync sync) {
         this.editor = editor;
@@ -148,6 +152,7 @@ final class TrackInspector {
         this.velocityDrag = new SliderDrag(editor, sync);
         this.chanceDrag = new SliderDrag(editor, sync);
         this.accentDrag = new SliderDrag(editor, sync);
+        this.sampleGainDrag = new SliderDrag(editor, sync);
     }
 
     void onShuffle(Runnable action) {
@@ -262,7 +267,7 @@ final class TrackInspector {
         decay.setName("decay");
         decayValue.setName("decay-value");
         addRow(panel, constraints, labeled(decayTitle, DECAY_TIP, decay, decayValue));
-        decayValue.setPreferredSize(new Dimension(72, 32));
+        decayValue.setPreferredSize(new Dimension(96, 32));
         cutoff.setName("cutoff");
         addRow(panel, constraints, effectRow(cutoffOn, cutoff, cutoffValue, "Low-pass filter, from dull to bright. 64 is the synth's own tone. Off leaves the controller unset, so the sound stays as it is. Built-in synth only. A DAW may ignore this."));
         resonance.setName("resonance");
@@ -282,7 +287,7 @@ final class TrackInspector {
         addRow(panel, constraints, Widgets.label("Mode"));
         drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
         noteMode.setToolTipText("One pitched instrument for the whole track.");
-        sampleMode.setToolTipText("A one-shot WAV, played through the built-in synth. Tune, decay, and effects still apply.");
+        sampleMode.setToolTipText("A one-shot WAV, played through the built-in synth. Tune, decay, gain, polarity, and effects still apply.");
         addRow(panel, constraints, Widgets.row(drumMode, noteMode, sampleMode));
         shuffle.setToolTipText("New hits on this track. The sound stays. Undo puts the old hits back.");
         shuffle.addActionListener(event -> shuffleTrack.run());
@@ -326,6 +331,12 @@ final class TrackInspector {
         velocityDrag.wire(velocity, this::applyVelocity);
         chanceDrag.wire(chance, this::applyChance);
         accentDrag.wire(accent, beat -> onScreen(beat).setAccent(accent.getValue()));
+        sampleGainDrag.wire(sampleGain, beat -> {
+            Track track = onScreen(beat);
+            if (track.sample() != null) {
+                track.setSample(track.sample().withGain(sampleGain.getValue()));
+            }
+        });
         drumMode.addActionListener(event -> setMode(TrackMode.DRUM));
         noteMode.addActionListener(event -> setMode(TrackMode.NOTE));
         sampleMode.addActionListener(event -> setMode(TrackMode.SAMPLE));
@@ -334,6 +345,7 @@ final class TrackInspector {
         sampleStart.addChangeListener(event -> applySampleStart());
         oneShot.addActionListener(event -> applyOneShot(true));
         choke.addActionListener(event -> applyOneShot(false));
+        sampleInvert.addActionListener(event -> applyInvert());
         collectSamples.addActionListener(event -> collectAction.run());
         steps16.addActionListener(event -> setPatternLength(16));
         steps32.addActionListener(event -> setPatternLength(32));
@@ -644,7 +656,9 @@ final class TrackInspector {
     private static final String DECAY_TIP = "How long the built-in synth lets the hit ring, from 10% to 200%. "
         + "100% is the instrument's own release and sends nothing. A decay other than 100% replaces the release a pitched preset's length was sending. "
         + "Kick, snare, closed hat, toms, clap, side stick, Woodblock click, and Snare crack ignore it. Snare crack's tail is reverb. "
-        + "A sample row uses it, because the SoundFont envelope follows this control even when a missing file falls back to the drum note. "
+        + "A sample row maps the percent onto that sample's volume envelope, for both one-shot and choke. "
+        + "A one-shot above 100% matches the file, because the recording is as long as the sound can be. "
+        + "A missing file falls back to the drum note, which may ignore decay. "
         + "Built-in synth only. A DAW may ignore this.";
 
     private void showDecay(Track track) {
@@ -660,7 +674,14 @@ final class TrackInspector {
             }
             decayValue.setText("ignored");
         } else {
-            decayValue.setText(track.decay() + "%");
+            String limit = track.decayLimit();
+            if (limit != null) {
+                decayValue.setText(track.decay() + "% file");
+                decayValue.setForeground(Theme.MUTED);
+                tip = tip + " " + limit;
+            } else {
+                decayValue.setText(track.decay() + "%");
+            }
         }
         decayTitle.setToolTipText(tip);
         decay.setToolTipText(tip);
@@ -1018,6 +1039,14 @@ final class TrackInspector {
         oneShot.setToolTipText("Play the whole recording. Note-off does not cut it.");
         choke.setName("sample-choke");
         choke.setToolTipText("Note-off and the step length cut the sample.");
+        sampleGain.setName("sample-gain");
+        sampleGainValue.setName("sample-gain-value");
+        sampleInvert.setName("sample-invert");
+        sampleInvert.setOpaque(false);
+        sampleInvert.setForeground(Theme.TEXT);
+        sampleInvert.setFocusable(false);
+        sampleInvert.setToolTipText("Flips the phase of this sample. Off is left out of the file. "
+            + "Use it when a sample cancels a drum on the same hit, such as a sine 808 under the kick.");
         collectSamples.setName("collect-samples");
         collectSamples.setToolTipText("Copy every sample this beat uses into a folder next to the beat.");
         JPanel card = new JPanel(new GridBagLayout());
@@ -1038,6 +1067,19 @@ final class TrackInspector {
         card.add(sampleSpin("Start", sampleStart, Widgets.label("frames")), constraints);
         constraints.gridy++;
         card.add(Widgets.row(oneShot, choke), constraints);
+        constraints.gridy++;
+        JPanel gain = labeled(
+            "Gain",
+            "How loud this sample is, in decibels, from −24 to +24. "
+                + "+8 dB is the default and is left out of the file. It makes up for the level the built-in synth takes off a note, so a hit sits near the file. "
+                + "0 dB is the quieter level from the first sample-track release. Drum and note rows do not use this.",
+            sampleGain,
+            sampleGainValue
+        );
+        sampleGainValue.setPreferredSize(new Dimension(72, 32));
+        card.add(gain, constraints);
+        constraints.gridy++;
+        card.add(sampleInvert, constraints);
         constraints.gridy++;
         constraints.insets = new Insets(0, 0, 0, 0);
         card.add(collectSamples, constraints);
@@ -1101,6 +1143,12 @@ final class TrackInspector {
         boolean shot = !sampleModeOn || sample.oneShot();
         Widgets.paintToggle(oneShot, shot);
         Widgets.paintToggle(choke, !shot);
+        int gain = sampleModeOn ? sample.gain() : SampleRef.GAIN;
+        if (!sampleGain.getValueIsAdjusting()) {
+            sampleGain.setValue(gain);
+        }
+        sampleGainValue.setText(SampleRef.gainText(sampleGain.getValueIsAdjusting() ? sampleGain.getValue() : gain));
+        sampleInvert.setSelected(sampleModeOn && sample.invert());
     }
 
     private void chooseSample() {
@@ -1210,6 +1258,24 @@ final class TrackInspector {
             Track track = onScreen(beat);
             if (track.sample() != null) {
                 track.setSample(track.sample().withOneShot(oneShotMode));
+            }
+        });
+        auditionRow();
+    }
+
+    private void applyInvert() {
+        if (sync.on() || editor.selectedTrack().mode() != TrackMode.SAMPLE) {
+            return;
+        }
+        boolean invert = sampleInvert.isSelected();
+        SampleRef current = editor.selectedTrack().sample();
+        if (current == null || current.invert() == invert) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.sample() != null) {
+                track.setSample(track.sample().withInvert(invert));
             }
         });
         auditionRow();

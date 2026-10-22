@@ -392,10 +392,13 @@ public final class Track {
      * Woodblock click, and Snare crack (and the timpani and woodblock programs) do not move.
      * Open hat, crash, ride, rimshot, and the other measured notes do.
      * <p>
-     * A sample row does. Its SoundFont voice sets a volume-envelope release, and Gervill adds
-     * CC 72 on top of that, so one-shot and choke both follow the control. A missing file falls
-     * back to a drum note, which may ignore CC 72, but the row stays a sample and the control
-     * stays on. The stored percent is kept either way.
+     * A sample row does. Its SoundFont voice maps the percent onto the volume-envelope
+     * decay, sustain, and release, so one-shot and choke both follow the control.
+     * CC 72 is not sent for a sample: on a one-shot it cannot move a release of 8400 timecents,
+     * and on a choke it cannot shorten the short release. A one-shot above 100% matches 100%,
+     * because the file is as long as the sound can be. A missing file falls back to a drum note,
+     * which may ignore decay, but the row stays a sample and the control stays on.
+     * The stored percent is kept either way.
      */
     public boolean decayApplies() {
         if (mode == TrackMode.SAMPLE) {
@@ -425,6 +428,17 @@ public final class Track {
             return "This sound ignores decay. The tail is reverb, so Reverb is what shortens it.";
         }
         return "This sound ignores decay on the built-in synth.";
+    }
+
+    /**
+     * Why part of the decay slider does nothing, or null when the whole slider changes the sound.
+     * A one-shot at 100% already plays the file, so 101–200% cannot make it longer.
+     */
+    public String decayLimit() {
+        if (mode == TrackMode.SAMPLE && sample != null && sample.oneShot() && decay > DECAY) {
+            return "A one-shot cannot ring longer than the file. Above 100% plays the whole recording.";
+        }
+        return null;
     }
 
     /**
