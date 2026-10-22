@@ -109,7 +109,34 @@ public final class BeatFiles {
     }
 
     public static void exportMidi(Beat beat, Path path, ExportOptions options) throws IOException, InvalidMidiDataException {
-        MidiSystem.write(SequenceBuilder.export(beat, options), 1, path.toFile());
+        exportMidi(beat, path, options, null, false);
+    }
+
+    /**
+     * Writes the MIDI file. Sample rows whose files can be read select the sample bank.
+     * {@code beatFile} resolves relative sample paths. When {@code writeSamples} is set and a
+     * sample bank was built, a companion {@code <name>-samples.sf2} is written beside the MIDI file.
+     */
+    public static void exportMidi(
+        Beat beat,
+        Path path,
+        ExportOptions options,
+        Path beatFile,
+        boolean writeSamples
+    ) throws IOException, InvalidMidiDataException {
+        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, beatFile, SequenceBuilder.exportSlots(beat, options));
+        MidiSystem.write(SequenceBuilder.export(beat, options, null, ready.use()), 1, path.toFile());
+        if (writeSamples && ready.sf2() != null && ready.sf2().length > 0) {
+            Files.write(samplesFont(path), ready.sf2());
+        }
+    }
+
+    /** Companion SoundFont written next to a MIDI export, {@code Album-A-as-heard.mid} to {@code Album-A-as-heard-samples.sf2}. */
+    public static Path samplesFont(Path midiPath) {
+        String name = midiPath.getFileName() == null ? "samples" : midiPath.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        return midiPath.resolveSibling(stem + "-samples.sf2");
     }
 
     /**
@@ -124,7 +151,7 @@ public final class BeatFiles {
         Soundbank soundbank,
         IntConsumer progress
     ) throws IOException, InvalidMidiDataException {
-        exportWav(beat, path, options, soundbank, progress, () -> false);
+        exportWav(beat, path, options, soundbank, progress, () -> false, null);
     }
 
     public static void exportWav(
@@ -135,8 +162,32 @@ public final class BeatFiles {
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException, InvalidMidiDataException {
+        exportWav(beat, path, options, soundbank, progress, cancelled, null);
+    }
+
+    /**
+     * Same WAV as {@link #exportWav(Beat, Path, ExportOptions, Soundbank, IntConsumer, BooleanSupplier)}.
+     * {@code beatFile} resolves relative samples. The sample bank is loaded beside {@code soundbank}.
+     */
+    public static void exportWav(
+        Beat beat,
+        Path path,
+        ExportOptions options,
+        Soundbank soundbank,
+        IntConsumer progress,
+        BooleanSupplier cancelled,
+        Path beatFile
+    ) throws IOException, InvalidMidiDataException {
         Soundbank playing = soundbank != null ? soundbank : SoundCatalog.builtin();
-        WavRenderer.render(SequenceBuilder.export(beat, options, playing), path, soundbank, progress, cancelled);
+        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, beatFile, SequenceBuilder.exportSlots(beat, options));
+        WavRenderer.render(
+            SequenceBuilder.export(beat, options, playing, ready.use()),
+            path,
+            soundbank,
+            ready.bank(),
+            progress,
+            cancelled
+        );
     }
 
     public static String safeName(String name) {

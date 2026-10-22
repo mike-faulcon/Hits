@@ -80,6 +80,10 @@ final class StudioFrame extends JFrame {
             this::updateTitle
         );
         this.exports = new ExportCommands(this, editor, player, beatsFolder, status);
+        player.setBeatFile(session::file);
+        exports.setBeatFile(session::file);
+        inspector.setBeatFile(session::file);
+        inspector.onCollect(files::collectSamples);
         browser.dragHandles(exports.midiChip(), exports.wavChip());
         browser.onLoad(files::loadSelected);
         browser.onSave(() -> files.save());

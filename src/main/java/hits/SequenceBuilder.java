@@ -83,7 +83,7 @@ public final class SequenceBuilder {
         if (!beat.hasChain()) {
             return build(beat, metronome);
         }
-        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true, null);
+        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true, null, SampleUse.none());
     }
 
     /**
@@ -99,7 +99,7 @@ public final class SequenceBuilder {
      * {@code metronome} adds clicks. {@link #export} never writes them.
      */
     public static Sequence build(Beat beat, boolean metronome) throws InvalidMidiDataException {
-        return pattern(beat, null, 1, metronome, null);
+        return pattern(beat, null, 1, metronome, null, SampleUse.none());
     }
 
     /**
@@ -131,13 +131,29 @@ public final class SequenceBuilder {
      */
     public static Sequence playback(Beat beat, boolean song, Random random, boolean metronome, Soundbank kits)
         throws InvalidMidiDataException {
+        return playback(beat, song, random, metronome, kits, SampleUse.none());
+    }
+
+    /**
+     * Playback on {@code kits}, with {@code samples} choosing which sample rows play a sample.
+     * {@link SampleUse#none()} plays every sample row as its General MIDI note.
+     */
+    public static Sequence playback(
+        Beat beat,
+        boolean song,
+        Random random,
+        boolean metronome,
+        Soundbank kits,
+        SampleUse samples
+    ) throws InvalidMidiDataException {
         boolean chance = usesChance(beat, song);
         int passes = playbackPasses(beat, song);
         Random roll = chance ? (random != null ? random : new Random()) : null;
+        SampleUse use = samples == null ? SampleUse.none() : samples;
         if (song && beat.hasChain()) {
-            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true, kits);
+            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true, kits, use);
         }
-        return pattern(beat, roll, passes, metronome, kits);
+        return pattern(beat, roll, passes, metronome, kits, use);
     }
 
     /** Tick length of {@link #playback}, including every pre-rolled pass. */
@@ -170,8 +186,14 @@ public final class SequenceBuilder {
         return beat.playingChance(beat.activeSlot());
     }
 
-    private static Sequence pattern(Beat beat, Random random, int passes, boolean metronome, Soundbank kits)
-        throws InvalidMidiDataException {
+    private static Sequence pattern(
+        Beat beat,
+        Random random,
+        int passes,
+        boolean metronome,
+        Soundbank kits,
+        SampleUse samples
+    ) throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, PPQ);
         Track tempo = sequence.createTrack();
         int steps = beat.stepCount(beat.activeSlot());
@@ -181,7 +203,7 @@ public final class SequenceBuilder {
         tempo.add(new MidiEvent(marker("end"), loop * times));
 
         hits.Track[] tracks = beat.activeTracks();
-        ChannelPlan plan = ChannelPlan.of(beat, List.of(beat.activeSlot()), kits);
+        ChannelPlan plan = ChannelPlan.of(beat, List.of(beat.activeSlot()), kits, samples);
         Track[] midiTracks = new Track[tracks.length];
         for (int i = 0; i < tracks.length; i++) {
             hits.Track track = tracks[i];
@@ -197,7 +219,7 @@ public final class SequenceBuilder {
                 if (midiTracks[i] == null) {
                     continue;
                 }
-                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true, (pass + 1L) * loop, null, plan);
+                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true, (pass + 1L) * loop, null, plan, samples);
             }
         }
         if (metronome) {
@@ -225,6 +247,15 @@ public final class SequenceBuilder {
      * Null keeps the kit number, which is what a MIDI file and an external output do.
      */
     public static Sequence export(Beat beat, ExportOptions options, Soundbank kits) throws InvalidMidiDataException {
+        return export(beat, options, kits, SampleUse.none());
+    }
+
+    /**
+     * File export heard on {@code kits}, with {@code samples} choosing which sample rows play a sample.
+     * Null {@code kits} keeps kit numbers. {@link SampleUse#none()} plays sample rows as General MIDI notes.
+     */
+    public static Sequence export(Beat beat, ExportOptions options, Soundbank kits, SampleUse samples)
+        throws InvalidMidiDataException {
         return arrangement(
             beat,
             options == null ? ExportOptions.matchingPlayback() : options,
@@ -232,8 +263,16 @@ public final class SequenceBuilder {
             1,
             false,
             false,
-            kits
+            kits,
+            samples == null ? SampleUse.none() : samples
         );
+    }
+
+    /** Patterns this export will visit, in letter order. */
+    public static List<Character> exportSlots(Beat beat, ExportOptions options) {
+        ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
+        boolean song = chosen.song() && beat.hasChain();
+        return spanSlots(beat, chosen, song);
     }
 
     private static Sequence arrangement(
@@ -243,7 +282,8 @@ public final class SequenceBuilder {
         int passes,
         boolean metronome,
         boolean clipEnd,
-        Soundbank kits
+        Soundbank kits,
+        SampleUse samples
     ) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
         boolean song = chosen.song() && beat.hasChain();
@@ -261,7 +301,7 @@ public final class SequenceBuilder {
             lengths[s] = sections.get(s).steps();
         }
         List<Character> spanSlots = spanSlots(beat, chosen, song);
-        ChannelPlan plan = ChannelPlan.of(beat, spanSlots, kits);
+        ChannelPlan plan = ChannelPlan.of(beat, spanSlots, kits, samples);
         boolean joined = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
         for (int pass = 0; pass < times; pass++) {
@@ -292,7 +332,8 @@ public final class SequenceBuilder {
                         random,
                         clipEnd ? sequenceEnd : -1,
                         ahead,
-                        plan
+                        plan,
+                        samples
                     );
                 }
             }
@@ -382,6 +423,21 @@ public final class SequenceBuilder {
      */
     static void playChannelState(Receiver receiver, Beat beat, boolean song, long tick, Soundbank kits)
         throws InvalidMidiDataException {
+        playChannelState(receiver, beat, song, tick, kits, SampleUse.none());
+    }
+
+    /**
+     * Pushes the slot sounding at {@code tick} onto an open synth.
+     * {@code samples} selects the sample bank for rows whose sample loaded.
+     */
+    static void playChannelState(
+        Receiver receiver,
+        Beat beat,
+        boolean song,
+        long tick,
+        Soundbank kits,
+        SampleUse samples
+    ) throws InvalidMidiDataException {
         if (receiver == null || beat == null) {
             return;
         }
@@ -391,7 +447,7 @@ public final class SequenceBuilder {
         char slot = song && beat.hasChain()
             ? Chain.place(beat, tick).slot()
             : beat.activeSlot();
-        ChannelPlan plan = ChannelPlan.of(beat, slots, kits);
+        ChannelPlan plan = ChannelPlan.of(beat, slots, kits, samples);
         hits.Track[] tracks = beat.slot(slot);
         for (int row = 0; row < tracks.length; row++) {
             hits.Track track = tracks[row];
@@ -433,10 +489,11 @@ public final class SequenceBuilder {
         Random random,
         long clipTick,
         int[] ahead,
-        ChannelPlan plan
+        ChannelPlan plan,
+        SampleUse samples
     ) throws InvalidMidiDataException {
         List<Placed> notes = placedNotes(
-            beat, track, steps, offset, sectionTicks, random, false, clipTick, ahead
+            beat, track, row, steps, offset, sectionTicks, random, false, clipTick, ahead, samples
         );
         long setupAt = offset;
         for (Placed note : notes) {
@@ -472,24 +529,27 @@ public final class SequenceBuilder {
         boolean wrapStart,
         long clipTick,
         int[] ahead,
-        ChannelPlan plan
+        ChannelPlan plan,
+        SampleUse samples
     ) throws InvalidMidiDataException {
         int channel = plan.channel(track, row);
         emitNotes(midi, channel, placedNotes(
-            beat, track, steps, offset, sectionTicks, random, wrapStart, clipTick, ahead
+            beat, track, row, steps, offset, sectionTicks, random, wrapStart, clipTick, ahead, samples
         ));
     }
 
     private static List<Placed> placedNotes(
         Beat beat,
         hits.Track track,
+        int row,
         int steps,
         long offset,
         long sectionTicks,
         Random random,
         boolean wrapStart,
         long clipTick,
-        int[] ahead
+        int[] ahead,
+        SampleUse samples
     ) {
         int swing = beat.swing();
         boolean legato = track.legato() && track.mode() == TrackMode.NOTE;
@@ -507,7 +567,9 @@ public final class SequenceBuilder {
                 continue;
             }
             play[step] = true;
-            sounding[step] = cell.soundingNote(track.playedNote());
+            boolean sampleFallback = track.mode() == TrackMode.SAMPLE
+                && (samples == null || !samples.plays(track, row));
+            sounding[step] = sampleFallback ? track.note() : cell.soundingNote(track.playedNote());
             velocities[step] = velocity;
             nudges[step] = track.playedNudge(step);
         }

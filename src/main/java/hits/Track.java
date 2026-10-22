@@ -55,6 +55,8 @@ public final class Track {
     private int chorus = UNSET;
     private int cutoff = UNSET;
     private int resonance = UNSET;
+    /** Kept while the row is a drum or a note, and written only in sample mode. */
+    private SampleRef sample;
     private final Step[] steps = new Step[CAPACITY];
 
     public Track(String name, TrackMode mode, int program, int note) {
@@ -62,7 +64,7 @@ public final class Track {
         this.mode = mode;
         this.program = clampProgram(program);
         this.note = Notes.clamp(note);
-        this.gate = mode == TrackMode.DRUM ? 45 : 80;
+        this.gate = mode == TrackMode.NOTE ? 80 : 45;
         this.velocity = 100;
         this.accent = 120;
         for (int i = 0; i < steps.length; i++) {
@@ -100,6 +102,9 @@ public final class Track {
             || resonance != other.resonance) {
             return false;
         }
+        if (mode == TrackMode.SAMPLE && !sameSample(sample, other.sample)) {
+            return false;
+        }
         for (int i = 0; i < CAPACITY; i++) {
             if (!steps[i].sameAs(other.steps[i])) {
                 return false;
@@ -128,6 +133,7 @@ public final class Track {
         copy.chorus = chorus;
         copy.cutoff = cutoff;
         copy.resonance = resonance;
+        copy.sample = sample;
         for (int i = 0; i < steps.length; i++) {
             copy.steps[i] = steps[i].copy();
         }
@@ -150,8 +156,11 @@ public final class Track {
 
     public void setMode(TrackMode mode) {
         this.mode = mode == null ? TrackMode.DRUM : mode;
-        if (this.mode == TrackMode.NOTE) {
+        if (this.mode != TrackMode.DRUM) {
             preset = null;
+        }
+        if (this.mode == TrackMode.SAMPLE && sample == null) {
+            sample = SampleRef.builtin(BuiltinSamples.CLICK, note);
         }
     }
 
@@ -274,11 +283,20 @@ public final class Track {
     }
 
     public void setPreset(PitchedPreset preset) {
-        if (mode == TrackMode.NOTE) {
+        if (mode != TrackMode.DRUM) {
             this.preset = null;
             return;
         }
         this.preset = preset;
+    }
+
+    /** The one-shot this row plays in sample mode. Null until that mode is chosen. */
+    public SampleRef sample() {
+        return sample;
+    }
+
+    public void setSample(SampleRef sample) {
+        this.sample = sample;
     }
 
     /** Cents added to this row. 0 keeps the instrument's own pitch. */
@@ -482,6 +500,9 @@ public final class Track {
     }
 
     public String soundName() {
+        if (mode == TrackMode.SAMPLE) {
+            return sample == null ? "Sample" : sample.label();
+        }
         if (mode == TrackMode.DRUM) {
             if (preset != null) {
                 return preset.label();
@@ -536,6 +557,16 @@ public final class Track {
 
     private static int clampController(int value) {
         return Math.max(0, Math.min(127, value));
+    }
+
+    private static boolean sameSample(SampleRef left, SampleRef right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.same(right);
     }
 
     private static void join(StringBuilder text, String part) {

@@ -14,7 +14,9 @@ import java.util.Map;
  * a track {@code legato} flag (omitted when false), a step {@code nudge} (timing percent, omitted at 0),
  * a track {@code shift} (omitted at 0), a track {@code tune} (cents, omitted at 0),
  * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
- * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent).
+ * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent),
+ * and a track {@code sample} object when {@code mode} is {@code sample}
+ * ({@code path}, {@code root}, {@code start}, {@code oneShot}).
  * Mute and solo are original track fields.
  * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
  * A slot {@code steps} key is written only when that pattern's length differs from the root {@code steps},
@@ -178,6 +180,9 @@ public final class BeatJson {
         if (track.hasResonance()) {
             field(out, 5, "resonance", track.resonance(), true);
         }
+        if (track.mode() == TrackMode.SAMPLE && track.sample() != null) {
+            writeSample(out, track.sample());
+        }
         out.append("          \"steps\": [");
         for (int i = 0; i < Track.CAPACITY; i++) {
             if (i > 0) {
@@ -202,6 +207,15 @@ public final class BeatJson {
         out.append("]\n");
         out.append("        }");
         out.append(comma ? ",\n" : "\n");
+    }
+
+    private static void writeSample(StringBuilder out, SampleRef sample) {
+        indent(out, 5);
+        out.append("\"sample\": {\"path\": \"").append(escape(sample.path()))
+            .append("\", \"root\": ").append(sample.root())
+            .append(", \"start\": ").append(sample.start())
+            .append(", \"oneShot\": ").append(sample.oneShot())
+            .append("},\n");
     }
 
     private static void field(StringBuilder out, int indent, String key, String value, boolean comma) {
@@ -308,6 +322,11 @@ public final class BeatJson {
         if (object.containsKey("resonance") && object.get("resonance") != null) {
             track.setResonance(number(object.get("resonance")));
         }
+        if (object.get("sample") instanceof Map<?, ?> raw) {
+            track.setSample(readSample(asMap(raw)));
+        } else if (track.mode() == TrackMode.SAMPLE) {
+            track.setSample(new SampleRef("", SampleRef.DEFAULT_ROOT, 0, true));
+        }
         List<?> steps = asList(object.get("steps"));
         int count = Math.min(Track.CAPACITY, steps.size());
         for (int i = 0; i < count; i++) {
@@ -328,6 +347,18 @@ public final class BeatJson {
             }
         }
         return track;
+    }
+
+    private static SampleRef readSample(Map<String, Object> object) {
+        String path = object.get("path") instanceof String text ? text : "";
+        int root = object.containsKey("root") && object.get("root") != null
+            ? number(object.get("root"))
+            : SampleRef.DEFAULT_ROOT;
+        int start = object.containsKey("start") && object.get("start") != null
+            ? number(object.get("start"))
+            : 0;
+        boolean oneShot = !object.containsKey("oneShot") || object.get("oneShot") == null || bool(object.get("oneShot"));
+        return new SampleRef(path, root, start, oneShot);
     }
 
     @SuppressWarnings("unchecked")

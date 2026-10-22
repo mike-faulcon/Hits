@@ -18,6 +18,11 @@ final class ExportPlan {
         return stem;
     }
 
+    /** {@code Album-A-as-heard.mid} beside {@code Album-A-as-heard-samples.sf2}. */
+    static Path samplesFont(Path midiPath) {
+        return BeatFiles.samplesFont(midiPath);
+    }
+
     static Path withExtension(Path path, String extension) {
         String suffix = "." + extension;
         if (!path.toString().toLowerCase(Locale.ROOT).endsWith(suffix)) {

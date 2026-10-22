@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 
@@ -52,6 +53,9 @@ final class ExportCommands {
     private final FileDrag wavDrag = new FileDrag();
     private final ExportMemory memory = new ExportMemory();
     private boolean songMode;
+    private Supplier<Path> beatFile = () -> null;
+    /** Null until the MIDI dialog is confirmed. A drag includes the sample bank while this is unset and the beat uses samples. */
+    private Boolean samplesChoice;
 
     ExportCommands(JFrame frame, Editor editor, Player player, BeatsFolder beatsFolder, StatusLine status) {
         this.frame = frame;
@@ -67,11 +71,15 @@ final class ExportCommands {
         }
     }
 
+    void setBeatFile(Supplier<Path> beatFile) {
+        this.beatFile = beatFile == null ? () -> null : beatFile;
+    }
+
     JComponent midiChip() {
         JComponent chip = FileDrag.chip("Drag MIDI");
         chip.setName("dragMidi");
-        chip.setToolTipText("Drag the current pattern into a DAW or a folder. Song mode drags the chain. Uses the current export choices.");
-        midiDrag.install(chip, () -> prepare("mid"), () ->
+        chip.setToolTipText("Drag the current pattern into a DAW or a folder. Song mode drags the chain. Uses the current export choices. A sample beat also drags its SoundFont until that box is unchecked.");
+        midiDrag.installAll(chip, this::prepareMidi, () ->
             status.set("MIDI is ready. Drag the chip into a DAW or a folder."));
         return chip;
     }
@@ -109,7 +117,7 @@ final class ExportCommands {
             return;
         }
         try {
-            BeatFiles.exportMidi(editor.beat(), choice.path(), choice.options());
+            BeatFiles.exportMidi(editor.beat(), choice.path(), choice.options(), beatFile.get(), includeSamples());
             status.set("Exported " + choice.path().getFileName() + ExportPlan.summary(choice.options()));
         } catch (RuntimeException | IOException | javax.sound.midi.InvalidMidiDataException exception) {
             JOptionPane.showMessageDialog(frame, Widgets.message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
@@ -141,7 +149,7 @@ final class ExportCommands {
                     return null;
                 }
             } else {
-                BeatFiles.exportMidi(beat, path, options);
+                BeatFiles.exportMidi(beat, path, options, beatFile.get(), includeSamples());
             }
             if (!Files.isRegularFile(path)) {
                 return null;
@@ -185,7 +193,8 @@ final class ExportCommands {
                     options,
                     bank,
                     this::publishPercent,
-                    this::isCancelled
+                    this::isCancelled,
+                    beatFile.get()
                 );
                 return null;
             }
@@ -288,6 +297,14 @@ final class ExportCommands {
         accessory.add(ignoreMuteSolo);
         accessory.add(both);
         accessory.add(song);
+        JCheckBox samples = new JCheckBox("Companion samples (.sf2)");
+        samples.setName("export-samples");
+        samples.setToolTipText("Write a SoundFont of this beat's samples next to the MIDI file.");
+        boolean midi = "mid".equals(extension);
+        if (midi) {
+            samples.setSelected(includeSamples());
+            accessory.add(samples);
+        }
         accessory.add(Box.createVerticalStrut(6));
         JPanel repeatRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         repeatRow.add(new JLabel("Repeats"));
@@ -296,6 +313,9 @@ final class ExportCommands {
         chooser.setAccessory(accessory);
         if (chooser.showSaveDialog(frame) != JFileChooser.APPROVE_OPTION) {
             return null;
+        }
+        if ("mid".equals(extension)) {
+            samplesChoice = samples.isSelected();
         }
         boolean pair = song.isSelected() ? memory.bothSlots() : both.isSelected();
         int times = (Integer) repeats.getValue();
@@ -310,6 +330,25 @@ final class ExportCommands {
             hasChain
         );
         return new ExportChoice(path, options);
+    }
+
+    private List<Path> prepareMidi() {
+        Path midi = prepare("mid");
+        if (midi == null) {
+            return List.of();
+        }
+        Path font = ExportPlan.samplesFont(midi);
+        if (includeSamples() && Files.isRegularFile(font)) {
+            return List.of(midi, font);
+        }
+        return List.of(midi);
+    }
+
+    private boolean includeSamples() {
+        if (samplesChoice != null) {
+            return samplesChoice;
+        }
+        return editor.beat().hasSamples();
     }
 
     private record ExportChoice(Path path, ExportOptions options) {}

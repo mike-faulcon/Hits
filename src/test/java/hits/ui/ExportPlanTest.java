@@ -22,6 +22,8 @@ class ExportPlanTest {
         assertEquals(already, ExportPlan.withExtension(already, "mid"));
         Path wav = Path.of("/tmp/takes/song");
         assertEquals(Path.of("/tmp/takes/song.wav"), ExportPlan.withExtension(wav, "wav"));
+        Path midi = Path.of("/tmp/takes/Album-A-as-heard.mid");
+        assertEquals(Path.of("/tmp/takes/Album-A-as-heard-samples.sf2"), ExportPlan.samplesFont(midi));
     }
 
     @Test

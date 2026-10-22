@@ -40,6 +40,8 @@ public final class SoundFonts {
 
     /**
      * Loads {@code bank} and then unloads {@code previous}, so a failed load leaves the current sounds.
+     * {@code previous} is only the bank being replaced. A user SoundFont and a sample bank
+     * stay loaded together when each install names only the bank it replaces.
      */
     public static void install(Synthesizer synthesizer, Soundbank bank, Soundbank previous) {
         if (synthesizer == null || !synthesizer.isOpen()) {

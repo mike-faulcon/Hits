@@ -13,6 +13,7 @@ import javax.sound.midi.MidiSystem;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -38,6 +39,11 @@ public final class Player implements AutoCloseable {
     private Path soundFont;
     private String soundFontName;
     private String soundFontNote;
+    private Supplier<Path> beatFile = () -> null;
+    private Soundbank sampleBank;
+    private SampleUse sampleUse = SampleUse.none();
+    private String sampleKey = "";
+    private String sampleWarning;
     private ScheduledFuture<?> noteOff;
     private int auditionChannel = -1;
     private int auditionNote = -1;
@@ -112,6 +118,16 @@ public final class Player implements AutoCloseable {
 
     public String soundFontName() {
         return soundFontName == null ? "" : soundFontName;
+    }
+
+    /** Beat file used to resolve relative sample paths. Null until the beat has been saved. */
+    public void setBeatFile(Supplier<Path> beatFile) {
+        this.beatFile = beatFile == null ? () -> null : beatFile;
+    }
+
+    /** Why a sample could not be read, or null. */
+    public String sampleWarning() {
+        return sampleWarning == null || sampleWarning.isBlank() ? null : sampleWarning;
     }
 
     /**
@@ -279,10 +295,16 @@ public final class Player implements AutoCloseable {
             return;
         }
         Track track = beat.slot(slot)[row];
+        char viewed = Beat.normalizeSlot(slot);
+        SampleUse use = installSamples(beat, List.of(viewed), !isBuiltIn());
         Soundbank kits = soundbank();
-        ChannelPlan plan = ChannelPlan.of(beat, List.of(Beat.normalizeSlot(slot)), kits);
+        ChannelPlan plan = ChannelPlan.of(beat, List.of(viewed), kits, use);
         int channel = plan.channel(track, row);
-        int sounding = Notes.clamp(note);
+        int requested = Notes.clamp(note);
+        if (track.mode() == TrackMode.SAMPLE && !use.plays(track, row)) {
+            requested = track.note();
+        }
+        int sounding = requested;
         try {
             if (noteOff != null) {
                 noteOff.cancel(false);
@@ -367,6 +389,16 @@ public final class Player implements AutoCloseable {
         if (synthesizer != null && soundFont != null) {
             reapplySoundFont();
         }
+        if (synthesizer != null && sampleBank != null) {
+            try {
+                SoundFonts.install(synthesizer, sampleBank, null);
+            } catch (RuntimeException exception) {
+                sampleWarning = exception.getMessage() == null ? "The sample bank did not load." : exception.getMessage();
+                sampleBank = null;
+                sampleUse = SampleUse.none();
+                sampleKey = "";
+            }
+        }
     }
 
     private void reapplySoundFont() {
@@ -413,7 +445,11 @@ public final class Player implements AutoCloseable {
 
     private void load(Beat beat, long position) throws InvalidMidiDataException {
         Soundbank kits = soundbank();
-        var sequence = SequenceBuilder.playback(beat, song, null, metronome, kits);
+        List<Character> slots = song && beat.hasChain()
+            ? Chain.distinctSlots(beat.chain())
+            : List.of(beat.activeSlot());
+        SampleUse use = installSamples(beat, slots, !isBuiltIn());
+        var sequence = SequenceBuilder.playback(beat, song, null, metronome, kits, use);
         sequencer.setSequence(sequence);
         long loop = SequenceBuilder.playbackTicks(beat, song);
         long end = Math.min(loop, sequence.getTickLength());
@@ -428,7 +464,51 @@ public final class Player implements AutoCloseable {
             at = Math.floorMod(position, loop);
             sequencer.setTickPosition(at);
         }
-        SequenceBuilder.playChannelState(receiver(), beat, song, at, kits);
+        SequenceBuilder.playChannelState(receiver(), beat, song, at, kits, use);
+    }
+
+    /**
+     * Rebuilds the sample bank when the path, modification time, or settings change.
+     * An external output does not install a bank. Sample tracks then play their General MIDI note.
+     */
+    private SampleUse installSamples(Beat beat, List<Character> slots, boolean external) {
+        Path file = beatFile.get();
+        if (external) {
+            sampleWarning = blank(SampleLibrary.warningsOnly(beat, file, slots).warning());
+            return SampleUse.none();
+        }
+        String key = SampleLibrary.cacheKey(beat, file, slots);
+        if (key.equals(sampleKey)) {
+            return sampleUse;
+        }
+        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, file, slots);
+        sampleWarning = blank(ready.warning());
+        sampleKey = ready.key() == null ? "" : ready.key();
+        Soundbank next = ready.bank();
+        if (isBuiltIn()) {
+            try {
+                if (next != null) {
+                    SoundFonts.install(synthesizer, next, sampleBank);
+                    sampleBank = next;
+                } else if (sampleBank != null) {
+                    synthesizer.unloadAllInstruments(sampleBank);
+                    sampleBank = null;
+                }
+            } catch (RuntimeException exception) {
+                sampleWarning = exception.getMessage() == null
+                    ? "The sample bank did not load."
+                    : exception.getMessage();
+                sampleBank = null;
+                sampleUse = SampleUse.none();
+                return sampleUse;
+            }
+        }
+        sampleUse = ready.use() == null ? SampleUse.none() : ready.use();
+        return sampleUse;
+    }
+
+    private static String blank(String text) {
+        return text == null || text.isBlank() ? null : text;
     }
 
     @Override

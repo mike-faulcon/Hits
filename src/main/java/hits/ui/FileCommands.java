@@ -3,6 +3,7 @@ package hits.ui;
 import hits.Beat;
 import hits.BeatFiles;
 import hits.Editor;
+import hits.SamplePaths;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -62,8 +63,9 @@ final class FileCommands {
             return;
         }
         try {
-            editor.replace(BeatFiles.load(entry.path()), false);
+            Beat loaded = BeatFiles.load(entry.path());
             session.loaded(entry.path());
+            editor.replace(loaded, false);
             status.set("Loaded " + entry.label());
         } catch (RuntimeException | IOException exception) {
             JOptionPane.showMessageDialog(frame, exception.getMessage(), "Hits", JOptionPane.ERROR_MESSAGE);
@@ -134,6 +136,42 @@ final class FileCommands {
         }
     }
 
+    void collectSamples() {
+        commitDocumentName.run();
+        commitTrackName.run();
+        Path file = session.file();
+        if (file == null) {
+            String safe = BeatFiles.safeName(editor.beat().name());
+            if (safe.isEmpty()) {
+                JOptionPane.showMessageDialog(
+                    frame,
+                    "Add a letter or number to the name before collecting samples.",
+                    "Hits",
+                    JOptionPane.WARNING_MESSAGE
+                );
+                return;
+            }
+            file = beatsFolder.get().resolve(safe + ".json");
+        }
+        Path beatFile = file;
+        try {
+            int[] updated = new int[1];
+            editor.edit(beat -> {
+                try {
+                    updated[0] = SamplePaths.collect(beat, beatFile);
+                } catch (IOException exception) {
+                    throw new IllegalArgumentException(
+                        exception.getMessage() == null ? "Could not collect samples" : exception.getMessage(),
+                        exception
+                    );
+                }
+            });
+            status.set(updated[0] == 0 ? "No samples to collect" : "Collected samples next to " + beatFile.getFileName());
+        } catch (RuntimeException exception) {
+            JOptionPane.showMessageDialog(frame, Widgets.message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
     void chooseBeatsFolder() {
         JFileChooser chooser = new JFileChooser(beatsFolder.get().toFile());
         chooser.setDialogTitle("Beats folder");
@@ -200,6 +238,13 @@ final class FileCommands {
             }
         }
         try {
+            if (editor.beat().hasSamples()) {
+                Path from = session.file();
+                Beat probe = editor.beat().copy();
+                if (SamplePaths.retarget(probe, from, target)) {
+                    editor.edit(beat -> SamplePaths.retarget(beat, from, target));
+                }
+            }
             Path path = BeatFiles.write(editor.beat(), target);
             editor.markClean();
             session.rememberWritten(path);

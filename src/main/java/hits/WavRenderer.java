@@ -47,6 +47,22 @@ public final class WavRenderer {
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException {
+        render(sequence, path, soundbank, null, progress, cancelled);
+    }
+
+    /**
+     * Same render as {@link #render(Sequence, Path, Soundbank, IntConsumer, BooleanSupplier)}.
+     * {@code soundbank} replaces the default bank. {@code samples} is loaded after it and is not
+     * unloaded, so both banks play. Null {@code samples} leaves the sample bank out.
+     */
+    public static void render(
+        Sequence sequence,
+        Path path,
+        Soundbank soundbank,
+        Soundbank samples,
+        IntConsumer progress,
+        BooleanSupplier cancelled
+    ) throws IOException {
         if (path == null) {
             throw new IOException("Choose a file for the WAV export");
         }
@@ -60,6 +76,9 @@ public final class WavRenderer {
             stream = openStream(synthesizer);
             if (soundbank != null) {
                 SoundFonts.install(synthesizer, soundbank, synthesizer.getDefaultSoundbank());
+            }
+            if (samples != null) {
+                SoundFonts.install(synthesizer, samples, null);
             }
             try {
                 receiver = synthesizer.getReceiver();

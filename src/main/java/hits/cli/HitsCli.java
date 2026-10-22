@@ -26,7 +26,8 @@ import java.util.Locale;
 /**
  * Headless commands for rendering and describing a beat.
  * {@code render} and {@code info} do not open a window. They call the same
- * {@link BeatFiles} export methods as the desktop Export buttons, with no SoundFont loaded.
+ * {@link BeatFiles} export methods as the desktop Export buttons. WAV uses the built-in
+ * General MIDI synth plus the beat's sample bank. A user SoundFont is not loaded.
  */
 public final class HitsCli {
     public static final int OK = 0;
@@ -37,12 +38,13 @@ public final class HitsCli {
 
     private static final String USAGE_TEXT = ""
         + "Usage:\n"
-        + "  hits render <beat.json> --out <file.wav|file.mid> [--song]\n"
+        + "  hits render <beat.json> --out <file.wav|file.mid> [--song] [--samples-sf2]\n"
         + "  hits info <beat.json>\n"
         + "\n"
         + "render writes the active pattern once, as heard. --song writes the whole chain.\n"
         + "The output type comes from the extension (.wav, .mid, or .midi).\n"
-        + "WAV uses the built-in General MIDI synth and does not open an audio device.\n"
+        + "WAV uses the built-in General MIDI synth plus the beat's sample bank, and does not open an audio device.\n"
+        + "A user SoundFont is not loaded. --samples-sf2 writes <name>-samples.sf2 beside a MIDI file.\n"
         + "Exit codes: 0 ok, 1 the beat or the render failed, 2 the command line was wrong.\n";
 
     private HitsCli() {}
@@ -131,9 +133,9 @@ public final class HitsCli {
                 Files.createDirectories(parent);
             }
             if (wav) {
-                BeatFiles.exportWav(beat, parsed.out, options, null, null);
+                BeatFiles.exportWav(beat, parsed.out, options, null, null, () -> false, parsed.beat);
             } else {
-                BeatFiles.exportMidi(beat, parsed.out, options);
+                BeatFiles.exportMidi(beat, parsed.out, options, parsed.beat, parsed.samplesSf2);
             }
         } catch (IOException | InvalidMidiDataException | RuntimeException exception) {
             err.println("Could not render " + parsed.out + ": " + detail(exception));
@@ -149,6 +151,14 @@ public final class HitsCli {
             return FAIL;
         }
         out.println("Wrote " + parsed.out.toAbsolutePath());
+        if (parsed.samplesSf2 && midi) {
+            Path companion = BeatFiles.samplesFont(parsed.out);
+            if (Files.isRegularFile(companion)) {
+                out.println("Wrote " + companion.toAbsolutePath());
+            } else {
+                out.println("No samples to write.");
+            }
+        }
         return OK;
     }
 
@@ -339,6 +349,7 @@ public final class HitsCli {
         Path beat = null;
         Path out = null;
         boolean song = false;
+        boolean samplesSf2 = false;
         for (int i = 1; i < args.length; i++) {
             String token = args[i];
             if (token == null) {
@@ -346,6 +357,10 @@ public final class HitsCli {
             }
             if ("--song".equals(token)) {
                 song = true;
+                continue;
+            }
+            if ("--samples-sf2".equals(token)) {
+                samplesSf2 = true;
                 continue;
             }
             if ("--out".equals(token)) {
@@ -369,13 +384,13 @@ public final class HitsCli {
         if (beat == null) {
             return Parsed.error(render ? "render needs a beat file." : "info needs a beat file.");
         }
-        if (!render && (song || out != null)) {
+        if (!render && (song || out != null || samplesSf2)) {
             return Parsed.error("info takes only a beat file.");
         }
         if (render && out == null) {
             return Parsed.error("render needs --out <file.wav|file.mid>.");
         }
-        return new Parsed(beat, out, song, null);
+        return new Parsed(beat, out, song, samplesSf2, null);
     }
 
     private static String extension(Path path) {
@@ -399,9 +414,9 @@ public final class HitsCli {
         return message;
     }
 
-    private record Parsed(Path beat, Path out, boolean song, String error) {
+    private record Parsed(Path beat, Path out, boolean song, boolean samplesSf2, String error) {
         static Parsed error(String message) {
-            return new Parsed(null, null, false, message);
+            return new Parsed(null, null, false, false, message);
         }
     }
 
