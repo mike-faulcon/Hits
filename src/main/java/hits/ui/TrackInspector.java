@@ -115,10 +115,22 @@ final class TrackInspector {
     private final JCheckBox resonanceOn = new JCheckBox("Resonance");
     private final JSlider resonance = Widgets.slider(0, 127, Track.FILTER_NEUTRAL);
     private final JLabel resonanceValue = Widgets.label("—");
+    private final JCheckBox lowCutOn = new JCheckBox("Low cut");
+    private final JSlider lowCut = Widgets.slider(0, Track.LOW_CUT_SLIDER, Track.lowCutSlider(120));
+    private final JLabel lowCutValue = Widgets.label("—");
+    private final JButton slope12 = Widgets.button("12");
+    private final JButton slope24 = Widgets.button("24");
+    private final JSlider presence = Widgets.slider(0, Track.PRESENCE_MAX, 0);
+    private final JLabel presenceValue = Widgets.label("0 dB");
     private final SliderDrag gateDrag;
     private final SliderDrag decayDrag;
     private final SliderDrag cutoffDrag;
     private final SliderDrag resonanceDrag;
+    private final SliderDrag lowCutDrag;
+    private final SliderDrag presenceDrag;
+    /** Slope the buttons show. Kept while Low cut is off so the toggle can be set first. */
+    private int shownSlope = Track.LOW_CUT_SLOPE;
+    private String slopeContext = "";
     private final SliderDrag velocityDrag;
     private final SliderDrag chanceDrag;
     private final SliderDrag accentDrag;
@@ -131,6 +143,8 @@ final class TrackInspector {
         this.decayDrag = new SliderDrag(editor, sync);
         this.cutoffDrag = new SliderDrag(editor, sync);
         this.resonanceDrag = new SliderDrag(editor, sync);
+        this.lowCutDrag = new SliderDrag(editor, sync);
+        this.presenceDrag = new SliderDrag(editor, sync);
         this.velocityDrag = new SliderDrag(editor, sync);
         this.chanceDrag = new SliderDrag(editor, sync);
         this.accentDrag = new SliderDrag(editor, sync);
@@ -253,6 +267,14 @@ final class TrackInspector {
         addRow(panel, constraints, effectRow(cutoffOn, cutoff, cutoffValue, "Low-pass filter, from dull to bright. 64 is the synth's own tone. Off leaves the controller unset, so the sound stays as it is. Built-in synth only. A DAW may ignore this."));
         resonance.setName("resonance");
         addRow(panel, constraints, effectRow(resonanceOn, resonance, resonanceValue, "Filter emphasis. 64 is the synth's own resonance. Off leaves the controller unset. Built-in synth only. A DAW may ignore this."));
+        lowCut.setName("low-cut");
+        lowCutOn.setName("low-cut-on");
+        lowCutValue.setName("low-cut-value");
+        addRow(panel, constraints, lowCutRow());
+        addRow(panel, constraints, slopeRow());
+        presence.setName("presence");
+        presenceValue.setName("presence-value");
+        addRow(panel, constraints, presenceRow());
         addRow(panel, constraints, labeled("Length", "How long the last step of a hit holds, as a percent of that step. A one-step hit uses the whole step this way.", gate, gateValue));
         addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
         addRow(panel, constraints, labeled("Chance", "Percent chance the selected step plays. 100% always plays. Playback rolls each pass. Export uses a fixed seed.", chance, chanceValue));
@@ -287,10 +309,20 @@ final class TrackInspector {
             track.setCutoff(cutoff.getValue());
         });
         resonanceDrag.wire(resonance, beat -> onScreen(beat).setResonance(resonance.getValue()));
+        lowCutDrag.wire(lowCut, beat -> {
+            Track track = onScreen(beat);
+            if (track.hasLowCut()) {
+                track.setLowCut(Track.lowCutHz(lowCut.getValue()), slopeChoice());
+            }
+        });
+        presenceDrag.wire(presence, beat -> onScreen(beat).setPresence(presence.getValue()));
         tuneSemi.addChangeListener(event -> applyTune());
         tuneCents.addChangeListener(event -> applyTune());
         cutoffOn.addActionListener(event -> applyCutoffToggle());
         resonanceOn.addActionListener(event -> applyResonanceToggle());
+        lowCutOn.addActionListener(event -> applyLowCutToggle());
+        slope12.addActionListener(event -> applySlope(Track.LOW_CUT_SLOPE));
+        slope24.addActionListener(event -> applySlope(Track.LOW_CUT_STEEP));
         velocityDrag.wire(velocity, this::applyVelocity);
         chanceDrag.wire(chance, this::applyChance);
         accentDrag.wire(accent, beat -> onScreen(beat).setAccent(accent.getValue()));
@@ -528,6 +560,8 @@ final class TrackInspector {
         showDecay(track);
         showCutoff(track);
         showEffect(resonanceOn, resonance, resonanceValue, track.hasResonance(), track.resonance());
+        showLowCut(track);
+        showPresence(track);
     }
 
     private void applyTune() {
@@ -571,6 +605,42 @@ final class TrackInspector {
         });
     }
 
+    private void applyLowCutToggle() {
+        if (sync.on()) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (lowCutOn.isSelected()) {
+                track.setLowCut(Track.lowCutHz(lowCut.getValue()), slopeChoice());
+            } else {
+                track.clearLowCut();
+            }
+        });
+    }
+
+    private void applySlope(int slope) {
+        if (sync.on()) {
+            return;
+        }
+        shownSlope = slope;
+        Track current = editor.selectedTrack();
+        if (!current.hasLowCut() || current.lowCutSlope() == slope) {
+            paintSlope();
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.hasLowCut()) {
+                track.setLowCut(track.lowCutHz(), slope);
+            }
+        });
+    }
+
+    private int slopeChoice() {
+        return shownSlope;
+    }
+
     private static final String DECAY_TIP = "How long the built-in synth lets the hit ring, from 10% to 200%. "
         + "100% is the instrument's own release and sends nothing. A decay other than 100% replaces the release a pitched preset's length was sending. "
         + "Kick, snare, closed hat, toms, clap, side stick, Woodblock click, and Snare crack ignore it. Snare crack's tail is reverb. "
@@ -612,6 +682,110 @@ final class TrackInspector {
         cutoffOn.setToolTipText(tip);
         cutoff.setToolTipText(tip);
         cutoffValue.setToolTipText(tip);
+    }
+
+    private static final String LOW_CUT_TIP = "High-pass, from 20 Hz to 2 kHz. Off leaves the row as it is. "
+        + "12 or 24 dB per octave. The filter is baked into playback and WAV export. "
+        + "A MIDI file writes the ordinary note and does not carry it.";
+    private static final String LOW_CUT_EXTERNAL = "Low cut and presence play on the built-in synth. "
+        + "This MIDI output uses its own sounds, so the setting is kept and comes back when you choose Built-in synth. "
+        + "A MIDI file does not carry it.";
+    private static final String PRESENCE_TIP = "High shelf above about 3 kHz, from 0 to +12 dB. "
+        + "0 leaves the highs as they are. Playback and WAV export use it. A MIDI file does not.";
+
+    private void showLowCut(Track track) {
+        boolean live = player.isBuiltIn();
+        String context = editor.viewSlot() + ":" + editor.trackIndex();
+        if (!context.equals(slopeContext)) {
+            slopeContext = context;
+            shownSlope = track.hasLowCut() ? track.lowCutSlope() : Track.LOW_CUT_SLOPE;
+        } else if (track.hasLowCut()) {
+            shownSlope = track.lowCutSlope();
+        }
+        lowCutOn.setSelected(track.hasLowCut());
+        boolean on = track.hasLowCut() && live;
+        lowCut.setEnabled(on);
+        slope12.setEnabled(on);
+        slope24.setEnabled(on);
+        lowCutOn.setEnabled(live);
+        if (track.hasLowCut() && !lowCut.getValueIsAdjusting()) {
+            lowCut.setValue(Track.lowCutSlider(track.lowCutHz()));
+        }
+        lowCutValue.setText(track.hasLowCut() ? track.lowCutHz() + " Hz" : "—");
+        paintSlope();
+        String tip = live ? LOW_CUT_TIP : LOW_CUT_EXTERNAL;
+        if (!live && track.hasLowCut()) {
+            tip = "Stored at " + track.lowCutHz() + " Hz, " + track.lowCutSlope() + " dB/oct. " + tip;
+        }
+        lowCutOn.setToolTipText(tip);
+        lowCut.setToolTipText(tip);
+        lowCutValue.setToolTipText(tip);
+        slope12.setToolTipText(tip + " 12 dB per octave.");
+        slope24.setToolTipText(tip + " 24 dB per octave.");
+        lowCutValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
+    }
+
+    private void paintSlope() {
+        Widgets.paintToggle(slope12, shownSlope != Track.LOW_CUT_STEEP);
+        Widgets.paintToggle(slope24, shownSlope == Track.LOW_CUT_STEEP);
+    }
+
+    private void showPresence(Track track) {
+        boolean live = player.isBuiltIn();
+        presence.setEnabled(live);
+        if (!presence.getValueIsAdjusting()) {
+            presence.setValue(track.presence());
+        }
+        presenceValue.setText(track.presence() > 0 ? "+" + track.presence() + " dB" : "0 dB");
+        String tip = live ? PRESENCE_TIP : LOW_CUT_EXTERNAL;
+        presence.setToolTipText(tip);
+        presenceValue.setToolTipText(tip);
+        presenceValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
+    }
+
+    private JPanel lowCutRow() {
+        lowCutOn.setOpaque(false);
+        lowCutOn.setForeground(Theme.TEXT);
+        lowCutOn.setFocusable(false);
+        lowCutValue.setPreferredSize(new Dimension(72, 32));
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        lowCutOn.setPreferredSize(new Dimension(108, 32));
+        lowCutOn.setMinimumSize(new Dimension(96, 28));
+        panel.add(lowCutOn, BorderLayout.WEST);
+        panel.add(lowCut, BorderLayout.CENTER);
+        panel.add(lowCutValue, BorderLayout.EAST);
+        return panel;
+    }
+
+    private JPanel slopeRow() {
+        slope12.setName("low-cut-12");
+        slope24.setName("low-cut-24");
+        Widgets.fix(slope12, 48, 32);
+        Widgets.fix(slope24, 48, 32);
+        JLabel title = Widgets.label("Slope");
+        title.setPreferredSize(new Dimension(108, 32));
+        title.setName("low-cut-slope");
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        panel.add(title, BorderLayout.WEST);
+        panel.add(Widgets.row(slope12, slope24), BorderLayout.CENTER);
+        paintSlope();
+        return panel;
+    }
+
+    private JPanel presenceRow() {
+        JLabel title = Widgets.label("Presence");
+        title.setName("presence-label");
+        title.setPreferredSize(new Dimension(108, 32));
+        presenceValue.setPreferredSize(new Dimension(72, 32));
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        panel.add(title, BorderLayout.WEST);
+        panel.add(presence, BorderLayout.CENTER);
+        panel.add(presenceValue, BorderLayout.EAST);
+        title.setToolTipText(PRESENCE_TIP);
+        return panel;
     }
 
     /** Thumb position when cutoff is turned on. Neutral 64 when this sound's slider includes it. */

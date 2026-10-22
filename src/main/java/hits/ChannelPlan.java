@@ -113,6 +113,9 @@ public final class ChannelPlan {
      * for rows whose sample loaded. Every other sample row plays its General MIDI note.
      */
     public static ChannelPlan of(Beat beat, List<Character> slots, Soundbank kits, SampleUse samples) {
+        if (samples == null) {
+            samples = SampleUse.none();
+        }
         boolean[] needsPrivate = new boolean[Beat.TRACKS];
         boolean[] melodic = new boolean[Beat.TRACKS];
         boolean[] presetRow = new boolean[Beat.TRACKS];
@@ -126,11 +129,13 @@ public final class ChannelPlan {
                         presetRow[row] = true;
                     }
                     shapeRow[row] |= shapeFlags(track);
-                    if (sharesDrumChannel(track, kits)) {
+                    boolean rendered = samples.plays(track, row);
+                    if (!rendered && sharesDrumChannel(track, kits)) {
                         continue;
                     }
                     needsPrivate[row] = true;
-                    if (track.mode() == TrackMode.NOTE
+                    if (rendered
+                        || track.mode() == TrackMode.NOTE
                         || track.mode() == TrackMode.SAMPLE
                         || (track.mode() == TrackMode.DRUM && track.preset() != null)) {
                         melodic[row] = true;
@@ -239,6 +244,13 @@ public final class ChannelPlan {
      * another pattern on the same row reserved a private channel.
      */
     public int channel(Track track, int row) {
+        if (track != null && samples.plays(track, row)) {
+            int reservedChannel = reserved(row);
+            boolean drumOverflow = overflow(row) && track.mode() != TrackMode.SAMPLE;
+            if (reservedChannel >= 0 && !drumOverflow) {
+                return reservedChannel;
+            }
+        }
         if (track != null && sharesDrumChannel(track, kits)) {
             return Gm.DRUM_CHANNEL;
         }
@@ -291,11 +303,19 @@ public final class ChannelPlan {
      */
     public List<ShortMessage> setup(Track track, int channel, int row) throws InvalidMidiDataException {
         List<ShortMessage> messages = new ArrayList<>();
-        if (!sharesDrumChannel(track, kits)) {
+        boolean rendered = samples.plays(track, row);
+        // A low-cut drum still looks like a shared kit drum: no tune, decay, or effect.
+        // Playback has already put it on its own channel so the sample bank can play.
+        // Channel 9 stays pan-only, including when that filtered drum overflowed.
+        if (!sharesDrumChannel(track, kits) || (rendered && channel != Gm.DRUM_CHANNEL)) {
             boolean preset = track.preset() != null && track.mode() == TrackMode.DRUM;
-            if (track.mode() == TrackMode.SAMPLE && samples.plays(track, row)) {
+            // A filtered drum that could not get its own channel stays on the kit note.
+            // Channel 9 would play the sample bank as percussion. A sample row already
+            // accepts that overflow, and keeps doing so.
+            boolean bankVoice = rendered && (track.mode() == TrackMode.SAMPLE || channel != Gm.DRUM_CHANNEL);
+            if (bankVoice) {
                 bankSelect(messages, channel, SampleBank.MIDI_BANK);
-                messages.add(program(channel, Math.max(0, row)));
+                messages.add(program(channel, samples.program(track, row)));
             } else if (track.mode() == TrackMode.SAMPLE) {
                 messages.add(control(channel, 0, Gm.DRUM_BANK));
                 messages.add(control(channel, 32, 0));

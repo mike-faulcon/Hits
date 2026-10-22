@@ -124,7 +124,11 @@ public final class BeatFiles {
         Path beatFile,
         boolean writeSamples
     ) throws IOException, InvalidMidiDataException {
-        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, beatFile, SequenceBuilder.exportSlots(beat, options));
+        // Low cut is not a MIDI controller. The file keeps the ordinary note, and the
+        // companion SoundFont is the unfiltered sample.
+        SampleLibrary.Ready ready = SampleLibrary.prepare(
+            beat, beatFile, SequenceBuilder.exportSlots(beat, options), null, false
+        );
         MidiSystem.write(SequenceBuilder.export(beat, options, null, ready.use()), 1, path.toFile());
         if (writeSamples && ready.sf2() != null && ready.sf2().length > 0) {
             Files.write(samplesFont(path), ready.sf2());
@@ -179,7 +183,9 @@ public final class BeatFiles {
         Path beatFile
     ) throws IOException, InvalidMidiDataException {
         Soundbank playing = soundbank != null ? soundbank : SoundCatalog.builtin();
-        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, beatFile, SequenceBuilder.exportSlots(beat, options));
+        SampleLibrary.Ready ready = SampleLibrary.prepare(
+            beat, beatFile, SequenceBuilder.exportSlots(beat, options), soundbank, true
+        );
         WavRenderer.render(
             SequenceBuilder.export(beat, options, playing, ready.use()),
             path,

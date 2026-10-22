@@ -304,6 +304,13 @@ final class ExportCommands {
         if (midi) {
             samples.setSelected(includeSamples());
             accessory.add(samples);
+            if (editor.beat().hasTone()) {
+                JLabel lowCut = new JLabel("<html>Low cut and presence are not in the MIDI file.<br>Playback and WAV export use them.</html>");
+                lowCut.setName("export-low-cut");
+                lowCut.setToolTipText("MIDI has no high-pass for this synth. The file writes the ordinary note.");
+                accessory.add(Box.createVerticalStrut(6));
+                accessory.add(lowCut);
+            }
         }
         accessory.add(Box.createVerticalStrut(6));
         JPanel repeatRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));

@@ -242,13 +242,21 @@ public final class Player implements AutoCloseable {
      * {@code songMode} follows the chain when the beat has one.
      */
     public void update(Beat beat, boolean songMode) {
+        update(beat, songMode, false);
+    }
+
+    /**
+     * Same as {@link #update(Beat, boolean)}. {@code deferBank} keeps the sample bank
+     * that is already loaded while a slider is still moving, and rebuilds when it settles.
+     */
+    public void update(Beat beat, boolean songMode, boolean deferBank) {
         if (!isOpen() || !sequencer.isRunning()) {
             return;
         }
         long position = sequencer.getTickPosition();
         song = songMode && beat.hasChain();
         try {
-            load(beat, position);
+            load(beat, position, deferBank);
             sequencer.start();
             long loop = SequenceBuilder.playbackTicks(beat, song);
             if (loop > 0) {
@@ -296,7 +304,7 @@ public final class Player implements AutoCloseable {
         }
         Track track = beat.slot(slot)[row];
         char viewed = Beat.normalizeSlot(slot);
-        SampleUse use = installSamples(beat, List.of(viewed), !isBuiltIn());
+        SampleUse use = installSamples(beat, List.of(viewed), !isBuiltIn(), false);
         Soundbank kits = soundbank();
         ChannelPlan plan = ChannelPlan.of(beat, List.of(viewed), kits, use);
         int channel = plan.channel(track, row);
@@ -444,11 +452,15 @@ public final class Player implements AutoCloseable {
     }
 
     private void load(Beat beat, long position) throws InvalidMidiDataException {
+        load(beat, position, false);
+    }
+
+    private void load(Beat beat, long position, boolean deferBank) throws InvalidMidiDataException {
         Soundbank kits = soundbank();
         List<Character> slots = song && beat.hasChain()
             ? Chain.distinctSlots(beat.chain())
             : List.of(beat.activeSlot());
-        SampleUse use = installSamples(beat, slots, !isBuiltIn());
+        SampleUse use = installSamples(beat, slots, !isBuiltIn(), deferBank);
         var sequence = SequenceBuilder.playback(beat, song, null, metronome, kits, use);
         sequencer.setSequence(sequence);
         long loop = SequenceBuilder.playbackTicks(beat, song);
@@ -471,17 +483,21 @@ public final class Player implements AutoCloseable {
      * Rebuilds the sample bank when the path, modification time, or settings change.
      * An external output does not install a bank. Sample tracks then play their General MIDI note.
      */
-    private SampleUse installSamples(Beat beat, List<Character> slots, boolean external) {
+    private SampleUse installSamples(Beat beat, List<Character> slots, boolean external, boolean deferBank) {
         Path file = beatFile.get();
         if (external) {
             sampleWarning = blank(SampleLibrary.warningsOnly(beat, file, slots).warning());
             return SampleUse.none();
         }
-        String key = SampleLibrary.cacheKey(beat, file, slots);
+        Soundbank kits = soundbank();
+        String key = SampleLibrary.cacheKey(beat, file, slots, kits, true);
         if (key.equals(sampleKey)) {
             return sampleUse;
         }
-        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, file, slots);
+        if (deferBank) {
+            return sampleUse;
+        }
+        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, file, slots, kits, true);
         sampleWarning = blank(ready.warning());
         sampleKey = ready.key() == null ? "" : ready.key();
         Soundbank next = ready.bank();

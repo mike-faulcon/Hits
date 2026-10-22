@@ -32,11 +32,17 @@ public final class SampleBank {
     public static final int RELEASE_ONE_SHOT = 8400;
     /** Timecents. About 16 ms, so note-off cuts a choked sample. */
     public static final int RELEASE_CHOKE = -7200;
+    /** Timecents. About 300 ms, so a held note fades instead of clicking off. */
+    public static final int RELEASE_HELD = -2100;
     /** Zeros after each sample so the interpolator can read past the end. */
     private static final int PAD = 46;
 
     private SampleBank() {}
 
+    /**
+     * One preset. {@code loop} holds a sustained note between the inner part of the PCM.
+     * A one-shot never loops. The 7-argument form does not loop, which is every sample row.
+     */
     public record Voice(
         int program,
         String name,
@@ -44,14 +50,26 @@ public final class SampleBank {
         short[] samples,
         int root,
         int start,
-        boolean oneShot
-    ) {}
+        boolean oneShot,
+        boolean loop
+    ) {
+        public Voice(int program, String name, int rate, short[] samples, int root, int start, boolean oneShot) {
+            this(program, name, rate, samples, root, start, oneShot, false);
+        }
+
+        public Voice {
+            if (oneShot) {
+                loop = false;
+            }
+        }
+    }
 
     public static byte[] write(List<Voice> voices) {
         int count = voices == null ? 0 : voices.size();
         ByteArrayOutputStream samples = new ByteArrayOutputStream();
         int[] starts = new int[count];
         int[] ends = new int[count];
+        int[] loopStarts = new int[count];
         int[] loopEnds = new int[count];
         int cursor = 0;
         for (int i = 0; i < count; i++) {
@@ -59,12 +77,21 @@ public final class SampleBank {
             short[] pcm = voice.samples == null ? new short[0] : voice.samples;
             starts[i] = cursor;
             ends[i] = cursor + pcm.length;
-            int loop = Math.min(pcm.length, 32);
-            if (loop < 1) {
-                loop = 1;
+            int loopStart = 0;
+            int loopEnd = Math.min(pcm.length, 32);
+            if (voice.loop() && pcm.length > 128) {
+                loopStart = pcm.length * 2 / 5;
+                loopEnd = pcm.length * 4 / 5;
+                if (loopEnd < loopStart + 32) {
+                    loopEnd = Math.min(pcm.length, loopStart + 32);
+                }
             }
-            loopEnds[i] = Math.min(ends[i], starts[i] + loop);
-            if (loopEnds[i] <= starts[i]) {
+            if (loopEnd < 1) {
+                loopEnd = 1;
+            }
+            loopStarts[i] = starts[i] + loopStart;
+            loopEnds[i] = Math.min(ends[i], starts[i] + loopEnd);
+            if (loopEnds[i] <= loopStarts[i]) {
                 loopEnds[i] = ends[i];
             }
             for (short sample : pcm) {
@@ -79,7 +106,7 @@ public final class SampleBank {
         }
         byte[] info = list("INFO", infoChunks());
         byte[] sdta = list("sdta", chunk("smpl", samples.toByteArray()));
-        byte[] pdta = list("pdta", presetData(voices, starts, ends, loopEnds));
+        byte[] pdta = list("pdta", presetData(voices, starts, ends, loopStarts, loopEnds));
         return riff("sfbk", concat(info, sdta, pdta));
     }
 
@@ -99,7 +126,7 @@ public final class SampleBank {
         );
     }
 
-    private static byte[] presetData(List<Voice> voices, int[] starts, int[] ends, int[] loopEnds) {
+    private static byte[] presetData(List<Voice> voices, int[] starts, int[] ends, int[] loopStarts, int[] loopEnds) {
         int count = voices == null ? 0 : voices.size();
         ByteArrayOutputStream presets = new ByteArrayOutputStream();
         ByteArrayOutputStream presetBags = new ByteArrayOutputStream();
@@ -128,7 +155,7 @@ public final class SampleBank {
                 name(voice.name(), "s" + i),
                 starts[i],
                 ends[i],
-                starts[i],
+                loopStarts[i],
                 loopEnds[i],
                 Math.max(1, voice.rate()),
                 voice.root()
@@ -174,10 +201,11 @@ public final class SampleBank {
                 count++;
             }
         }
-        out.writeBytes(generator(38, voice.oneShot() ? RELEASE_ONE_SHOT : RELEASE_CHOKE));
+        int release = voice.oneShot() ? RELEASE_ONE_SHOT : voice.loop() ? RELEASE_HELD : RELEASE_CHOKE;
+        out.writeBytes(generator(38, release));
         out.writeBytes(generator(43, 0x7F00));
         out.writeBytes(generator(44, 0x7F00));
-        out.writeBytes(generator(54, 0));
+        out.writeBytes(generator(54, voice.loop() ? 1 : 0));
         out.writeBytes(generator(58, Math.max(0, Math.min(127, voice.root()))));
         out.writeBytes(generator(53, sampleIndex));
         return count + 6;
