@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * A chip that starts a copy drag of one existing file.
+ * A chip that starts a copy drag of one or more existing files.
  * The file is written before {@link TransferHandler#exportAsDrag} so the native side
  * can offer {@link DataFlavor#javaFileListFlavor} for a path that is already on disk.
  */
@@ -31,7 +31,7 @@ final class FileDrag {
     private static boolean listening;
     private static boolean leftDown;
 
-    private Path armed;
+    private List<Path> armed = List.of();
     private boolean busy;
     private boolean dragActive;
 
@@ -57,7 +57,7 @@ final class FileDrag {
 
     /** Drops a prepared file when the beat or the export choices change. */
     void disarm() {
-        armed = null;
+        armed = List.of();
     }
 
     /**
@@ -65,8 +65,22 @@ final class FileDrag {
      * {@code held} runs when that dialog outlives the mouse button, so the next drag can use the file.
      */
     void install(JComponent chip, Supplier<Path> prepare, Runnable held) {
+        installAll(chip, () -> {
+            Path path = prepare.get();
+            if (path == null || !Files.isRegularFile(path)) {
+                return List.of();
+            }
+            return List.of(path);
+        }, held);
+    }
+
+    /**
+     * Same gesture as {@link #install}, offering every file {@code prepare} returns.
+     * A MIDI drag can include the companion sample bank.
+     */
+    void installAll(JComponent chip, Supplier<List<Path>> prepare, Runnable held) {
         listenForButton();
-        Path[] ready = new Path[1];
+        List<Path>[] ready = new List[] {List.of()};
         TransferHandler handler = new TransferHandler() {
             @Override
             public int getSourceActions(JComponent component) {
@@ -75,16 +89,20 @@ final class FileDrag {
 
             @Override
             protected Transferable createTransferable(JComponent component) {
-                if (ready[0] == null) {
+                if (ready[0].isEmpty()) {
                     return null;
                 }
-                return files(List.of(ready[0].toFile()));
+                List<File> offered = new ArrayList<>();
+                for (Path path : ready[0]) {
+                    offered.add(path.toFile());
+                }
+                return files(offered);
             }
 
             @Override
             protected void exportDone(JComponent source, Transferable data, int action) {
                 dragActive = false;
-                ready[0] = null;
+                ready[0] = List.of();
             }
         };
         chip.setTransferHandler(handler);
@@ -96,30 +114,30 @@ final class FileDrag {
                 }
                 busy = true;
                 try {
-                    Path path = armed;
-                    if (path == null || !Files.isRegularFile(path)) {
-                        path = prepare.get();
+                    List<Path> paths = armed;
+                    if (!present(paths)) {
+                        paths = prepare.get();
                     }
-                    if (path == null || !Files.isRegularFile(path)) {
-                        armed = null;
+                    if (!present(paths)) {
+                        armed = List.of();
                         return;
                     }
-                    // Keep it until the beat or the export choices change. A second drag
+                    // Keep them until the beat or the export choices change. A second drag
                     // then skips rendering, which matters after the WAV progress window.
-                    armed = path;
+                    armed = paths;
                     if (!leftDown) {
                         if (held != null) {
                             held.run();
                         }
                         return;
                     }
-                    ready[0] = path;
+                    ready[0] = paths;
                     dragActive = true;
                     try {
                         handler.exportAsDrag(chip, event, TransferHandler.COPY);
                     } catch (InvalidDnDOperationException exception) {
                         dragActive = false;
-                        ready[0] = null;
+                        ready[0] = List.of();
                         if (held != null) {
                             held.run();
                         }
@@ -128,7 +146,7 @@ final class FileDrag {
                     // when exportAsDrag returns, the chip must still accept the next drag.
                     if (!leftDown) {
                         dragActive = false;
-                        ready[0] = null;
+                        ready[0] = List.of();
                     }
                 } finally {
                     busy = false;
@@ -137,6 +155,18 @@ final class FileDrag {
         };
         chip.addMouseListener(gesture);
         chip.addMouseMotionListener(gesture);
+    }
+
+    private static boolean present(List<Path> paths) {
+        if (paths == null || paths.isEmpty()) {
+            return false;
+        }
+        for (Path path : paths) {
+            if (path == null || !Files.isRegularFile(path)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** The file list Swing hands to a DAW or a file manager. */

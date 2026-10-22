@@ -55,6 +55,8 @@ public final class Track {
     private int chorus = UNSET;
     private int cutoff = UNSET;
     private int resonance = UNSET;
+    /** Kept while the row is a drum or a note, and written only in sample mode. */
+    private SampleRef sample;
     private final Step[] steps = new Step[CAPACITY];
 
     public Track(String name, TrackMode mode, int program, int note) {
@@ -62,7 +64,7 @@ public final class Track {
         this.mode = mode;
         this.program = clampProgram(program);
         this.note = Notes.clamp(note);
-        this.gate = mode == TrackMode.DRUM ? 45 : 80;
+        this.gate = mode == TrackMode.NOTE ? 80 : 45;
         this.velocity = 100;
         this.accent = 120;
         for (int i = 0; i < steps.length; i++) {
@@ -100,6 +102,9 @@ public final class Track {
             || resonance != other.resonance) {
             return false;
         }
+        if (mode == TrackMode.SAMPLE && !sameSample(sample, other.sample)) {
+            return false;
+        }
         for (int i = 0; i < CAPACITY; i++) {
             if (!steps[i].sameAs(other.steps[i])) {
                 return false;
@@ -128,6 +133,7 @@ public final class Track {
         copy.chorus = chorus;
         copy.cutoff = cutoff;
         copy.resonance = resonance;
+        copy.sample = sample;
         for (int i = 0; i < steps.length; i++) {
             copy.steps[i] = steps[i].copy();
         }
@@ -150,8 +156,11 @@ public final class Track {
 
     public void setMode(TrackMode mode) {
         this.mode = mode == null ? TrackMode.DRUM : mode;
-        if (this.mode == TrackMode.NOTE) {
+        if (this.mode != TrackMode.DRUM) {
             preset = null;
+        }
+        if (this.mode == TrackMode.SAMPLE && sample == null) {
+            sample = SampleRef.builtin(BuiltinSamples.CLICK, note);
         }
     }
 
@@ -274,11 +283,20 @@ public final class Track {
     }
 
     public void setPreset(PitchedPreset preset) {
-        if (mode == TrackMode.NOTE) {
+        if (mode != TrackMode.DRUM) {
             this.preset = null;
             return;
         }
         this.preset = preset;
+    }
+
+    /** The one-shot this row plays in sample mode. Null until that mode is chosen. */
+    public SampleRef sample() {
+        return sample;
+    }
+
+    public void setSample(SampleRef sample) {
+        this.sample = sample;
     }
 
     /** Cents added to this row. 0 keeps the instrument's own pitch. */
@@ -347,8 +365,16 @@ public final class Track {
      * Measured at controller 0, 64, and 127: kick, snare, closed hat, toms, clap, side stick,
      * Woodblock click, and Snare crack (and the timpani and woodblock programs) do not move.
      * Open hat, crash, ride, rimshot, and the other measured notes do.
+     * <p>
+     * A sample row does. Its SoundFont voice sets a volume-envelope release, and Gervill adds
+     * CC 72 on top of that, so one-shot and choke both follow the control. A missing file falls
+     * back to a drum note, which may ignore CC 72, but the row stays a sample and the control
+     * stays on. The stored percent is kept either way.
      */
     public boolean decayApplies() {
+        if (mode == TrackMode.SAMPLE) {
+            return true;
+        }
         if (mode == TrackMode.NOTE) {
             return !releaseIgnoredProgram(program);
         }
@@ -381,8 +407,13 @@ public final class Track {
      * the slider sits at the nearest end until it is moved.
      * Kit drums move from 0 up to about 56. Most notes move from about 32 to 80.
      * Bass programs 32–39 stay closed through about 58.
+     * A sample row starts at 0. Its voice has no filter of its own, so the dark end of
+     * Gervill's brightness controller is where the sample changes.
      */
     public static int cutoffSliderMin(Track track) {
+        if (track != null && track.mode() == TrackMode.SAMPLE) {
+            return 0;
+        }
         if (track != null && track.mode() == TrackMode.NOTE && bassProgram(track.program())) {
             return 58;
         }
@@ -396,8 +427,14 @@ public final class Track {
      * Highest cutoff controller the slider offers. Above this the centroid stops rising:
      * about 56 for kit drums, 80 for most notes, and 86 for the bass programs.
      * On Syn Bass the centroid peaks near 86 and turns down by 90.
+     * A sample row stops at {@link #FILTER_NEUTRAL}. Gervill's default filter is already
+     * open there (about 20 kHz), and a higher controller does not brighten the sample.
+     * Turning the filter on therefore starts at the sample's own tone.
      */
     public static int cutoffSliderMax(Track track) {
+        if (track != null && track.mode() == TrackMode.SAMPLE) {
+            return FILTER_NEUTRAL;
+        }
         if (track != null && track.mode() == TrackMode.NOTE && bassProgram(track.program())) {
             return 86;
         }
@@ -557,6 +594,9 @@ public final class Track {
     }
 
     public String soundName() {
+        if (mode == TrackMode.SAMPLE) {
+            return sample == null ? "Sample" : sample.label();
+        }
         if (mode == TrackMode.DRUM) {
             if (preset != null) {
                 return preset.label();
@@ -632,6 +672,16 @@ public final class Track {
 
     private static int clampController(int value) {
         return Math.max(0, Math.min(127, value));
+    }
+
+    private static boolean sameSample(SampleRef left, SampleRef right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.same(right);
     }
 
     private static void join(StringBuilder text, String part) {

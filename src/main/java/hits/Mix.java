@@ -80,7 +80,16 @@ public final class Mix {
             && left.playedNote() == right.playedNote()
             && left.bank() == right.bank()
             && left.kit() == right.kit()
-            && left.preset() == right.preset();
+            && left.preset() == right.preset()
+            && sampleKey(left).equals(sampleKey(right));
+    }
+
+    /** Path of a sample row. Drum and note rows share an empty key so they still match each other. */
+    private static String sampleKey(Track track) {
+        if (track.mode() != TrackMode.SAMPLE || track.sample() == null) {
+            return "";
+        }
+        return track.sample().path();
     }
 
     /**

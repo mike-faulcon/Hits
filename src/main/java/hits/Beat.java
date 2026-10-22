@@ -315,7 +315,20 @@ public final class Beat {
             || hasNoteLength()
             || hasNudge()
             || hasSoundChoice()
-            || hasShape();
+            || hasShape()
+            || hasSamples();
+    }
+
+    /** A sample track in any pattern. The sample object is version 2. */
+    public boolean hasSamples() {
+        for (Track[] slot : slots) {
+            for (Track track : slot) {
+                if (track.mode() == TrackMode.SAMPLE) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Tune, decay, or a send or filter, in any pattern. */

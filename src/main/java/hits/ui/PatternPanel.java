@@ -3,12 +3,15 @@ package hits.ui;
 import hits.Beat;
 import hits.Editor;
 import hits.NoteSpan;
+import hits.SampleRef;
 import hits.Step;
 import hits.Track;
+import hits.TrackMode;
 
 import javax.swing.JPanel;
 import javax.swing.Scrollable;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -20,8 +23,12 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.datatransfer.DataFlavor;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
+import java.util.List;
+import java.util.Locale;
 
 /** Track names, mute, solo, the step grid, and a velocity lane for the selected track. */
 final class PatternPanel extends JPanel implements Scrollable {
@@ -62,6 +69,69 @@ final class PatternPanel extends JPanel implements Scrollable {
         };
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
+        setTransferHandler(wavDrop());
+    }
+
+    private TransferHandler wavDrop() {
+        return new TransferHandler() {
+            @Override
+            public boolean canImport(TransferSupport support) {
+                if (!support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                    return false;
+                }
+                if (support.getDropLocation() == null) {
+                    return true;
+                }
+                return metrics().rowAt(support.getDropLocation().getDropPoint().y) >= 0;
+            }
+
+            @Override
+            public boolean importData(TransferSupport support) {
+                if (!canImport(support)) {
+                    return false;
+                }
+                try {
+                    Object data = support.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+                    if (!(data instanceof List<?> files)) {
+                        return false;
+                    }
+                    File wav = null;
+                    for (Object item : files) {
+                        if (item instanceof File file && isWav(file)) {
+                            wav = file;
+                            break;
+                        }
+                    }
+                    if (wav == null || support.getDropLocation() == null) {
+                        return false;
+                    }
+                    int row = metrics().rowAt(support.getDropLocation().getDropPoint().y);
+                    if (row < 0) {
+                        return false;
+                    }
+                    String path = wav.toPath().toAbsolutePath().normalize().toString();
+                    editor.selectTrack(row);
+                    editor.edit(beat -> {
+                        Track track = beat.slot(editor.viewSlot())[row];
+                        track.setMode(TrackMode.SAMPLE);
+                        SampleRef sample = track.sample();
+                        if (sample == null) {
+                            track.setSample(new SampleRef(path, track.note(), 0, true));
+                        } else {
+                            track.setSample(sample.withPath(path));
+                        }
+                    });
+                    return true;
+                } catch (Exception exception) {
+                    return false;
+                }
+            }
+        };
+    }
+
+    private static boolean isWav(File file) {
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        return name.endsWith(".wav") || name.endsWith(".wave");
     }
 
     void setPlayhead(int step) {

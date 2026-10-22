@@ -163,6 +163,13 @@ class ControlRetest {
         assertTrue(new Track("Bass", TrackMode.NOTE, 38, 35).decayApplies());
         assertFalse(new Track("Timpani", TrackMode.NOTE, 47, 60).decayApplies());
         assertFalse(new Track("Wood", TrackMode.NOTE, 115, 60).decayApplies());
+
+        Track sample = new Track("Hit", TrackMode.SAMPLE, 0, 38);
+        assertTrue(sample.decayApplies(), "a sample uses Gervill's envelope");
+        assertEquals(null, sample.decayNote());
+        assertEquals(0, Track.cutoffSliderMin(sample));
+        assertEquals(Track.FILTER_NEUTRAL, Track.cutoffSliderMax(sample));
+        assertEquals(56, Track.cutoffSliderMax(drum(38)));
     }
 
     @Test

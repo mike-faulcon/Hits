@@ -1,12 +1,15 @@
 package hits.ui;
 
 import hits.Beat;
+import hits.BuiltinSamples;
 import hits.ChannelPlan;
 import hits.Editor;
 import hits.Gm;
 import hits.Notes;
 import hits.PitchedPreset;
 import hits.Player;
+import hits.SamplePaths;
+import hits.SampleRef;
 import hits.SoundCatalog;
 import hits.Step;
 import hits.Track;
@@ -17,11 +20,13 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.Scrollable;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingConstants;
@@ -29,6 +34,7 @@ import javax.sound.midi.Soundbank;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -36,8 +42,10 @@ import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /** Track name, sound, length, hold, nudge, volume, chance, loud hit, mode, step pitch, and pattern length. */
 final class TrackInspector {
@@ -68,6 +76,18 @@ final class TrackInspector {
     private final JLabel accentValue = Widgets.label("120");
     private final JButton drumMode = Widgets.button("Drum");
     private final JButton noteMode = Widgets.button("Note");
+    private final JButton sampleMode = Widgets.button("Sample");
+    private final JComboBox<String> samplePicker = new JComboBox<>();
+    private final JLabel sampleWarning = Widgets.label(" ");
+    private final JSpinner sampleRoot = new JSpinner(new SpinnerNumberModel(SampleRef.DEFAULT_ROOT, 0, 127, 1));
+    private final JLabel sampleRootName = Widgets.label(Notes.name(SampleRef.DEFAULT_ROOT));
+    private final JSpinner sampleStart = new JSpinner(new SpinnerNumberModel(0, 0, 1_000_000, 1));
+    private final JButton oneShot = Widgets.button("One-shot");
+    private final JButton choke = Widgets.button("Choke");
+    private final JButton collectSamples = Widgets.button("Collect samples");
+    private Runnable collectAction = () -> {};
+    private Supplier<Path> beatFile = () -> null;
+    private boolean choosingSample;
     private final JButton steps16 = Widgets.button("16 steps");
     private final JButton steps32 = Widgets.button("32 steps");
     private final JSpinner patternSteps = new JSpinner(new SpinnerNumberModel(16, Beat.MIN_STEPS, Beat.MAX_STEPS, 1));
@@ -118,6 +138,15 @@ final class TrackInspector {
 
     void onShuffle(Runnable action) {
         shuffleTrack = action;
+    }
+
+    void onCollect(Runnable action) {
+        collectAction = action == null ? () -> {} : action;
+    }
+
+    /** Beat file used to resolve a relative sample and to explain a missing file. */
+    void setBeatFile(Supplier<Path> beatFile) {
+        this.beatFile = beatFile == null ? () -> null : beatFile;
     }
 
     JPanel component() {
@@ -207,6 +236,7 @@ final class TrackInspector {
         soundPicker.setOpaque(false);
         soundPicker.add(drums, "drum");
         soundPicker.add(programs, "note");
+        soundPicker.add(sampleCard(), "sample");
         addRow(panel, constraints, soundPicker);
         addRow(panel, constraints, kits);
         addRow(panel, constraints, kitNote);
@@ -230,7 +260,8 @@ final class TrackInspector {
         addRow(panel, constraints, Widgets.label("Mode"));
         drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
         noteMode.setToolTipText("One pitched instrument for the whole track.");
-        addRow(panel, constraints, Widgets.row(drumMode, noteMode));
+        sampleMode.setToolTipText("A one-shot WAV, played through the built-in synth. Tune, decay, and effects still apply.");
+        addRow(panel, constraints, Widgets.row(drumMode, noteMode, sampleMode));
         shuffle.setToolTipText("New hits on this track. The sound stays. Undo puts the old hits back.");
         shuffle.addActionListener(event -> shuffleTrack.run());
         addRow(panel, constraints, shuffle);
@@ -265,6 +296,13 @@ final class TrackInspector {
         accentDrag.wire(accent, beat -> onScreen(beat).setAccent(accent.getValue()));
         drumMode.addActionListener(event -> setMode(TrackMode.DRUM));
         noteMode.addActionListener(event -> setMode(TrackMode.NOTE));
+        sampleMode.addActionListener(event -> setMode(TrackMode.SAMPLE));
+        samplePicker.addActionListener(event -> chooseSample());
+        sampleRoot.addChangeListener(event -> applySampleRoot());
+        sampleStart.addChangeListener(event -> applySampleStart());
+        oneShot.addActionListener(event -> applyOneShot(true));
+        choke.addActionListener(event -> applyOneShot(false));
+        collectSamples.addActionListener(event -> collectAction.run());
         steps16.addActionListener(event -> setPatternLength(16));
         steps32.addActionListener(event -> setPatternLength(32));
         patternSteps.addChangeListener(event -> {
@@ -406,7 +444,8 @@ final class TrackInspector {
         noteValue.setToolTipText(track.tune() == 0
             ? "Pitch of this row."
             : "Pitch of this row, including tune: " + heading + ".");
-        ((CardLayout) soundPicker.getLayout()).show(soundPicker, track.mode() == TrackMode.DRUM ? "drum" : "note");
+        ((CardLayout) soundPicker.getLayout()).show(soundPicker, soundCard(track.mode()));
+        showSample(track);
         refillDrums(track);
         refillKits(track);
         selectProgram(track);
@@ -448,6 +487,7 @@ final class TrackInspector {
         accentValue.setText(Integer.toString(track.accent()));
         Widgets.paintToggle(drumMode, track.mode() == TrackMode.DRUM);
         Widgets.paintToggle(noteMode, track.mode() == TrackMode.NOTE);
+        Widgets.paintToggle(sampleMode, track.mode() == TrackMode.SAMPLE);
         int length = beat.stepCount(editor.viewSlot());
         Widgets.paintToggle(steps16, length == 16);
         Widgets.paintToggle(steps32, length == 32);
@@ -534,6 +574,7 @@ final class TrackInspector {
     private static final String DECAY_TIP = "How long the built-in synth lets the hit ring, from 10% to 200%. "
         + "100% is the instrument's own release and sends nothing. A decay other than 100% replaces the release a pitched preset's length was sending. "
         + "Kick, snare, closed hat, toms, clap, side stick, Woodblock click, and Snare crack ignore it. Snare crack's tail is reverb. "
+        + "A sample row uses it, because the SoundFont envelope follows this control even when a missing file falls back to the drum note. "
         + "Built-in synth only. A DAW may ignore this.";
 
     private void showDecay(Track track) {
@@ -788,6 +829,216 @@ final class TrackInspector {
             return;
         }
         editor.edit(beat -> beat.setSlotSteps(slot, steps));
+    }
+
+    private JPanel sampleCard() {
+        samplePicker.setName("sample-picker");
+        samplePicker.setToolTipText("A built-in one-shot, or a WAV file. Drop a WAV on the row to use it.");
+        sampleWarning.setName("sample-warning");
+        sampleWarning.setForeground(Theme.MUTED);
+        sampleRoot.setName("sample-root");
+        sampleRoot.setToolTipText("The MIDI note that plays this recording at its own speed.");
+        sampleStart.setName("sample-start");
+        sampleStart.setToolTipText("How many sample frames to skip before the hit.");
+        oneShot.setName("sample-oneshot");
+        oneShot.setToolTipText("Play the whole recording. Note-off does not cut it.");
+        choke.setName("sample-choke");
+        choke.setToolTipText("Note-off and the step length cut the sample.");
+        collectSamples.setName("collect-samples");
+        collectSamples.setToolTipText("Copy every sample this beat uses into a folder next to the beat.");
+        JPanel card = new JPanel(new GridBagLayout());
+        card.setOpaque(false);
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.anchor = GridBagConstraints.WEST;
+        constraints.insets = new Insets(0, 0, 6, 0);
+        card.add(samplePicker, constraints);
+        constraints.gridy++;
+        card.add(sampleWarning, constraints);
+        constraints.gridy++;
+        card.add(sampleSpin("Root", sampleRoot, sampleRootName), constraints);
+        constraints.gridy++;
+        card.add(sampleSpin("Start", sampleStart, Widgets.label("frames")), constraints);
+        constraints.gridy++;
+        card.add(Widgets.row(oneShot, choke), constraints);
+        constraints.gridy++;
+        constraints.insets = new Insets(0, 0, 0, 0);
+        card.add(collectSamples, constraints);
+        return card;
+    }
+
+    private static JPanel sampleSpin(String label, JSpinner spinner, JLabel extra) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        row.add(Widgets.label(label));
+        row.add(spinner);
+        row.add(extra);
+        return row;
+    }
+
+    private static String soundCard(TrackMode mode) {
+        if (mode == TrackMode.NOTE) {
+            return "note";
+        }
+        if (mode == TrackMode.SAMPLE) {
+            return "sample";
+        }
+        return "drum";
+    }
+
+    private void showSample(Track track) {
+        SampleRef sample = track.sample();
+        boolean sampleModeOn = track.mode() == TrackMode.SAMPLE && sample != null;
+        choosingSample = true;
+        samplePicker.removeAllItems();
+        samplePicker.addItem("808");
+        samplePicker.addItem("Click");
+        samplePicker.addItem("Snap");
+        int select = 1;
+        if (sampleModeOn) {
+            String path = sample.path();
+            if (BuiltinSamples.EIGHT_OH_EIGHT.equals(path)) {
+                select = 0;
+            } else if (BuiltinSamples.SNAP.equals(path)) {
+                select = 2;
+            } else if (BuiltinSamples.CLICK.equals(path) || path.isBlank()) {
+                select = 1;
+            } else {
+                samplePicker.addItem(sample.label());
+                select = 3;
+            }
+        }
+        samplePicker.addItem("Choose WAV…");
+        samplePicker.setSelectedIndex(select);
+        choosingSample = false;
+        String problem = sampleModeOn ? SamplePaths.problem(track, beatFile.get()) : null;
+        sampleWarning.setText(problem == null ? " " : problem);
+        sampleWarning.setVisible(problem != null);
+        if (sampleModeOn && !sampleRoot.getValue().equals(sample.root())) {
+            sampleRoot.setValue(sample.root());
+        }
+        sampleRootName.setText(Notes.name(((Number) sampleRoot.getValue()).intValue()));
+        if (sampleModeOn && !sampleStart.getValue().equals(sample.start())) {
+            sampleStart.setValue(sample.start());
+        }
+        boolean shot = !sampleModeOn || sample.oneShot();
+        Widgets.paintToggle(oneShot, shot);
+        Widgets.paintToggle(choke, !shot);
+    }
+
+    private void chooseSample() {
+        if (sync.on() || choosingSample || editor.selectedTrack().mode() != TrackMode.SAMPLE) {
+            return;
+        }
+        int index = samplePicker.getSelectedIndex();
+        int last = samplePicker.getItemCount() - 1;
+        if (index < 0 || index == last) {
+            if (index == last) {
+                chooseWav();
+            }
+            return;
+        }
+        String label = samplePicker.getItemAt(index);
+        String path = switch (label) {
+            case "808" -> BuiltinSamples.EIGHT_OH_EIGHT;
+            case "Click" -> BuiltinSamples.CLICK;
+            case "Snap" -> BuiltinSamples.SNAP;
+            default -> null;
+        };
+        if (path == null) {
+            return;
+        }
+        SampleRef current = editor.selectedTrack().sample();
+        if (current != null && path.equals(current.path())) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            SampleRef sample = track.sample();
+            if (sample == null) {
+                track.setSample(SampleRef.builtin(path, track.note()));
+            } else {
+                track.setSample(sample.withPath(path));
+            }
+        });
+        auditionRow();
+    }
+
+    private void chooseWav() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Sample");
+        chooser.setFileFilter(new FileNameExtensionFilter("WAV audio", "wav", "wave"));
+        java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(samplePicker);
+        if (chooser.showOpenDialog(window) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
+            showSample(editor.selectedTrack());
+            return;
+        }
+        String path = chooser.getSelectedFile().toPath().toAbsolutePath().normalize().toString();
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            SampleRef sample = track.sample();
+            if (sample == null) {
+                track.setSample(new SampleRef(path, track.note(), 0, true));
+            } else {
+                track.setSample(sample.withPath(path));
+            }
+        });
+        auditionRow();
+    }
+
+    private void applySampleRoot() {
+        if (sync.on() || editor.selectedTrack().mode() != TrackMode.SAMPLE) {
+            return;
+        }
+        int root = ((Number) sampleRoot.getValue()).intValue();
+        sampleRootName.setText(Notes.name(root));
+        SampleRef current = editor.selectedTrack().sample();
+        if (current == null || current.root() == root) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.sample() != null) {
+                track.setSample(track.sample().withRoot(root));
+            }
+        });
+    }
+
+    private void applySampleStart() {
+        if (sync.on() || editor.selectedTrack().mode() != TrackMode.SAMPLE) {
+            return;
+        }
+        int start = ((Number) sampleStart.getValue()).intValue();
+        SampleRef current = editor.selectedTrack().sample();
+        if (current == null || current.start() == start) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.sample() != null) {
+                track.setSample(track.sample().withStart(start));
+            }
+        });
+    }
+
+    private void applyOneShot(boolean oneShotMode) {
+        if (sync.on() || editor.selectedTrack().mode() != TrackMode.SAMPLE) {
+            return;
+        }
+        SampleRef current = editor.selectedTrack().sample();
+        if (current == null || current.oneShot() == oneShotMode) {
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.sample() != null) {
+                track.setSample(track.sample().withOneShot(oneShotMode));
+            }
+        });
+        auditionRow();
     }
 
     private void setMode(TrackMode mode) {

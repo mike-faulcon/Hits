@@ -10,9 +10,9 @@ import java.util.List;
  * Which MIDI channel a row uses, stable for every pattern in an export.
  * Center drums with no kit, bank, pitched preset, tune, decay, or effect share channel 9.
  * Every other row gets a channel of its own from {@link #POOL}. Channel 15 is last
- * in that pool because the metronome already uses it. Notes and pitched presets
+ * in that pool because the metronome already uses it. Notes, sample tracks, and pitched presets
  * are placed before drums, so a drum is the row that falls back to channel 9
- * when the pool runs out.
+ * when the pool runs out. A sample track never shares channel 9.
  */
 public final class ChannelPlan {
     /**
@@ -53,13 +53,23 @@ public final class ChannelPlan {
     private final int[] shapeRow;
     /** Bank used to decide whether a kit program really exists. Null keeps the stored kit. */
     private final Soundbank kits;
+    /** Which sample rows actually play a sample. Null or {@link SampleUse#none()} falls back. */
+    private final SampleUse samples;
 
-    private ChannelPlan(int[] reserved, boolean[] overflow, boolean[] presetRow, int[] shapeRow, Soundbank kits) {
+    private ChannelPlan(
+        int[] reserved,
+        boolean[] overflow,
+        boolean[] presetRow,
+        int[] shapeRow,
+        Soundbank kits,
+        SampleUse samples
+    ) {
         this.reserved = reserved;
         this.overflow = overflow;
         this.presetRow = presetRow;
         this.shapeRow = shapeRow;
         this.kits = kits;
+        this.samples = samples == null ? SampleUse.none() : samples;
     }
 
     /**
@@ -95,6 +105,14 @@ public final class ChannelPlan {
      * is not actually in that bank. Null keeps every stored kit number.
      */
     public static ChannelPlan of(Beat beat, List<Character> slots, Soundbank kits) {
+        return of(beat, slots, kits, SampleUse.none());
+    }
+
+    /**
+     * Same plan as {@link #of(Beat, List, Soundbank)}. {@code samples} selects the sample bank
+     * for rows whose sample loaded. Every other sample row plays its General MIDI note.
+     */
+    public static ChannelPlan of(Beat beat, List<Character> slots, Soundbank kits, SampleUse samples) {
         boolean[] needsPrivate = new boolean[Beat.TRACKS];
         boolean[] melodic = new boolean[Beat.TRACKS];
         boolean[] presetRow = new boolean[Beat.TRACKS];
@@ -112,14 +130,16 @@ public final class ChannelPlan {
                         continue;
                     }
                     needsPrivate[row] = true;
-                    if (track.mode() == TrackMode.NOTE || (track.mode() == TrackMode.DRUM && track.preset() != null)) {
+                    if (track.mode() == TrackMode.NOTE
+                        || track.mode() == TrackMode.SAMPLE
+                        || (track.mode() == TrackMode.DRUM && track.preset() != null)) {
                         melodic[row] = true;
                     }
                 }
             }
         }
         ChannelPlan assigned = assign(Beat.TRACKS, needsPrivate, melodic);
-        return new ChannelPlan(assigned.reserved, assigned.overflow, presetRow, shapeRow, kits);
+        return new ChannelPlan(assigned.reserved, assigned.overflow, presetRow, shapeRow, kits, samples);
     }
 
     private static int shapeFlags(Track track) {
@@ -161,7 +181,7 @@ public final class ChannelPlan {
         boolean[] taken = new boolean[16];
         place(reserved, overflow, taken, needsPrivate, melodic, true);
         place(reserved, overflow, taken, needsPrivate, melodic, false);
-        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null);
+        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none());
     }
 
     private static void place(
@@ -273,7 +293,14 @@ public final class ChannelPlan {
         List<ShortMessage> messages = new ArrayList<>();
         if (!sharesDrumChannel(track, kits)) {
             boolean preset = track.preset() != null && track.mode() == TrackMode.DRUM;
-            if (preset) {
+            if (track.mode() == TrackMode.SAMPLE && samples.plays(track, row)) {
+                bankSelect(messages, channel, SampleBank.MIDI_BANK);
+                messages.add(program(channel, Math.max(0, row)));
+            } else if (track.mode() == TrackMode.SAMPLE) {
+                messages.add(control(channel, 0, Gm.DRUM_BANK));
+                messages.add(control(channel, 32, 0));
+                messages.add(program(channel, SoundCatalog.playedKit(kits, track.kit())));
+            } else if (preset) {
                 bankSelect(messages, channel, track.bank());
                 messages.add(program(channel, track.preset().program()));
             } else if (track.mode() == TrackMode.NOTE) {
