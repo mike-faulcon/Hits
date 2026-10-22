@@ -32,7 +32,8 @@ public final class SampleShot {
         SwingUtilities.invokeAndWait(() -> {
             Beat beat = Beat.drumKit("samples");
             beat.track(0).setMode(TrackMode.SAMPLE);
-            beat.track(0).setSample(new SampleRef("/tmp/hits-missing-click.wav", 36, 80, true));
+            beat.track(0).setSample(new SampleRef("/tmp/hits-missing-click.wav", 36, 80, true).withInvert(true));
+            beat.track(0).setDecay(160);
             holder.editor = new Editor(beat);
             holder.player = new Player();
             holder.player.open();
@@ -42,15 +43,17 @@ public final class SampleShot {
             holder.frame.setVisible(true);
         });
         Thread.sleep(700);
-        showSampleCard(holder.frame);
+        showSampleCard(holder.frame, "sample-gain");
         capture(holder.frame, directory.resolve("sample-inspector-1500.png"));
+        showSampleCard(holder.frame, "decay-value");
+        capture(holder.frame, directory.resolve("sample-inspector-decay-1500.png"));
         SwingUtilities.invokeAndWait(() -> {
             holder.frame.setSize(1180, 860);
             holder.frame.setLocation(0, 0);
             holder.frame.validate();
         });
         Thread.sleep(400);
-        showSampleCard(holder.frame);
+        showSampleCard(holder.frame, "sample-invert");
         capture(holder.frame, directory.resolve("sample-inspector-1180.png"));
         SwingUtilities.invokeLater(() -> {
             JButton export = findButton(holder.frame, "Export MIDI");
@@ -84,10 +87,10 @@ public final class SampleShot {
         ImageIO.write(new Robot().createScreenCapture(area), "png", path.toFile());
     }
 
-    private static void showSampleCard(JFrame frame) throws Exception {
+    private static void showSampleCard(JFrame frame, String name) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             frame.validate();
-            reveal(find(frame, "collect-samples"));
+            reveal(find(frame, name));
         });
         Thread.sleep(250);
     }

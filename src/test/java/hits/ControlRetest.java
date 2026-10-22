@@ -34,7 +34,10 @@ class ControlRetest {
             assertTrue(controller >= previous && controller <= 127, percent + " -> " + controller);
             previous = controller;
         }
+        assertEquals(56, Track.decayController(10));
+        assertEquals(63, Track.decayController(90));
         assertEquals(64, Track.decayController(100));
+        assertEquals(77, Track.decayController(120));
         assertEquals(127, Track.decayController(200));
         assertTrue(Track.decayController(50) > Track.decayController(10));
         assertTrue(Track.decayController(150) > 64);

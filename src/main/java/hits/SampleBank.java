@@ -16,9 +16,13 @@ import java.util.List;
  * {@code --release 21}.
  * <p>
  * Every sample track shares one melodic bank, {@link #SF2_BANK}. That bank is not
- * 120, 121, or 128. The program number is the row. A one-shot is a sample that
+ * 120, 121, or 128. Each distinct sample on a row gets its own program in that bank,
+ * so two patterns can play two samples on the same row. A one-shot is a sample that
  * does not loop, with a release long enough that note-off does not cut it.
  * Choke uses a short release, so note-off and the step length stop the sound.
+ * Decay is the volume-envelope decay, sustain, and release of that preset.
+ * Gain is {@code initialAttenuation}. Gervill scales that generator by about −0.376,
+ * so a negative amount is a boost.
  */
 public final class SampleBank {
     /**
@@ -34,9 +38,24 @@ public final class SampleBank {
     public static final int RELEASE_CHOKE = -7200;
     /** Zeros after each sample so the interpolator can read past the end. */
     private static final int PAD = 46;
+    /** SF2 default: the decay stage is skipped and the voice sits at the sustain level. */
+    public static final int DECAY_NONE = -12000;
+    /** SF2 sustain, in centibels of attenuation. 0 is full level. 1000 is silence. */
+    public static final int SUSTAIN_FULL = 0;
+    public static final int SUSTAIN_SILENT = 1000;
+    /**
+     * Gervill adds {@code initialAttenuation * SCALE} to mixer gain.
+     * Mixer gain is in centibels (10 units = 1 dB), and the scale is about −0.376,
+     * so the generator amount for {@code +N} dB is {@code N * 10 / SCALE}.
+     */
+    private static final double GERVILL_ATTENUATION_SCALE = -0.3762870132923126;
 
     private SampleBank() {}
 
+    /**
+     * One preset. {@code decay}, {@code sustain}, and {@code release} are the volume envelope.
+     * {@code attenuation} is SF2 {@code initialAttenuation} (negative boosts).
+     */
     public record Voice(
         int program,
         String name,
@@ -44,8 +63,95 @@ public final class SampleBank {
         short[] samples,
         int root,
         int start,
-        boolean oneShot
-    ) {}
+        boolean oneShot,
+        int decay,
+        int sustain,
+        int release,
+        int attenuation
+    ) {
+        /** A voice at decay 100: a one-shot rings out, a choke follows note-off, and gain is untouched. */
+        public Voice(int program, String name, int rate, short[] samples, int root, int start, boolean oneShot) {
+            this(
+                program,
+                name,
+                rate,
+                samples,
+                root,
+                start,
+                oneShot,
+                DECAY_NONE,
+                SUSTAIN_FULL,
+                oneShot ? RELEASE_ONE_SHOT : RELEASE_CHOKE,
+                0
+            );
+        }
+    }
+
+    /** Volume envelope for one preset. Times are SoundFont timecents. Sustain is centibels. */
+    public record Envelope(int decay, int sustain, int release) {}
+
+    /**
+     * Decay percent mapped onto the volume envelope.
+     * <p>
+     * One-shot at 100% and above keeps a release long enough that note-off does not cut the file.
+     * The file is the limit, so 200% matches 100%. Below 100% the decay stage fades to silence
+     * in that fraction of the recording, and the release is the same length so a short step
+     * does not chop the fade. Choke at 100% is the short release. Above 100% lengthens that
+     * release the way CC 72 used to. Below 100% fades from note-on across that fraction of the
+     * file, and note-off still cuts.
+     */
+    public static Envelope envelope(boolean oneShot, int percent, int frames, int rate) {
+        int clamped = Math.max(Track.DECAY_MIN, Math.min(Track.DECAY_MAX, percent));
+        double duration = Math.max(0.02, frames / (double) Math.max(1, rate));
+        if (oneShot) {
+            if (clamped >= Track.DECAY) {
+                return new Envelope(DECAY_NONE, SUSTAIN_FULL, RELEASE_ONE_SHOT);
+            }
+            int fade = fadeTimecents(duration * clamped / 100.0);
+            return new Envelope(fade, SUSTAIN_SILENT, fade);
+        }
+        if (clamped >= Track.DECAY) {
+            return new Envelope(DECAY_NONE, SUSTAIN_FULL, chokeRelease(clamped));
+        }
+        return new Envelope(fadeTimecents(duration * clamped / 100.0), SUSTAIN_SILENT, RELEASE_CHOKE);
+    }
+
+    /**
+     * SF2 {@code initialAttenuation} for a gain in decibels.
+     * Positive decibels become a negative generator amount, which Gervill treats as a boost.
+     */
+    public static int attenuation(int decibels) {
+        if (decibels == 0) {
+            return 0;
+        }
+        int amount = (int) Math.round(decibels * 10.0 / GERVILL_ATTENUATION_SCALE);
+        return Math.max(-1440, Math.min(1440, amount));
+    }
+
+    /** Timecents whose −40 dB point is about {@code audibleSeconds}. */
+    private static int fadeTimecents(double audibleSeconds) {
+        double silence = Math.max(0.004, audibleSeconds) * (96.0 / 40.0);
+        return timecents(silence);
+    }
+
+    /**
+     * Choke release at {@code percent} of 100 and above.
+     * 100% is {@link #RELEASE_CHOKE}. Higher percents add the same timecents CC 72 used to add,
+     * so a choke can still ring past the step. CC 72 itself is not sent for a sample.
+     */
+    private static int chokeRelease(int percent) {
+        int controller = Track.decayController(percent);
+        double bipolar = (controller / 128.0) * 2.0 - 1.0;
+        return timecentsFrom(RELEASE_CHOKE + (int) Math.round(bipolar * 6000.0));
+    }
+
+    private static int timecents(double seconds) {
+        return timecentsFrom((int) Math.round(1200.0 * Math.log(Math.max(0.001, seconds)) / Math.log(2.0)));
+    }
+
+    private static int timecentsFrom(int value) {
+        return Math.max(-12000, Math.min(RELEASE_ONE_SHOT, value));
+    }
 
     public static byte[] write(List<Voice> voices) {
         int count = voices == null ? 0 : voices.size();
@@ -174,13 +280,19 @@ public final class SampleBank {
                 count++;
             }
         }
-        out.writeBytes(generator(38, voice.oneShot() ? RELEASE_ONE_SHOT : RELEASE_CHOKE));
+        out.writeBytes(generator(36, voice.decay()));
+        out.writeBytes(generator(37, voice.sustain()));
+        out.writeBytes(generator(38, voice.release()));
+        if (voice.attenuation() != 0) {
+            out.writeBytes(generator(48, voice.attenuation()));
+            count++;
+        }
         out.writeBytes(generator(43, 0x7F00));
         out.writeBytes(generator(44, 0x7F00));
         out.writeBytes(generator(54, 0));
         out.writeBytes(generator(58, Math.max(0, Math.min(127, voice.root()))));
         out.writeBytes(generator(53, sampleIndex));
-        return count + 6;
+        return count + 8;
     }
 
     private static byte[] presetHeader(String name, int preset, int bank, int bag) {
