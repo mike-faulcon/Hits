@@ -10,6 +10,7 @@ import javax.sound.midi.Soundbank;
 import javax.sound.midi.Track;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
@@ -183,6 +184,7 @@ public final class SequenceBuilder {
         hits.Track[] tracks = beat.activeTracks();
         ChannelPlan plan = ChannelPlan.of(beat, List.of(beat.activeSlot()), kits);
         Track[] midiTracks = new Track[tracks.length];
+        ChannelMemory memory = new ChannelMemory();
         for (int i = 0; i < tracks.length; i++) {
             hits.Track track = tracks[i];
             if (!beat.audible(track)) {
@@ -190,7 +192,7 @@ public final class SequenceBuilder {
             }
             midiTracks[i] = sequence.createTrack();
             midiTracks[i].add(new MidiEvent(trackName(track.name()), 0));
-            writeSetup(midiTracks[i], track, i, 0, plan);
+            writeSetup(midiTracks[i], track, i, 0, plan, memory);
         }
         for (int pass = 0; pass < times; pass++) {
             for (int i = 0; i < tracks.length; i++) {
@@ -264,6 +266,7 @@ public final class SequenceBuilder {
         ChannelPlan plan = ChannelPlan.of(beat, spanSlots, kits);
         boolean joined = spanSlots.size() > 1;
         Track[] midiTracks = new Track[Beat.TRACKS];
+        ChannelMemory memory = new ChannelMemory();
         for (int pass = 0; pass < times; pass++) {
             long origin = pass * span;
             for (int s = 0; s < sections.size(); s++) {
@@ -292,11 +295,13 @@ public final class SequenceBuilder {
                         random,
                         clipEnd ? sequenceEnd : -1,
                         ahead,
-                        plan
+                        plan,
+                        memory
                     );
                 }
             }
         }
+        memory.restoreLoop();
         if (metronome) {
             addClicks(sequence, sections, times);
         }
@@ -356,13 +361,73 @@ public final class SequenceBuilder {
      * A shared drum sends pan only. A private drum selects the drum bank before its kit,
      * because a program change alone would look up a silent drum-kit preset.
      * Level is not a controller. Each note-on already carries the fader, so it cannot stick.
+     * Release and reverb are skipped when the channel already has that value.
+     * Pitch, filter, and the sends wait until a note still sounding from the previous
+     * pattern has ended, so the tail is not bent or opened mid-note.
      */
-    private static void writeSetup(Track midi, hits.Track track, int row, long offset, ChannelPlan plan)
-        throws InvalidMidiDataException {
+    private static void writeSetup(
+        Track midi,
+        hits.Track track,
+        int row,
+        long offset,
+        ChannelPlan plan,
+        ChannelMemory memory
+    ) throws InvalidMidiDataException {
         int channel = plan.channel(track, row);
-        for (ShortMessage message : plan.setup(track, channel, row)) {
-            midi.add(new MidiEvent(message, offset));
+        List<ShortMessage> messages = plan.setup(track, channel, row);
+        memory.noteFirst(midi, channel, offset, messages);
+        long hold = overlappingHold(midi, channel, offset);
+        for (ShortMessage message : messages) {
+            if (memory.unchangedReleaseOrReverb(message)) {
+                continue;
+            }
+            long tick = hold > offset && affectsHeldNote(message) ? hold : offset;
+            midi.add(new MidiEvent(message, tick));
+            memory.remember(message);
         }
+    }
+
+    /**
+     * Latest note-off on {@code channel} for a note that started before {@code at} and is still
+     * held there. Returns {@code at} when nothing crosses that tick.
+     */
+    private static long overlappingHold(Track midi, int channel, long at) {
+        long[] started = new long[128];
+        Arrays.fill(started, -1);
+        long until = at;
+        for (int i = 0; i < midi.size(); i++) {
+            MidiEvent event = midi.get(i);
+            if (!(event.getMessage() instanceof ShortMessage message) || message.getChannel() != channel) {
+                continue;
+            }
+            int pitch = message.getData1();
+            boolean noteOn = message.getCommand() == ShortMessage.NOTE_ON && message.getData2() > 0;
+            boolean noteOff = message.getCommand() == ShortMessage.NOTE_OFF
+                || (message.getCommand() == ShortMessage.NOTE_ON && message.getData2() == 0);
+            if (noteOn) {
+                started[pitch] = event.getTick();
+            } else if (noteOff && started[pitch] >= 0) {
+                if (started[pitch] < at && event.getTick() > at) {
+                    until = Math.max(until, event.getTick());
+                }
+                started[pitch] = -1;
+            }
+        }
+        return until;
+    }
+
+    /** Pitch, filter, release, and the effect sends. Bank, program, and pan stay at the pattern start. */
+    private static boolean affectsHeldNote(ShortMessage message) {
+        if (message.getCommand() == ShortMessage.PITCH_BEND) {
+            return true;
+        }
+        if (message.getCommand() != ShortMessage.CONTROL_CHANGE) {
+            return false;
+        }
+        return switch (message.getData1()) {
+            case ChannelPlan.RELEASE, ChannelPlan.REVERB, ChannelPlan.CHORUS, ChannelPlan.CUTOFF, ChannelPlan.RESONANCE -> true;
+            default -> false;
+        };
     }
 
     /**
@@ -433,7 +498,8 @@ public final class SequenceBuilder {
         Random random,
         long clipTick,
         int[] ahead,
-        ChannelPlan plan
+        ChannelPlan plan,
+        ChannelMemory memory
     ) throws InvalidMidiDataException {
         List<Placed> notes = placedNotes(
             beat, track, steps, offset, sectionTicks, random, false, clipTick, ahead
@@ -444,7 +510,7 @@ public final class SequenceBuilder {
                 setupAt = note.sound.start();
             }
         }
-        writeSetup(midi, track, row, setupAt, plan);
+        writeSetup(midi, track, row, setupAt, plan, memory);
         emitNotes(midi, plan.channel(track, row), notes);
     }
 
@@ -686,5 +752,117 @@ public final class SequenceBuilder {
         MetaMessage message = new MetaMessage();
         message.setMessage(0x06, data, data.length);
         return message;
+    }
+
+    /**
+     * Release and reverb already on a channel. Gervill starts at release 64 and reverb 40,
+     * so a preset that asks for those neutrals is not written again.
+     * When the song ends on a different value, the first pattern's value is put back at
+     * its setup tick so a loop does not keep the last pattern's send.
+     */
+    private static final class ChannelMemory {
+        private final int[] release = new int[16];
+        private final int[] reverb = new int[16];
+        private final boolean[] seen = new boolean[16];
+        private final Integer[] firstRelease = new Integer[16];
+        private final Integer[] firstReverb = new Integer[16];
+        private final long[] firstTick = new long[16];
+        private final Track[] firstTrack = new Track[16];
+
+        private ChannelMemory() {
+            Arrays.fill(release, 64);
+            Arrays.fill(reverb, hits.Track.REVERB_NEUTRAL);
+        }
+
+        private void noteFirst(Track midi, int channel, long tick, List<ShortMessage> messages) {
+            if (channel < 0 || channel > 15 || seen[channel]) {
+                return;
+            }
+            seen[channel] = true;
+            firstTick[channel] = tick;
+            firstTrack[channel] = midi;
+            firstRelease[channel] = controller(messages, channel, ChannelPlan.RELEASE);
+            firstReverb[channel] = controller(messages, channel, ChannelPlan.REVERB);
+        }
+
+        private boolean unchangedReleaseOrReverb(ShortMessage message) {
+            if (message.getCommand() != ShortMessage.CONTROL_CHANGE) {
+                return false;
+            }
+            int channel = message.getChannel();
+            if (channel < 0 || channel > 15) {
+                return false;
+            }
+            if (message.getData1() == ChannelPlan.RELEASE) {
+                return message.getData2() == release[channel];
+            }
+            if (message.getData1() == ChannelPlan.REVERB) {
+                return message.getData2() == reverb[channel];
+            }
+            return false;
+        }
+
+        private void remember(ShortMessage message) {
+            if (message.getCommand() != ShortMessage.CONTROL_CHANGE) {
+                return;
+            }
+            int channel = message.getChannel();
+            if (channel < 0 || channel > 15) {
+                return;
+            }
+            if (message.getData1() == ChannelPlan.RELEASE) {
+                release[channel] = message.getData2();
+            } else if (message.getData1() == ChannelPlan.REVERB) {
+                reverb[channel] = message.getData2();
+            }
+        }
+
+        private void restoreLoop() throws InvalidMidiDataException {
+            for (int channel = 0; channel < 16; channel++) {
+                if (!seen[channel] || firstTrack[channel] == null) {
+                    continue;
+                }
+                restore(channel, ChannelPlan.RELEASE, firstRelease[channel], release[channel]);
+                restore(channel, ChannelPlan.REVERB, firstReverb[channel], reverb[channel]);
+            }
+        }
+
+        private void restore(int channel, int controller, Integer desired, int actual) throws InvalidMidiDataException {
+            if (desired == null || desired == actual) {
+                return;
+            }
+            if (already(firstTrack[channel], channel, controller, desired, firstTick[channel])) {
+                return;
+            }
+            firstTrack[channel].add(new MidiEvent(controlMessage(channel, controller, desired), firstTick[channel]));
+        }
+
+        private static boolean already(Track midi, int channel, int controller, int value, long tick) {
+            for (int i = 0; i < midi.size(); i++) {
+                MidiEvent event = midi.get(i);
+                if (event.getTick() != tick || !(event.getMessage() instanceof ShortMessage message)) {
+                    continue;
+                }
+                if (message.getCommand() == ShortMessage.CONTROL_CHANGE
+                    && message.getChannel() == channel
+                    && message.getData1() == controller
+                    && message.getData2() == value) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static Integer controller(List<ShortMessage> messages, int channel, int controller) {
+            Integer value = null;
+            for (ShortMessage message : messages) {
+                if (message.getCommand() == ShortMessage.CONTROL_CHANGE
+                    && message.getChannel() == channel
+                    && message.getData1() == controller) {
+                    value = message.getData2();
+                }
+            }
+            return value;
+        }
     }
 }

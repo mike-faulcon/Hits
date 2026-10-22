@@ -259,8 +259,9 @@ public final class ChannelPlan {
      * <p>
      * An explicit decay replaces the release a pitched preset's gate would send, and an explicit
      * reverb replaces that gate's reverb. At decay 100 and with reverb unset, the gate is left
-     * in charge, so a preset at gate 45 still sends release 64 and reverb 40. One controller is
-     * sent either way, so the two never fight.
+     * in charge, so a preset at gate 45 still asks for release 64 and reverb 40. One value is
+     * chosen either way, so the two never fight. The sequence writer then skips a controller
+     * the channel already has, including those neutrals when nothing has changed them.
      * Unset cutoff, resonance, chorus, and reverb send nothing on a row that never uses them.
      * CC 75 is not sent: the built-in synth's decay controller does not lengthen a kick and it
      * collapses an open hat. Decay is CC 72.

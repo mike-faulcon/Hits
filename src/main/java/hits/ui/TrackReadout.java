@@ -51,19 +51,42 @@ final class TrackReadout {
             return new StepPitch("—", "Right-click or Alt-click a step that is on.", false, false);
         }
         Step step = track.step(column);
+        String trackPitch = tunedName(track.playedNote(), track.tune());
         if (step.hasPitch()) {
+            String played = tunedName(step.pitch(), track.tune());
             return new StepPitch(
-                Notes.name(step.pitch()),
-                "This step plays " + Notes.name(step.pitch()) + ". The track pitch is " + Notes.name(track.playedNote()) + ".",
+                played,
+                "This step plays " + played + ". The track pitch is " + trackPitch + ".",
                 true,
                 true
             );
         }
         return new StepPitch(
-            Notes.name(track.playedNote()),
-            "Uses the track pitch, " + Notes.name(track.playedNote()) + ".",
+            trackPitch,
+            "Uses the track pitch, " + trackPitch + ".",
             true,
             false
         );
+    }
+
+    /**
+     * Note name plus the row's tune. {@code +1500} cents is {@code C1 +15 st}.
+     * Cents that are not a whole semitone stay in the name, inside ±50 after rounding.
+     */
+    static String tunedName(int note, int tuneCents) {
+        String name = Notes.name(note);
+        if (tuneCents == 0) {
+            return name;
+        }
+        int semis = (int) Math.round(tuneCents / 100.0);
+        int cents = tuneCents - semis * 100;
+        StringBuilder text = new StringBuilder(name);
+        if (semis != 0) {
+            text.append(semis > 0 ? " +" : " −").append(Math.abs(semis)).append(" st");
+        }
+        if (cents != 0) {
+            text.append(cents > 0 ? " +" : " −").append(Math.abs(cents)).append(" c");
+        }
+        return text.toString();
     }
 }
