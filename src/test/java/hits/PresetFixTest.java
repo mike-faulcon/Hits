@@ -49,8 +49,9 @@ class PresetFixTest {
     void presetExportSendsTheGateControllers() throws Exception {
         assertEquals(54, controller(presetBeat(PitchedPreset.RIM, 5), 0, 72));
         assertEquals(0, controller(presetBeat(PitchedPreset.RIM, 5), 0, 91));
-        assertEquals(64, controller(presetBeat(PitchedPreset.CRACK, 45), 0, 72));
-        assertEquals(40, controller(presetBeat(PitchedPreset.CRACK, 45), 0, 91));
+        Sequence neutral = presetBeat(PitchedPreset.CRACK, 45);
+        assertFalse(hasController(neutral, 72), "gate 45 release is already 64");
+        assertFalse(hasController(neutral, 91), "gate 45 reverb is already 40");
         assertEquals(80, controller(presetBeat(PitchedPreset.CLICK, 100), 0, 72));
         assertEquals(80, controller(presetBeat(PitchedPreset.CLICK, 100), 0, 91));
 
@@ -79,7 +80,7 @@ class PresetFixTest {
         assertEquals(54, controllerAt(song, 0, 72, 0));
         assertEquals(0, controllerAt(song, 0, 91, 0));
         assertEquals(64, controllerAt(song, 0, 72, bar));
-        assertEquals(0, controllerAt(song, 0, 91, bar));
+        assertFalse(hasControllerAt(song, 0, 91, bar), "reverb 0 did not change");
         assertEquals(108, noteAt(song, 0, 0));
         assertEquals(60, noteAt(song, 0, bar));
     }
@@ -331,6 +332,20 @@ class PresetFixTest {
             }
         }
         throw new AssertionError("missing controller " + controller + " at " + tick);
+    }
+
+    private static boolean hasControllerAt(Sequence sequence, int channel, int controller, long tick) {
+        for (MidiEvent event : events(sequence)) {
+            if (event.getTick() != tick || !(event.getMessage() instanceof ShortMessage message)) {
+                continue;
+            }
+            if (message.getCommand() == ShortMessage.CONTROL_CHANGE
+                && message.getChannel() == channel
+                && message.getData1() == controller) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasController(Sequence sequence, int controller) {

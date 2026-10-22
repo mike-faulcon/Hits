@@ -3,7 +3,6 @@ package hits.ui;
 import hits.Beat;
 import hits.Editor;
 import hits.NoteSpan;
-import hits.Notes;
 import hits.SampleRef;
 import hits.Step;
 import hits.Track;
@@ -468,8 +467,11 @@ final class PatternPanel extends JPanel implements Scrollable {
         }
         int column = row >= 0 ? metrics.columnAt(event.getX(), event.getY()) : -1;
         if (column >= 0) {
-            Step step = editor.viewTrack(row).step(column);
-            String pitch = step.hasPitch() ? " Step pitch " + Notes.name(step.pitch()) + "." : "";
+            Track rowTrack = editor.viewTrack(row);
+            Step step = rowTrack.step(column);
+            String pitch = step.hasPitch()
+                ? " Step pitch " + TrackReadout.tunedName(step.pitch(), rowTrack.tune()) + "."
+                : "";
             String chance = step.uncertain() ? " Chance " + step.probability() + "%." : "";
             String held = step.extended() ? " Holds " + step.length() + " steps." : "";
             int offset = editor.viewTrack(row).playedNudge(column);

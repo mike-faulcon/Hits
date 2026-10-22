@@ -16,3 +16,5 @@
 ## What the code does
 
 `TrackMode.SAMPLE` and a `sample` object are version 2. A beat that never uses them is still written as version 1. `SampleBank` writes an in-memory SoundFont 2 file and `MidiSystem.getSoundbank` reads it. The bank number is 64 in the file, which the built-in synth maps to MIDI bank 8192 (CC 0 = 64, CC 32 = 0). The program is the row. One-shot is a sample that does not loop, with a release long enough that note-off does not cut it. Choke uses a short release.
+
+Decay stays enabled on a sample row. The voice sets a volume-envelope release and Gervill's CC 72 adds to it, so the control is not marked ignored the way a kick or a closed hat is. A missing file still falls back to the drum note, which may ignore that controller, and the stored percent is kept. Cutoff for a sample row is 0–64. The voice has no filter of its own, so 64 is already open and a higher controller does not brighten it. Kit drums, bass, and other notes keep the ranges measured for those instruments.

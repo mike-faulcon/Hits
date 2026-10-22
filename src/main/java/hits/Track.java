@@ -308,14 +308,17 @@ public final class Track {
         this.tune = Math.max(TUNE_MIN, Math.min(TUNE_MAX, cents));
     }
 
-    /** Whole semitones of {@link #tune()}, toward zero. The rest is {@link #tuneCents()}. */
+    /**
+     * Whole semitones of {@link #tune()}, rounded so {@link #tuneCents()} stays inside ±50.
+     * 275 is 3 semitones minus 25 cents, and one more semitone is 375, not 350.
+     */
     public int tuneSemitones() {
-        return tune / 100;
+        return (int) Math.round(tune / 100.0);
     }
 
-    /** Cents within the current semitone, from −50 to +50 except at the ±24 semitone ends. */
+    /** Cents left after {@link #tuneSemitones()}, from −50 to +50. */
     public int tuneCents() {
-        return tune % 100;
+        return tune - tuneSemitones() * 100;
     }
 
     /**
@@ -337,17 +340,108 @@ public final class Track {
     }
 
     /**
-     * CC 72 for {@code percent}. 100% is 64, which is the release the built-in synth already uses.
-     * 10% is 0 and 200% is 127.
+     * CC 72 for {@code percent}. 100% is 64, the release the built-in synth already uses,
+     * and a row at 100% does not send it.
+     * <p>
+     * Gervill adds about {@code ((cc / 64) - 1) * 6000} timecents, so release time is
+     * exponential in the controller. Measured −20 dB times on the rim, the open hat, Syn Bass,
+     * and a saw stay on the floor until about CC 52–58 (the note is already that short) and
+     * then rise through CC 127. Mapping 10% to 0 therefore leaves most of the slider silent.
+     * 10% is CC 56, just off that floor. 100% is 64. 200% is 127. Each side is linear in the
+     * controller, which is what spread those measured times.
      * CC 75 is not used. On this synth it turns an open hat into a click for every value under 64,
      * and a kick, tom, saw, and xylophone ignore it.
      */
     public static int decayController(int percent) {
         int clamped = Math.max(DECAY_MIN, Math.min(DECAY_MAX, percent));
-        if (clamped <= DECAY) {
-            return (clamped - DECAY_MIN) * 64 / (DECAY - DECAY_MIN);
+        if (clamped >= DECAY) {
+            return 64 + (int) Math.round((clamped - DECAY) * 63.0 / (DECAY_MAX - DECAY));
         }
-        return 64 + (clamped - DECAY) * 63 / (DECAY_MAX - DECAY);
+        return 56 + (int) Math.round((clamped - DECAY_MIN) * 8.0 / (DECAY - DECAY_MIN));
+    }
+
+    /**
+     * Whether CC 72 changes this sound on the built-in synth.
+     * Measured at controller 0, 64, and 127: kick, snare, closed hat, toms, clap, side stick,
+     * Woodblock click, and Snare crack (and the timpani and woodblock programs) do not move.
+     * Open hat, crash, ride, rimshot, and the other measured notes do.
+     * <p>
+     * A sample row does. Its SoundFont voice sets a volume-envelope release, and Gervill adds
+     * CC 72 on top of that, so one-shot and choke both follow the control. A missing file falls
+     * back to a drum note, which may ignore CC 72, but the row stays a sample and the control
+     * stays on. The stored percent is kept either way.
+     */
+    public boolean decayApplies() {
+        if (mode == TrackMode.SAMPLE) {
+            return true;
+        }
+        if (mode == TrackMode.NOTE) {
+            return !releaseIgnoredProgram(program);
+        }
+        if (preset == PitchedPreset.CLICK || preset == PitchedPreset.CRACK) {
+            return false;
+        }
+        if (preset != null) {
+            return true;
+        }
+        return !releaseIgnoredDrum(note);
+    }
+
+    /**
+     * Why {@link #decayApplies()} is false, or null when decay works.
+     * Snare crack's tail is reverb, so the note points at that control.
+     */
+    public String decayNote() {
+        if (decayApplies()) {
+            return null;
+        }
+        if (preset == PitchedPreset.CRACK || (mode == TrackMode.NOTE && program == 47)) {
+            return "This sound ignores decay. The tail is reverb, so Reverb is what shortens it.";
+        }
+        return "This sound ignores decay on the built-in synth.";
+    }
+
+    /**
+     * Lowest cutoff controller the slider offers for {@code track}.
+     * The file still stores the controller. A saved value outside the slider is kept and sent;
+     * the slider sits at the nearest end until it is moved.
+     * Kit drums move from 0 up to about 56. Most notes move from about 32 to 80.
+     * Bass programs 32–39 stay closed through about 58.
+     * A sample row starts at 0. Its voice has no filter of its own, so the dark end of
+     * Gervill's brightness controller is where the sample changes.
+     */
+    public static int cutoffSliderMin(Track track) {
+        if (track != null && track.mode() == TrackMode.SAMPLE) {
+            return 0;
+        }
+        if (track != null && track.mode() == TrackMode.NOTE && bassProgram(track.program())) {
+            return 58;
+        }
+        if (track != null && track.mode() == TrackMode.NOTE) {
+            return 32;
+        }
+        return 0;
+    }
+
+    /**
+     * Highest cutoff controller the slider offers. Above this the centroid stops rising:
+     * about 56 for kit drums, 80 for most notes, and 86 for the bass programs.
+     * On Syn Bass the centroid peaks near 86 and turns down by 90.
+     * A sample row stops at {@link #FILTER_NEUTRAL}. Gervill's default filter is already
+     * open there (about 20 kHz), and a higher controller does not brighten the sample.
+     * Turning the filter on therefore starts at the sample's own tone.
+     */
+    public static int cutoffSliderMax(Track track) {
+        if (track != null && track.mode() == TrackMode.SAMPLE) {
+            return FILTER_NEUTRAL;
+        }
+        if (track != null && track.mode() == TrackMode.NOTE && bassProgram(track.program())) {
+            return 86;
+        }
+        if (track != null && track.mode() == TrackMode.NOTE) {
+            return 80;
+        }
+        return 56;
     }
 
     /**
@@ -549,6 +643,27 @@ public final class Track {
             step.setLength(Step.MIN_LENGTH);
             step.setNudge(0);
         }
+    }
+
+    /** Acoustic bass through synth bass 2. Their energy sits under a closed filter until about CC 58. */
+    private static boolean bassProgram(int program) {
+        return program >= 32 && program <= 39;
+    }
+
+    /** Timpani and woodblock. The sample length does not follow CC 72. */
+    private static boolean releaseIgnoredProgram(int program) {
+        return program == 47 || program == 115;
+    }
+
+    /**
+     * Kit keys that ignored CC 72 at 0, 64, and 127.
+     * 46 open hat, 49 crash, and 51 ride are not in this list.
+     */
+    private static boolean releaseIgnoredDrum(int note) {
+        return switch (note) {
+            case 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 47, 48, 50 -> true;
+            default -> false;
+        };
     }
 
     private static int clampProgram(int program) {

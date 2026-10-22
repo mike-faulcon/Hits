@@ -84,4 +84,25 @@ class TrackReadoutTest {
         assertEquals(Notes.name(60), own.text());
         assertEquals("This step plays " + Notes.name(60) + ". The track pitch is C7.", own.tip());
     }
+
+    @Test
+    void stepPitchShowsTuneWithTheNote() {
+        Beat beat = Beat.drumKit("tuned");
+        Track kick = beat.track(0);
+        kick.setTune(1500);
+        kick.tap(0, false);
+        TrackReadout.StepPitch pitch = TrackReadout.stepPitch(beat, 'a', kick, 0);
+        assertEquals("C1 +15 st", pitch.text());
+        assertEquals("Uses the track pitch, C1 +15 st.", pitch.tip());
+
+        kick.setTune(220);
+        TrackReadout.StepPitch fine = TrackReadout.stepPitch(beat, 'a', kick, 0);
+        assertEquals("C1 +2 st +20 c", fine.text());
+
+        kick.setTune(1500);
+        kick.step(0).setPitch(38);
+        TrackReadout.StepPitch own = TrackReadout.stepPitch(beat, 'a', kick, 0);
+        assertEquals("D1 +15 st", own.text());
+        assertEquals("This step plays D1 +15 st. The track pitch is C1 +15 st.", own.tip());
+    }
 }
