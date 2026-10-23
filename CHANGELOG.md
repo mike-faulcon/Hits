@@ -1,5 +1,19 @@
 # Changelog
 
+## Filter fixes
+
+A low cut or presence on one pattern no longer changes the plain drum on that row in another pattern. The filtered voice uses its own sample-bank channel. The plain voice keeps the channel it would have had alone. Chaining a filtered kick (tune +15 st, presence +12) into an unfiltered kick (tune +19 st) left a +2.3 dB residual in the second bar, with the lows down 4.7 dB and the highs up 3.4 dB. The same comparison is now a −80.8 dB residual, and those bands match within 0.1 dB.
+
+The recording trims the synth's leading latency. A filtered kick lined up 12.9 ms late with no tune, and 5.7 ms late at +15 st. Both are now within one sample (0.02 ms).
+
+The recording is dry. Reverb and chorus come from the row at playback, the same as an unfiltered row. Low cut 20 Hz with reverb 0 used to ring 545 ms to −40 dB against 165 ms unfiltered. Both are now about 180 ms.
+
+A hot kick is no longer turned down to stay inside 16-bit. Peaks that would not fit are scaled, and the SoundFont gain puts the level back. A low cut at 20 Hz was 2.4–3.0 dB quiet. At velocities 80, 100, and 127 it is now +0.18 dB against the unfiltered kick. A note row was 1.5–3.7 dB quiet, with a wobbling loop and the release cut at note-off. The same saw is now +0.24 dB, the loop wobble matches the unfiltered note (0.27 dB), and the release runs past 300 ms (about 970 ms against about 830 ms unfiltered).
+
+A sample low cut that overshoots 16-bit is scaled the same way. A near-full-scale file at low cut 40 Hz / 24 dB peaked at +2.3 dBFS with 331 flat-topped samples. The stored PCM no longer flat-tops, and the 1 kHz level is unchanged.
+
+MIDI export and `--samples-sf2` still leave low cut and presence out. `hits render` of a MIDI file, `hits render --samples-sf2`, and `hits info` say so on stderr and name the rows. The export dialog does too. A WAV render does not print that warning. A sample gain outside −24 to +24 dB is clamped, named on stderr, and the inspector readout shows the clamp. `hits info` also says that +8 dB is the default when a sample row does not set gain. `hits render` and Export WAV report when the master clips or the limiter reduces it by more than 1 dB. A relative sample path resolves against the beat file even when that path is a bare name.
+
 ## Sample-track retest
 
 Sample rows can name a different sample in each pattern. Each distinct sample on a row, including the same file at a different decay, gain, or polarity, is its own preset in bank 64. Playback, WAV, and MIDI keep that program. A sample that cannot be loaded plays its drum note on channel 9, and that note is audible. `hits render` and `hits info` print the warning on stderr. `hits info` lists each sample path and whether it is ready.

@@ -48,6 +48,8 @@ public final class Beat {
     private int master = MASTER;
     private final Track[][] slots = new Track[SLOT_COUNT][TRACKS];
     private List<Chain.Part> chain = List.of();
+    /** Load-time notes, such as a sample gain that was clamped. Not written to the file. */
+    private final List<String> loadWarnings = new ArrayList<>();
 
     private Beat(String name) {
         this.name = name == null || name.isBlank() ? "untitled" : name.trim();
@@ -105,7 +107,67 @@ public final class Beat {
         for (int i = 0; i < SLOT_COUNT; i++) {
             copyTracks(slots[i], copy.slots[i]);
         }
+        copy.loadWarnings.addAll(loadWarnings);
         return copy;
+    }
+
+    /** A note from loading, such as a sample gain outside −24 to +24 dB. */
+    public void addLoadWarning(String warning) {
+        if (warning != null && !warning.isBlank()) {
+            loadWarnings.add(warning);
+        }
+    }
+
+    public List<String> loadWarnings() {
+        return List.copyOf(loadWarnings);
+    }
+
+    /**
+     * The clamp warning for this pattern's row, or null. The inspector shows it
+     * so a gain above +24 dB is not only stored as 24.
+     */
+    public String gainWarning(char slot, String name) {
+        String prefix = slotLabel(slot) + " " + (name == null ? "" : name) + ":";
+        for (String warning : loadWarnings) {
+            if (warning.startsWith(prefix) && warning.contains("sample gain")) {
+                return warning;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Rows that use low cut or presence, as {@code A Kick, B Bass}.
+     * Empty when the beat does not use either control.
+     */
+    public String filterRowNames() {
+        StringBuilder names = new StringBuilder();
+        for (char slot = 'a'; slot <= 'h'; slot++) {
+            for (Track track : slot(slot)) {
+                if (!track.hasTone()) {
+                    continue;
+                }
+                if (names.length() > 0) {
+                    names.append(", ");
+                }
+                names.append(slotLabel(slot)).append(' ').append(track.name());
+            }
+        }
+        return names.toString();
+    }
+
+    /**
+     * MIDI export and a companion SoundFont drop low cut and presence.
+     * Null when this beat does not use them.
+     */
+    public String midiFilterWarning() {
+        String rows = filterRowNames();
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return "Low cut and presence are not in the MIDI file or the companion SoundFont: "
+            + rows
+            + ". Playback and WAV export use them.";
     }
 
     public String name() {

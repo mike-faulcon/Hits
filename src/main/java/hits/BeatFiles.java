@@ -154,17 +154,17 @@ public final class BeatFiles {
      * {@link #exportWav(Beat, Path, ExportOptions, Soundbank, IntConsumer, BooleanSupplier, Path)}
      * when the path is relative to that file.
      */
-    public static void exportWav(
+    public static String exportWav(
         Beat beat,
         Path path,
         ExportOptions options,
         Soundbank soundbank,
         IntConsumer progress
     ) throws IOException, InvalidMidiDataException {
-        exportWav(beat, path, options, soundbank, progress, () -> false, null);
+        return exportWav(beat, path, options, soundbank, progress, () -> false, null);
     }
 
-    public static void exportWav(
+    public static String exportWav(
         Beat beat,
         Path path,
         ExportOptions options,
@@ -172,14 +172,15 @@ public final class BeatFiles {
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException, InvalidMidiDataException {
-        exportWav(beat, path, options, soundbank, progress, cancelled, null);
+        return exportWav(beat, path, options, soundbank, progress, cancelled, null);
     }
 
     /**
      * Same WAV as {@link #exportWav(Beat, Path, ExportOptions, Soundbank, IntConsumer, BooleanSupplier)}.
      * {@code beatFile} resolves relative samples. The sample bank is loaded beside {@code soundbank}.
+     * Returns the master clip or limiter warning, or null when the render stays under 1 dB of reduction.
      */
-    public static void exportWav(
+    public static String exportWav(
         Beat beat,
         Path path,
         ExportOptions options,
@@ -200,7 +201,7 @@ public final class BeatFiles {
         SampleLibrary.Ready ready = SampleLibrary.prepare(
             beat, samplesFrom, SequenceBuilder.exportSlots(beat, options), soundbank, true
         );
-        WavRenderer.render(
+        return WavRenderer.render(
             SequenceBuilder.export(beat, options, playing, ready.use()),
             path,
             soundbank,

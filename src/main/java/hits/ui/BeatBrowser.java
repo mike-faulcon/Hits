@@ -179,6 +179,7 @@ final class BeatBrowser {
         JButton saveButton = Widgets.button("Save");
         JButton saveAsButton = Widgets.button("Save As");
         JButton export = Widgets.button("Export MIDI");
+        export.setName("export-midi");
         JButton exportWavButton = Widgets.button("Export WAV");
         JButton freshButton = Widgets.button("New");
         JButton makeBeatButton = Widgets.button("Make me a beat");

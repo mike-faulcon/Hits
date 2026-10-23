@@ -190,8 +190,14 @@ public final class SampleLibrary {
             try {
                 SampleAudio.Clip clip = read(sample, beatFile);
                 short[] pcm = sample.invert() ? invert(clip.samples()) : clip.samples();
+                double makeup = 0;
                 if (bakeTone && track.hasTone()) {
-                    pcm = ToneFilter.apply(pcm, clip.rate(), track.lowCutHz(), track.lowCutSlope(), track.presence());
+                    double[] filtered = ToneFilter.process(
+                        pcm, clip.rate(), track.lowCutHz(), track.lowCutSlope(), track.presence()
+                    );
+                    ToneFilter.Fitted fitted = ToneFilter.fit(filtered);
+                    pcm = fitted.samples();
+                    makeup = fitted.makeupDb();
                 }
                 int audible = Math.max(1, pcm.length - Math.min(sample.start(), Math.max(0, pcm.length - 1)));
                 SampleBank.Envelope envelope = SampleBank.envelope(sample.oneShot(), track.decay(), audible, clip.rate());
@@ -207,7 +213,7 @@ public final class SampleLibrary {
                     envelope.decay(),
                     envelope.sustain(),
                     envelope.release(),
-                    SampleBank.attenuation(sample.gain())
+                    SampleBank.attenuation(sample.gain() + makeup)
                 )));
             } catch (IOException exception) {
                 append(warnings, track.name() + ": Could not read this sample. This row plays " + Notes.name(track.note()) + ".");
@@ -250,8 +256,11 @@ public final class SampleLibrary {
                     loop,
                     SampleBank.DECAY_NONE,
                     SampleBank.SUSTAIN_FULL,
-                    loop ? SampleBank.RELEASE_HELD : SampleBank.RELEASE_ONE_SHOT,
-                    0
+                    SampleBank.RELEASE_ONE_SHOT,
+                    rendered.attenuation(),
+                    rendered.loopStart(),
+                    rendered.loopEnd(),
+                    rendered.sampleMode()
                 )));
             } catch (IOException exception) {
                 claimed.remove(row + "|" + key);
@@ -370,7 +379,10 @@ public final class SampleLibrary {
             voice.decay(),
             voice.sustain(),
             voice.release(),
-            voice.attenuation()
+            voice.attenuation(),
+            voice.loopStart(),
+            voice.loopEnd(),
+            voice.sampleMode()
         );
     }
 

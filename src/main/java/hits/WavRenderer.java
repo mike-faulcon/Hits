@@ -21,6 +21,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
@@ -40,14 +41,14 @@ public final class WavRenderer {
         }
     }
 
-    public static void render(
+    public static String render(
         Sequence sequence,
         Path path,
         Soundbank soundbank,
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException {
-        render(sequence, path, soundbank, null, progress, cancelled);
+        return render(sequence, path, soundbank, null, progress, cancelled);
     }
 
     /**
@@ -55,7 +56,12 @@ public final class WavRenderer {
      * {@code soundbank} replaces the default bank. {@code samples} is loaded after it and is not
      * unloaded, so both banks play. Null {@code samples} leaves the sample bank out.
      */
-    public static void render(
+    /**
+     * Same render as {@link #render(Sequence, Path, Soundbank, IntConsumer, BooleanSupplier)}.
+     * Returns a warning when the master clips or the limiter reduces it by more than 1 dB.
+     * Null when the file stays inside that.
+     */
+    public static String render(
         Sequence sequence,
         Path path,
         Soundbank soundbank,
@@ -87,6 +93,7 @@ public final class WavRenderer {
             }
             WavAudio.send(receiver, sequence);
             long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence));
+            MasterWatch watch = MasterWatch.attach(synthesizer);
             Path parent = path.getParent();
             Path directory = parent == null ? Path.of(".") : parent;
             try {
@@ -94,7 +101,7 @@ public final class WavRenderer {
                     Files.createDirectories(parent);
                 }
                 temp = Files.createTempFile(directory, "hits-wav", ".part");
-                write(stream, temp, frames, progress, cancelled);
+                write(stream, temp, frames, progress, cancelled, watch);
                 // createTempFile is owner-only. MIDI is created with the process umask, usually 0644.
                 applyUmaskPermissions(temp);
                 moveIntoPlace(temp, path);
@@ -106,6 +113,7 @@ public final class WavRenderer {
             }
             finished = true;
             report(progress, 100);
+            return watch.warning();
         } catch (javax.sound.midi.InvalidMidiDataException exception) {
             throw new IOException(
                 exception.getMessage() == null ? "The beat could not be rendered." : exception.getMessage(),
@@ -163,7 +171,7 @@ public final class WavRenderer {
             if (frames > Integer.MAX_VALUE) {
                 throw new IOException("The hit is too long to render.");
             }
-            return mixMono(stream, (int) frames);
+            return mixMono(stream, (int) frames, MasterWatch.attach(synthesizer));
         } catch (javax.sound.midi.InvalidMidiDataException exception) {
             throw new IOException(
                 exception.getMessage() == null ? "The beat could not be rendered." : exception.getMessage(),
@@ -186,7 +194,7 @@ public final class WavRenderer {
         }
     }
 
-    private static short[] mixMono(AudioInputStream stream, int frames) throws IOException {
+    private static short[] mixMono(AudioInputStream stream, int frames, MasterWatch watch) throws IOException {
         short[] mono = new short[frames];
         byte[] buffer = new byte[WavAudio.BYTES_PER_FRAME * 4096];
         int frame = 0;
@@ -201,12 +209,15 @@ public final class WavRenderer {
                 throw new IOException("The built-in synth stopped rendering.");
             }
             filled += read;
+            watch.poll();
             int whole = filled / WavAudio.BYTES_PER_FRAME;
             for (int i = 0; i < whole; i++) {
                 int offset = i * WavAudio.BYTES_PER_FRAME;
-                int left = (buffer[offset] & 0xff) | (buffer[offset + 1] << 8);
-                int right = (buffer[offset + 2] & 0xff) | (buffer[offset + 3] << 8);
-                mono[frame++] = (short) ((((short) left) + ((short) right)) / 2);
+                int left = (short) ((buffer[offset] & 0xff) | (buffer[offset + 1] << 8));
+                int right = (short) ((buffer[offset + 2] & 0xff) | (buffer[offset + 3] << 8));
+                watch.hear(left);
+                watch.hear(right);
+                mono[frame++] = (short) ((left + right) / 2);
             }
             int used = whole * WavAudio.BYTES_PER_FRAME;
             if (used < filled) {
@@ -277,7 +288,8 @@ public final class WavRenderer {
         Path temp,
         long frames,
         IntConsumer progress,
-        BooleanSupplier cancelled
+        BooleanSupplier cancelled,
+        MasterWatch watch
     ) throws IOException {
         long total = frames * WavAudio.BYTES_PER_FRAME;
         report(progress, 0);
@@ -297,6 +309,8 @@ public final class WavRenderer {
                 } else if (read == 0) {
                     throw new IOException("The built-in synth stopped rendering.");
                 } else {
+                    watch.poll();
+                    watch.hear(buffer, read);
                     out.write(buffer, 0, read);
                     remaining -= read;
                 }
@@ -370,5 +384,94 @@ public final class WavRenderer {
     private static String text(Throwable exception, String fallback) {
         String message = exception.getMessage();
         return message == null || message.isBlank() ? fallback : message;
+    }
+
+    /**
+     * Watches Gervill's master limiter while samples are pulled. The gain recovers
+     * after the loud part, so it has to be read during the render. Reflection needs
+     * {@code --add-opens java.desktop/com.sun.media.sound=ALL-UNNAMED}. Without that,
+     * only samples sitting on the 16-bit rail are reported.
+     */
+    private static final class MasterWatch {
+        private Object limiter;
+        private java.lang.reflect.Field gainField;
+        private float minGain = 1f;
+        private boolean clipped;
+
+        static MasterWatch attach(Synthesizer synthesizer) {
+            MasterWatch watch = new MasterWatch();
+            try {
+                java.lang.reflect.Field mixerField = synthesizer.getClass().getDeclaredField("mainmixer");
+                mixerField.setAccessible(true);
+                Object mixer = mixerField.get(synthesizer);
+                if (mixer == null) {
+                    return watch;
+                }
+                java.lang.reflect.Field agc = mixer.getClass().getDeclaredField("agc");
+                agc.setAccessible(true);
+                Object limiter = agc.get(mixer);
+                if (limiter == null) {
+                    return watch;
+                }
+                java.lang.reflect.Field gain = limiter.getClass().getDeclaredField("gain");
+                gain.setAccessible(true);
+                watch.limiter = limiter;
+                watch.gainField = gain;
+            } catch (ReflectiveOperationException | InaccessibleObjectException ignored) {
+                // Hard clips are still counted.
+            }
+            return watch;
+        }
+
+        void poll() {
+            if (gainField == null) {
+                return;
+            }
+            try {
+                float value = gainField.getFloat(limiter);
+                if (value > 0f && value < minGain) {
+                    minGain = value;
+                }
+            } catch (IllegalAccessException ignored) {
+                gainField = null;
+            }
+        }
+
+        void hear(int sample) {
+            if (sample >= 32767 || sample <= -32768) {
+                clipped = true;
+            }
+        }
+
+        void hear(byte[] buffer, int length) {
+            int frame = WavAudio.BYTES_PER_FRAME;
+            int frames = length / frame;
+            for (int i = 0; i < frames; i++) {
+                int offset = i * frame;
+                int left = (short) ((buffer[offset] & 0xff) | (buffer[offset + 1] << 8));
+                int right = (short) ((buffer[offset + 2] & 0xff) | (buffer[offset + 3] << 8));
+                hear(left);
+                hear(right);
+            }
+        }
+
+        String warning() {
+            double reduction = minGain < 1f ? -20.0 * Math.log10(minGain) : 0;
+            boolean heavy = reduction > 1.0;
+            if (!heavy && !clipped) {
+                return null;
+            }
+            if (heavy && clipped) {
+                return String.format(
+                    Locale.ROOT,
+                    "The master output clipped. The limiter reduced the master by %.1f dB.",
+                    reduction
+                );
+            }
+            if (heavy) {
+                return String.format(Locale.ROOT, "The limiter reduced the master by %.1f dB.", reduction);
+            }
+            return "The master output clipped.";
+        }
     }
 }

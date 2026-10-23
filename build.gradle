@@ -23,7 +23,10 @@ application {
     // AudioSynthesizer.openStream is the JDK software synth. The package is not exported.
     // run, the installDist start script, and the packaged app all pass this flag.
     // No arguments opens the window. render and info are headless commands.
-    applicationDefaultJvmArgs = ["--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED"]
+    applicationDefaultJvmArgs = [
+        "--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED",
+        "--add-opens", "java.desktop/com.sun.media.sound=ALL-UNNAMED"
+    ]
 }
 
 repositories {
@@ -38,7 +41,10 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
-    jvmArgs("--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED")
+    jvmArgs(
+        "--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED",
+        "--add-opens", "java.desktop/com.sun.media.sound=ALL-UNNAMED"
+    )
     // ./gradlew test -Dhits.updateGoldens=true rewrites the CLI MIDI event dumps.
     def updateGoldens = System.getProperty("hits.updateGoldens")
     if (updateGoldens != null) {
@@ -121,6 +127,7 @@ tasks.register("packageApp") {
             "--add-modules", "java.desktop,java.prefs",
             "--jlink-options", "--strip-native-commands --strip-debug --no-man-pages --no-header-files --compress zip-6",
             "--java-options", "--add-exports=java.desktop/com.sun.media.sound=ALL-UNNAMED",
+            "--java-options", "--add-opens=java.desktop/com.sun.media.sound=ALL-UNNAMED",
             "--java-options", "-Dhits.packaged=true",
         ]
         logger.lifecycle("Packaging Hits as ${type}")

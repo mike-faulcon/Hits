@@ -38,6 +38,8 @@ public final class SampleBank {
     public static final int RELEASE_CHOKE = -7200;
     /** Timecents. About 300 ms, so a held note fades instead of clicking off. */
     public static final int RELEASE_HELD = -2100;
+    /** Loop while the key is down, then play the recorded release. */
+    public static final int LOOP_UNTIL_RELEASE = 3;
     /** Zeros after each sample so the interpolator can read past the end. */
     private static final int PAD = 46;
     /** SF2 default: the decay stage is skipped and the voice sits at the sustain level. */
@@ -72,7 +74,10 @@ public final class SampleBank {
         int decay,
         int sustain,
         int release,
-        int attenuation
+        int attenuation,
+        int loopStart,
+        int loopEnd,
+        int sampleMode
     ) {
         /** A voice at decay 100: a one-shot rings out, a choke follows note-off, and gain is untouched. */
         public Voice(int program, String name, int rate, short[] samples, int root, int start, boolean oneShot) {
@@ -89,6 +94,40 @@ public final class SampleBank {
                 SUSTAIN_FULL,
                 oneShot ? RELEASE_ONE_SHOT : RELEASE_CHOKE,
                 0
+            );
+        }
+
+        /** No custom loop points. {@code sampleMode} follows {@code loop}. */
+        public Voice(
+            int program,
+            String name,
+            int rate,
+            short[] samples,
+            int root,
+            int start,
+            boolean oneShot,
+            boolean loop,
+            int decay,
+            int sustain,
+            int release,
+            int attenuation
+        ) {
+            this(
+                program,
+                name,
+                rate,
+                samples,
+                root,
+                start,
+                oneShot,
+                loop,
+                decay,
+                sustain,
+                release,
+                attenuation,
+                -1,
+                -1,
+                -1
             );
         }
 
@@ -133,7 +172,15 @@ public final class SampleBank {
      * Positive decibels become a negative generator amount, which Gervill treats as a boost.
      */
     public static int attenuation(int decibels) {
-        if (decibels == 0) {
+        return attenuation((double) decibels);
+    }
+
+    /**
+     * Same generator amount as {@link #attenuation(int)}, for a fractional decibel
+     * makeup when PCM was scaled down to fit in 16-bit.
+     */
+    public static int attenuation(double decibels) {
+        if (Math.abs(decibels) < 0.0005) {
             return 0;
         }
         int amount = (int) Math.round(decibels * 10.0 / GERVILL_ATTENUATION_SCALE);
@@ -181,8 +228,13 @@ public final class SampleBank {
             int loopStart = 0;
             int loopEnd = Math.min(pcm.length, 32);
             if (voice.loop() && pcm.length > 128) {
-                loopStart = pcm.length * 2 / 5;
-                loopEnd = pcm.length * 4 / 5;
+                if (voice.loopStart() >= 0 && voice.loopEnd() > voice.loopStart() + 32) {
+                    loopStart = Math.min(voice.loopStart(), pcm.length - 33);
+                    loopEnd = Math.min(voice.loopEnd(), pcm.length);
+                } else {
+                    loopStart = pcm.length * 2 / 5;
+                    loopEnd = pcm.length * 4 / 5;
+                }
                 if (loopEnd < loopStart + 32) {
                     loopEnd = Math.min(pcm.length, loopStart + 32);
                 }
@@ -311,7 +363,11 @@ public final class SampleBank {
         }
         out.writeBytes(generator(43, 0x7F00));
         out.writeBytes(generator(44, 0x7F00));
-        out.writeBytes(generator(54, voice.loop() ? 1 : 0));
+        int sampleMode = voice.sampleMode();
+        if (sampleMode < 0) {
+            sampleMode = voice.loop() ? 1 : 0;
+        }
+        out.writeBytes(generator(54, sampleMode));
         out.writeBytes(generator(58, Math.max(0, Math.min(127, voice.root()))));
         out.writeBytes(generator(53, sampleIndex));
         return count + 8;
