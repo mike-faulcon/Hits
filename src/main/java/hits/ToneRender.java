@@ -15,9 +15,12 @@ import java.util.Map;
 /**
  * Records one built-in drum or note so a high-pass can be stored in the sample bank.
  * Live playback and WAV export then play that recording, which is why they match.
- * The recording is the hit at {@link #CAPTURE_VELOCITY}. A later velocity still
- * follows the SoundFont curve. Tune, decay, cutoff, resonance, reverb, and chorus
- * stay as MIDI, so moving those does not record the hit again.
+ * The recording is the hit at {@link #CAPTURE_VELOCITY}, captured dry: reverb and chorus
+ * are applied later from the row, the same way an unfiltered row sends them.
+ * The synth's leading render latency is trimmed off, so the hit lines up with the
+ * built-in sound. A hot peak is scaled into 16-bit and the lost level is given back
+ * as SoundFont attenuation, so a kick is not turned down to stay in range.
+ * Tune and decay stay as MIDI. Moving the filter records the hit again.
  */
 public final class ToneRender {
     /**
@@ -25,6 +28,10 @@ public final class ToneRender {
      * back at the level the built-in sound had.
      */
     public static final int CAPTURE_VELOCITY = 100;
+
+    /** Held-note capture: eight 16ths at 120 bpm, one second of sustain, then the release. */
+    private static final int NOTE_BPM = 120;
+    private static final int NOTE_STEPS = 8;
 
     private static final int RAW_LIMIT = 16;
     private static final Map<String, short[]> RAW = new LinkedHashMap<>(16, 0.75f, true) {
@@ -34,11 +41,24 @@ public final class ToneRender {
         }
     };
     private static volatile double playbackGain = Double.NaN;
+    /** Samples of leading silence the offline synth inserts. {@code -1} until measured. */
+    private static volatile int leadSamples = -1;
 
     private ToneRender() {}
 
-    /** Filtered PCM for {@code track}, and whether a note should loop. */
-    public record Rendered(short[] samples, boolean loop) {}
+    /**
+     * Filtered PCM for {@code track}, whether a note should loop, and the SoundFont
+     * attenuation that restores any level the 16-bit fit removed.
+     * Loop points are sample indexes. {@code -1} asks the bank for its usual loop.
+     */
+    public record Rendered(
+        short[] samples,
+        boolean loop,
+        int attenuation,
+        int loopStart,
+        int loopEnd,
+        int sampleMode
+    ) {}
 
     public static Rendered render(Soundbank kits, hits.Track track) throws IOException {
         if (track == null) {
@@ -49,22 +69,47 @@ public final class ToneRender {
         synchronized (RAW) {
             raw = RAW.get(id);
             if (raw == null) {
-                raw = scale(capture(kits, track), playbackGain());
+                raw = capture(kits, track);
                 RAW.put(id, raw);
             }
         }
-        short[] filtered = ToneFilter.apply(
-            raw.clone(),
-            WavAudio.SAMPLE_RATE,
-            track.lowCutHz(),
-            track.lowCutSlope(),
-            track.presence()
-        );
-        boolean loop = track.mode() == TrackMode.NOTE && sustains(filtered);
-        if (loop) {
-            crossfade(filtered);
+        double[] audio = new double[raw.length];
+        for (int i = 0; i < raw.length; i++) {
+            audio[i] = raw[i];
         }
-        return new Rendered(filtered, loop);
+        if (track.hasTone()) {
+            audio = ToneFilter.process(raw, WavAudio.SAMPLE_RATE, track.lowCutHz(), track.lowCutSlope(), track.presence());
+        }
+        double gain = playbackGain();
+        if (Math.abs(gain - 1.0) >= 0.02) {
+            for (int i = 0; i < audio.length; i++) {
+                audio[i] *= gain;
+            }
+        }
+        boolean note = track.mode() == TrackMode.NOTE;
+        int loopStart = -1;
+        int loopEnd = -1;
+        int sampleMode = -1;
+        boolean loop = note && sustains(audio);
+        if (loop) {
+            Loop marked = markLoop(audio, WavAudio.SAMPLE_RATE);
+            if (marked == null) {
+                loop = false;
+            } else {
+                loopStart = marked.start;
+                loopEnd = marked.end;
+                sampleMode = SampleBank.LOOP_UNTIL_RELEASE;
+            }
+        }
+        ToneFilter.Fitted fitted = ToneFilter.fit(audio);
+        return new Rendered(
+            fitted.samples(),
+            loop,
+            SampleBank.attenuation(fitted.makeupDb()),
+            loopStart,
+            loopEnd,
+            sampleMode
+        );
     }
 
     /**
@@ -81,9 +126,19 @@ public final class ToneRender {
         return early > 200 && later > early * 0.4;
     }
 
+    private static boolean sustains(double[] pcm) {
+        int rate = WavAudio.SAMPLE_RATE;
+        if (pcm == null || pcm.length < rate / 2) {
+            return false;
+        }
+        double early = rms(pcm, rate / 20, rate / 5);
+        double later = rms(pcm, rate / 2, Math.min(pcm.length, rate * 3 / 4));
+        return early > 200 && later > early * 0.4;
+    }
+
     private static short[] capture(Soundbank kits, hits.Track source) throws IOException {
         Beat beat = Beat.drumKit("tone");
-        beat.setBpm(120);
+        beat.setBpm(NOTE_BPM);
         beat.setSwing(50);
         hits.Track row = beat.track(0);
         row.setName(source.name());
@@ -94,13 +149,17 @@ public final class ToneRender {
         row.setKit(source.kit());
         row.setPreset(source.preset());
         row.setVelocity(CAPTURE_VELOCITY);
+        // The built-in synth's default reverb is part of a plain drum. Baking it in and
+        // then sending the row's own reverb plays the room twice. Capture dry.
+        row.setReverb(0);
+        row.setChorus(0);
         boolean note = row.mode() == TrackMode.NOTE;
         if (note) {
-            beat.setStepCount(8);
+            beat.setStepCount(NOTE_STEPS);
             row.setGate(100);
             row.tap(0, false);
             row.step(0).setVelocity(CAPTURE_VELOCITY);
-            row.step(0).setLength(8);
+            row.step(0).setLength(NOTE_STEPS);
         } else {
             beat.setStepCount(1);
             row.tap(0, false);
@@ -112,7 +171,10 @@ public final class ToneRender {
             if (peak(mono) < 40) {
                 throw new IOException("The built-in sound did not render.");
             }
-            return trim(mono);
+            short[] trimmed = dropLead(mono, leadIn());
+            int releaseAt = note ? noteReleaseAt(WavAudio.SAMPLE_RATE) : 0;
+            int minEnd = note ? releaseAt + WavAudio.SAMPLE_RATE * 3 / 10 : 0;
+            return trimTail(trimmed, minEnd);
         } catch (InvalidMidiDataException exception) {
             throw new IOException(
                 exception.getMessage() == null ? "The built-in sound did not render." : exception.getMessage(),
@@ -121,10 +183,17 @@ public final class ToneRender {
         }
     }
 
+    /** Sample index where the captured note's release begins, after the lead-in is gone. */
+    private static int noteReleaseAt(int rate) {
+        double seconds = NOTE_STEPS * (60.0 / NOTE_BPM) / 4.0;
+        return (int) Math.round(seconds * rate);
+    }
+
     /**
      * How much louder the sample bank plays a recording back, measured once with a sine
      * at {@link #CAPTURE_VELOCITY}. Captured hits are scaled by this so the passband
-     * stays at the built-in level.
+     * stays at the built-in level. A peak that would not fit is scaled down in
+     * {@link ToneFilter#fit} and restored with SoundFont attenuation.
      */
     private static double playbackGain() throws IOException {
         if (!Double.isNaN(playbackGain)) {
@@ -157,6 +226,51 @@ public final class ToneRender {
         }
     }
 
+    /**
+     * Leading samples the offline synth inserts before a note at tick 0.
+     * Measured with a one-sample impulse, dry, through the same renderer as a capture.
+     */
+    private static int leadIn() throws IOException {
+        if (leadSamples >= 0) {
+            return leadSamples;
+        }
+        synchronized (ToneRender.class) {
+            if (leadSamples >= 0) {
+                return leadSamples;
+            }
+            int rate = WavAudio.SAMPLE_RATE;
+            short[] impulse = new short[64];
+            impulse[0] = 28000;
+            try {
+                byte[] sf2 = SampleBank.write(List.of(new SampleBank.Voice(0, "imp", rate, impulse, 60, 0, true)));
+                Soundbank bank = SampleBank.load(sf2);
+                short[] heard = WavRenderer.renderMono(impulseSequence(), null, bank);
+                int peak = peak(heard);
+                if (peak < 40) {
+                    throw new IOException("The sample bank did not play the latency impulse.");
+                }
+                int gate = Math.max(40, peak / 20);
+                int at = 0;
+                for (int i = 0; i < heard.length; i++) {
+                    if (Math.abs(heard[i]) >= gate) {
+                        at = i;
+                        break;
+                    }
+                }
+                int cap = rate / 20;
+                leadSamples = Math.max(0, Math.min(at, cap));
+                return leadSamples;
+            } catch (InvalidMidiDataException exception) {
+                throw new IOException("The sample bank did not play the latency impulse.", exception);
+            }
+        }
+    }
+
+    /**
+     * The sine is played the way a captured hit is played back: velocity
+     * {@link #CAPTURE_VELOCITY}, and the synth's own reverb. The impulse that
+     * measures latency is a separate, dry note so the onset is not the room.
+     */
     private static Sequence calibrationSequence() throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, SequenceBuilder.PPQ);
         Track midi = sequence.createTrack();
@@ -181,44 +295,66 @@ public final class ToneRender {
         return sequence;
     }
 
+    /** A dry note at tick 0. Reverb and chorus are 0 so the onset is not the room. */
+    private static Sequence impulseSequence() throws InvalidMidiDataException {
+        Sequence sequence = new Sequence(Sequence.PPQ, SequenceBuilder.PPQ);
+        Track midi = sequence.createTrack();
+        MetaMessage tempo = new MetaMessage();
+        tempo.setMessage(0x51, new byte[] {0x07, (byte) 0xA1, 0x20}, 3);
+        midi.add(new MidiEvent(tempo, 0));
+        control(midi, 0, SampleBank.SF2_BANK, 0);
+        control(midi, 32, 0, 0);
+        control(midi, 10, 64, 0);
+        control(midi, 91, 0, 0);
+        control(midi, 93, 0, 0);
+        ShortMessage program = new ShortMessage();
+        program.setMessage(ShortMessage.PROGRAM_CHANGE, 0, 0, 0);
+        midi.add(new MidiEvent(program, 0));
+        ShortMessage on = new ShortMessage();
+        on.setMessage(ShortMessage.NOTE_ON, 0, 60, 127);
+        midi.add(new MidiEvent(on, 0));
+        ShortMessage off = new ShortMessage();
+        off.setMessage(ShortMessage.NOTE_OFF, 0, 60, 0);
+        midi.add(new MidiEvent(off, SequenceBuilder.PPQ));
+        MetaMessage end = new MetaMessage();
+        end.setMessage(0x2F, new byte[0], 0);
+        midi.add(new MidiEvent(end, SequenceBuilder.PPQ));
+        return sequence;
+    }
+
     private static void control(Track midi, int controller, int value, long tick) throws InvalidMidiDataException {
         ShortMessage message = new ShortMessage();
         message.setMessage(ShortMessage.CONTROL_CHANGE, 0, controller, value);
         midi.add(new MidiEvent(message, tick));
     }
 
-    private static short[] scale(short[] pcm, double gain) {
-        if (Math.abs(gain - 1.0) < 0.02) {
+    /** Drops the offline synth's leading latency. The instrument's own attack stays. */
+    private static short[] dropLead(short[] pcm, int lead) {
+        if (pcm == null || lead <= 0 || lead >= pcm.length - 64) {
             return pcm;
         }
-        double peak = peak(pcm);
-        double used = gain;
-        if (peak * used > 32000) {
-            used = 32000 / peak;
-        }
-        short[] out = new short[pcm.length];
-        for (int i = 0; i < pcm.length; i++) {
-            int value = (int) Math.round(pcm[i] * used);
-            if (value > 32767) {
-                value = 32767;
-            } else if (value < -32768) {
-                value = -32768;
-            }
-            out[i] = (short) value;
-        }
-        return out;
+        short[] trimmed = new short[pcm.length - lead];
+        System.arraycopy(pcm, lead, trimmed, 0, trimmed.length);
+        return trimmed;
     }
 
-    /** Drops the quiet export tail. Keeps a short ring after the last loud frame. */
-    private static short[] trim(short[] pcm) {
+    /**
+     * Drops the quiet export tail. Keeps down to about −40 dB, and at least {@code minEnd}
+     * samples, so a note's release is still in the recording.
+     */
+    private static short[] trimTail(short[] pcm, int minEnd) {
+        if (pcm == null || pcm.length == 0) {
+            return pcm == null ? new short[0] : pcm;
+        }
+        int gate = Math.max(12, peak(pcm) / 100);
         int last = 0;
         for (int i = 0; i < pcm.length; i++) {
-            if (Math.abs(pcm[i]) > 180) {
+            if (Math.abs(pcm[i]) >= gate) {
                 last = i;
             }
         }
-        int end = Math.min(pcm.length, last + WavAudio.SAMPLE_RATE / 5);
-        int floor = Math.min(pcm.length, WavAudio.SAMPLE_RATE / 10);
+        int end = Math.min(pcm.length, last + WavAudio.SAMPLE_RATE / 10);
+        int floor = Math.min(pcm.length, Math.max(WavAudio.SAMPLE_RATE / 10, minEnd));
         end = Math.max(end, floor);
         if (end >= pcm.length) {
             return pcm;
@@ -228,23 +364,49 @@ public final class ToneRender {
         return trimmed;
     }
 
-    /** Blends the loop end toward the loop start so a held note does not click. */
-    private static void crossfade(short[] pcm) {
-        if (pcm.length < 512) {
-            return;
+    /**
+     * A short loop in the steady sustain, crossfaded into the samples just before it,
+     * with the recorded release left after {@code end}. Sample mode 3 plays that tail
+     * once the key is up. The loop is leveled so a slow decay does not pump each cycle.
+     */
+    private record Loop(int start, int end) {}
+
+    private static Loop markLoop(double[] pcm, int rate) {
+        int releaseAt = noteReleaseAt(rate);
+        int minTail = rate * 3 / 10;
+        if (pcm == null || releaseAt + minTail > pcm.length) {
+            return null;
         }
-        int loopStart = pcm.length * 2 / 5;
-        int loopEnd = pcm.length * 4 / 5;
-        int fade = 256;
-        if (loopEnd - fade <= loopStart || loopStart + fade >= pcm.length) {
-            return;
+        int fade = Math.min(rate / 20, 2048);
+        int loopLen = Math.min(rate / 8, releaseAt / 3);
+        if (loopLen < fade * 2) {
+            return null;
+        }
+        int loopEnd = releaseAt;
+        int loopStart = loopEnd - loopLen;
+        if (loopStart < fade) {
+            return null;
+        }
+        int window = Math.min(fade, loopLen / 4);
+        double startLevel = rms(pcm, loopStart, loopStart + window);
+        double endLevel = rms(pcm, loopEnd - window, loopEnd);
+        if (startLevel > 1 && endLevel > 1) {
+            double ratio = startLevel / endLevel;
+            ratio = Math.max(0.75, Math.min(1.35, ratio));
+            for (int i = 0; i < loopLen; i++) {
+                double t = i / (double) Math.max(1, loopLen - 1);
+                pcm[loopStart + i] *= 1 + (ratio - 1) * t;
+            }
         }
         for (int i = 0; i < fade; i++) {
             double t = i / (double) fade;
+            double keep = Math.cos(t * Math.PI / 2);
+            double bring = Math.sin(t * Math.PI / 2);
             int at = loopEnd - fade + i;
-            double mixed = (1 - t) * pcm[at] + t * pcm[loopStart + i];
-            pcm[at] = (short) Math.max(-32768, Math.min(32767, Math.round(mixed)));
+            double joined = pcm[at] * keep + pcm[loopStart - fade + i] * bring;
+            pcm[at] = joined;
         }
+        return new Loop(loopStart, loopEnd);
     }
 
     private static String identity(Soundbank kits, hits.Track track) {
@@ -288,11 +450,29 @@ public final class ToneRender {
         return Math.sqrt(sum / (to - from));
     }
 
+    private static double rms(double[] pcm, int start, int end) {
+        if (pcm == null || pcm.length == 0) {
+            return 0;
+        }
+        int from = Math.max(0, start);
+        int to = Math.min(pcm.length, end);
+        if (to <= from) {
+            return 0;
+        }
+        double sum = 0;
+        for (int i = from; i < to; i++) {
+            double sample = pcm[i];
+            sum += sample * sample;
+        }
+        return Math.sqrt(sum / (to - from));
+    }
+
     /** For tests that need a fresh calibration after a JDK change. Not used by the app. */
     static void forget() {
         synchronized (RAW) {
             RAW.clear();
         }
         playbackGain = Double.NaN;
+        leadSamples = -1;
     }
 }

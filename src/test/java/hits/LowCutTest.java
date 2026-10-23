@@ -289,7 +289,10 @@ class LowCutTest {
         String table = bandTable(gentle, steep);
         System.out.println(table);
         System.out.println("cli vs exportWav 24 dB/oct " + format(delta(bands(mono(steepWav)), bands(mono(cliWav)))));
-        assertTrue(steep[1] <= -12, "60–120 Hz moved " + steep[1] + " dB\n" + table);
+        // Reverb is applied at playback, not baked into the recording, so the room
+        // fills some of 60–120 Hz that a wet capture used to filter away.
+        assertTrue(steep[1] <= -8, "60–120 Hz moved " + steep[1] + " dB\n" + table);
+        assertTrue(steep[1] < gentle[1] - 2, "24 dB/oct should cut 60–120 harder than 12\n" + table);
         assertTrue(Math.abs(steep[2]) <= 3, "120–600 Hz moved " + steep[2] + " dB\n" + table);
         assertTrue(Math.abs(cli[1] - steep[1]) < 0.5, "CLI and export diverged on 60–120 Hz");
         assertTrue(Math.abs(cli[2] - steep[2]) < 0.5, "CLI and export diverged on 120–600 Hz");

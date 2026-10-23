@@ -49,7 +49,7 @@ public final class HitsCli {
         + "render writes the active pattern once, as heard. --song writes the whole chain.\n"
         + "The output type comes from the extension (.wav, .mid, or .midi).\n"
         + "WAV uses the built-in General MIDI synth plus the beat's sample bank, and does not open an audio device.\n"
-        + "Low cut and presence are in the WAV. A MIDI file keeps the ordinary note and does not carry them.\n"
+        + "Low cut and presence are in the WAV. A MIDI file keeps the ordinary note and does not carry them, and says so on stderr.\n"
         + "A user SoundFont is not loaded. --samples-sf2 writes <name>-samples.sf2 beside a MIDI file.\n"
         + "Exit codes: 0 ok, 1 the beat or the render failed, 2 the command line was wrong.\n";
 
@@ -133,14 +133,21 @@ public final class HitsCli {
         ExportOptions options = parsed.song
             ? new ExportOptions(true, false, 1, true)
             : ExportOptions.matchingPlayback();
+        warnLoads(beat, err);
         warnSamples(beat, parsed.beat, SequenceBuilder.exportSlots(beat, options), err);
+        if (midi || parsed.samplesSf2) {
+            warnFilters(beat, err);
+        }
         try {
             Path parent = parsed.out.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
             if (wav) {
-                BeatFiles.exportWav(beat, parsed.out, options, null, null, () -> false, parsed.beat);
+                String limiter = BeatFiles.exportWav(beat, parsed.out, options, null, null, () -> false, parsed.beat);
+                if (limiter != null && !limiter.isBlank()) {
+                    err.println(limiter);
+                }
             } else {
                 BeatFiles.exportMidi(beat, parsed.out, options, parsed.beat, parsed.samplesSf2);
             }
@@ -182,6 +189,8 @@ public final class HitsCli {
         } catch (Fail fail) {
             return fail.code;
         }
+        warnLoads(beat, err);
+        warnFilters(beat, err);
         try {
             List<Character> slots = usedSlots(beat);
             SampleLibrary.Ready ready = SampleLibrary.prepare(beat, parsed.beat, slots);
@@ -261,7 +270,28 @@ public final class HitsCli {
         }
         text.append("length: ").append(lengthText(pattern, patternSections)).append('\n');
         text.append("song: ").append(lengthText(song, songSections)).append('\n');
+        text.append("sample gain: +").append(SampleRef.GAIN)
+            .append(" dB is the default when a sample row does not set gain\n");
         return text.toString();
+    }
+
+    private static void warnLoads(Beat beat, PrintStream err) {
+        if (beat == null) {
+            return;
+        }
+        for (String warning : beat.loadWarnings()) {
+            err.println(warning);
+        }
+    }
+
+    private static void warnFilters(Beat beat, PrintStream err) {
+        if (beat == null) {
+            return;
+        }
+        String warning = beat.midiFilterWarning();
+        if (warning != null) {
+            err.println(warning);
+        }
     }
 
     private static void warnSamples(Beat beat, Path beatFile, List<Character> slots, PrintStream err) {

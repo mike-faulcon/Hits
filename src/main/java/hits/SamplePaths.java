@@ -24,10 +24,15 @@ public final class SamplePaths {
         if (path.isAbsolute()) {
             return path.normalize();
         }
-        if (beatFile == null || beatFile.getParent() == null) {
+        if (beatFile == null) {
             return null;
         }
-        return beatFile.getParent().resolve(path).normalize();
+        // A bare relative beat path has no parent. Resolve against that file's directory.
+        Path parent = beatFile.toAbsolutePath().normalize().getParent();
+        if (parent == null) {
+            return null;
+        }
+        return parent.resolve(path).normalize();
     }
 
     /** Path relative to {@code beatFile}, with {@code /} separators. */

@@ -9,35 +9,75 @@ public final class ToneFilter {
     private ToneFilter() {}
 
     /**
+     * PCM scaled into 16-bit, and the decibels to add back so playback stays at the
+     * unscaled level. {@code makeupDb} is 0 when nothing exceeded the range.
+     */
+    public record Fitted(short[] samples, double makeupDb) {}
+
+    /**
      * High-pass, then a high shelf when {@code presenceDb} is above 0.
      * Returns {@code samples} itself when both are off, so a plain row is not copied.
+     * Samples outside 16-bit are clamped. {@link #fit(double[])} keeps that overshoot instead.
      */
     public static short[] apply(short[] samples, int rate, int hz, int slope, int presenceDb) {
         if (samples == null || samples.length == 0) {
             return samples == null ? new short[0] : samples;
         }
-        boolean highpass = hz > 0;
-        boolean shelf = presenceDb > 0;
-        if (!highpass && !shelf) {
+        if (hz <= 0 && presenceDb <= 0) {
             return samples;
         }
-        double[] audio = new double[samples.length];
-        for (int i = 0; i < samples.length; i++) {
-            audio[i] = samples[i];
-        }
-        if (highpass) {
-            for (Section section : highPass(rate, hz, slope)) {
-                section.process(audio);
-            }
-        }
-        if (shelf) {
-            highShelf(rate, Track.PRESENCE_HZ, presenceDb).process(audio);
-        }
+        double[] audio = process(samples, rate, hz, slope, presenceDb);
         short[] out = new short[audio.length];
         for (int i = 0; i < audio.length; i++) {
             out[i] = clamp(audio[i]);
         }
         return out;
+    }
+
+    /**
+     * The same filter as {@link #apply}, left in floating point so a later stage can
+     * scale the peak into 16-bit instead of flattening it.
+     */
+    public static double[] process(short[] samples, int rate, int hz, int slope, int presenceDb) {
+        int length = samples == null ? 0 : samples.length;
+        double[] audio = new double[length];
+        for (int i = 0; i < length; i++) {
+            audio[i] = samples[i];
+        }
+        if (hz > 0) {
+            for (Section section : highPass(rate, hz, slope)) {
+                section.process(audio);
+            }
+        }
+        if (presenceDb > 0) {
+            highShelf(rate, Track.PRESENCE_HZ, presenceDb).process(audio);
+        }
+        return audio;
+    }
+
+    /**
+     * Scales {@code audio} so the peak fits in 16-bit. The returned makeup is the
+     * decibel boost that puts playback back at the unscaled level.
+     */
+    public static Fitted fit(double[] audio) {
+        if (audio == null || audio.length == 0) {
+            return new Fitted(new short[0], 0);
+        }
+        double peak = 0;
+        for (double sample : audio) {
+            peak = Math.max(peak, Math.abs(sample));
+        }
+        double scale = 1;
+        double makeup = 0;
+        if (peak > 32767) {
+            scale = 32767.0 / peak;
+            makeup = 20.0 * Math.log10(peak / 32767.0);
+        }
+        short[] out = new short[audio.length];
+        for (int i = 0; i < audio.length; i++) {
+            out[i] = clamp(audio[i] * scale);
+        }
+        return new Fitted(out, makeup);
     }
 
     /** High-pass magnitude at {@code freqHz}, in dB. 0 dB is the passband. */

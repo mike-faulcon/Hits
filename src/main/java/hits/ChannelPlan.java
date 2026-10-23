@@ -57,6 +57,16 @@ public final class ChannelPlan {
     private final Soundbank kits;
     /** Which sample rows actually play a sample. Null or {@link SampleUse#none()} falls back. */
     private final SampleUse samples;
+    /**
+     * Extra channel for a sample-bank voice when the same row also has a plain
+     * drum or note. {@code -1} keeps the rendered voice on {@link #reserved}.
+     */
+    private final int[] sampleChannel;
+    /**
+     * The plain drum could not get its own channel, so it plays on channel 9
+     * with per-key NRPN. The sample-bank voice stays on {@link #reserved}.
+     */
+    private final boolean[] acousticNine;
 
     private ChannelPlan(
         int[] reserved,
@@ -64,7 +74,9 @@ public final class ChannelPlan {
         boolean[] presetRow,
         int[] shapeRow,
         Soundbank kits,
-        SampleUse samples
+        SampleUse samples,
+        int[] sampleChannel,
+        boolean[] acousticNine
     ) {
         this.reserved = reserved;
         this.overflow = overflow;
@@ -72,6 +84,16 @@ public final class ChannelPlan {
         this.shapeRow = shapeRow;
         this.kits = kits;
         this.samples = samples == null ? SampleUse.none() : samples;
+        this.sampleChannel = sampleChannel == null ? emptyChannels(reserved.length) : sampleChannel;
+        this.acousticNine = acousticNine == null ? new boolean[reserved.length] : acousticNine;
+    }
+
+    private static int[] emptyChannels(int count) {
+        int[] channels = new int[Math.max(0, count)];
+        for (int i = 0; i < channels.length; i++) {
+            channels[i] = -1;
+        }
+        return channels;
     }
 
     /**
@@ -122,6 +144,9 @@ public final class ChannelPlan {
         boolean[] melodic = new boolean[Beat.TRACKS];
         boolean[] presetRow = new boolean[Beat.TRACKS];
         int[] shapeRow = new int[Beat.TRACKS];
+        boolean[] sampleVoice = new boolean[Beat.TRACKS];
+        boolean[] acousticPrivate = new boolean[Beat.TRACKS];
+        boolean[] acousticMelodic = new boolean[Beat.TRACKS];
         if (beat != null && slots != null) {
             for (char slot : slots) {
                 Track[] tracks = beat.slot(slot);
@@ -148,11 +173,64 @@ public final class ChannelPlan {
                         || (track.mode() == TrackMode.DRUM && track.preset() != null)) {
                         melodic[row] = true;
                     }
+                    if (rendered) {
+                        sampleVoice[row] = true;
+                    } else {
+                        acousticPrivate[row] = true;
+                        if (track.mode() == TrackMode.NOTE
+                            || (track.mode() == TrackMode.DRUM && track.preset() != null)) {
+                            acousticMelodic[row] = true;
+                        }
+                    }
                 }
             }
         }
         ChannelPlan assigned = assign(Beat.TRACKS, needsPrivate, melodic);
-        return new ChannelPlan(assigned.reserved, assigned.overflow, presetRow, shapeRow, kits, samples);
+        int[] sampleChannel = emptyChannels(Beat.TRACKS);
+        boolean[] acousticNine = new boolean[Beat.TRACKS];
+        separate(assigned, sampleVoice, acousticPrivate, acousticMelodic, sampleChannel, acousticNine);
+        return new ChannelPlan(
+            assigned.reserved, assigned.overflow, presetRow, shapeRow, kits, samples, sampleChannel, acousticNine
+        );
+    }
+
+    /**
+     * A filtered hit and a plain hit on the same row cannot share a channel.
+     * Gervill will not switch that channel from the sample bank back to the drum bank,
+     * so the plain hit would play the filtered recording. The plain voice keeps the
+     * channel it would have had on its own. The filtered voice takes the next free
+     * pool channel. When none is left, a plain drum falls back to channel 9.
+     */
+    private static void separate(
+        ChannelPlan assigned,
+        boolean[] sampleVoice,
+        boolean[] acousticPrivate,
+        boolean[] acousticMelodic,
+        int[] sampleChannel,
+        boolean[] acousticNine
+    ) {
+        boolean[] taken = new boolean[16];
+        taken[Gm.DRUM_CHANNEL] = true;
+        for (int row = 0; row < assigned.reserved.length; row++) {
+            int channel = assigned.reserved[row];
+            if (channel >= 0 && channel < taken.length && !assigned.overflow[row]) {
+                taken[channel] = true;
+            }
+        }
+        int rows = Math.min(sampleChannel.length, assigned.reserved.length);
+        for (int row = 0; row < rows; row++) {
+            if (row >= sampleVoice.length || !sampleVoice[row]
+                || row >= acousticPrivate.length || !acousticPrivate[row]) {
+                continue;
+            }
+            int extra = nextFree(taken);
+            if (extra >= 0) {
+                sampleChannel[row] = extra;
+                taken[extra] = true;
+            } else if (row >= acousticMelodic.length || !acousticMelodic[row]) {
+                acousticNine[row] = true;
+            }
+        }
     }
 
     private static int shapeFlags(Track track) {
@@ -194,7 +272,7 @@ public final class ChannelPlan {
         boolean[] taken = new boolean[16];
         place(reserved, overflow, taken, needsPrivate, melodic, true);
         place(reserved, overflow, taken, needsPrivate, melodic, false);
-        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none());
+        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null);
     }
 
     private static void place(
@@ -255,7 +333,14 @@ public final class ChannelPlan {
         if (track != null && track.mode() == TrackMode.SAMPLE && !samples.plays(track, row)) {
             return Gm.DRUM_CHANNEL;
         }
-        if (track != null && track.mode() != TrackMode.SAMPLE && samples.plays(track, row)) {
+        boolean rendered = track != null && track.mode() != TrackMode.SAMPLE && samples.plays(track, row);
+        if (rendered && row >= 0 && row < sampleChannel.length && sampleChannel[row] >= 0) {
+            return sampleChannel[row];
+        }
+        if (!rendered && acousticNine(row)) {
+            return Gm.DRUM_CHANNEL;
+        }
+        if (rendered) {
             int reservedChannel = reserved(row);
             if (reservedChannel >= 0 && !overflow(row)) {
                 return reservedChannel;
@@ -286,6 +371,10 @@ public final class ChannelPlan {
         return row >= 0 && row < overflow.length && overflow[row];
     }
 
+    private boolean acousticNine(int row) {
+        return row >= 0 && row < acousticNine.length && acousticNine[row];
+    }
+
     /**
      * Bank, program, and pan for one row, in the order a synth needs them.
      * A shared drum sends pan only. A pitched preset sends its melodic program
@@ -314,6 +403,13 @@ public final class ChannelPlan {
     public List<ShortMessage> setup(Track track, int channel, int row) throws InvalidMidiDataException {
         List<ShortMessage> messages = new ArrayList<>();
         boolean rendered = samples.plays(track, row);
+        // A plain drum that lost its channel to a filtered voice on the same row
+        // plays on channel 9. Bank 120 there would retune every drum, so only the key moves.
+        if (!rendered && acousticNine(row) && channel == Gm.DRUM_CHANNEL) {
+            addKeyShape(messages, track, channel, row);
+            messages.add(control(channel, 10, track.pan()));
+            return messages;
+        }
         // A low-cut drum still looks like a shared kit drum: no tune, decay, or effect.
         // Playback has already put it on its own channel so the sample bank can play.
         // Channel 9 stays pan-only, including when that filtered drum overflowed.
@@ -344,7 +440,10 @@ public final class ChannelPlan {
                 bankSelect(messages, channel, track.bank());
                 messages.add(program(channel, SoundCatalog.playedKit(kits, track.kit())));
             }
-            if (overflow(row)) {
+            // A rendered voice on its own channel still gets bank, program, and bend,
+            // even when the plain voice on this row overflowed onto channel 9.
+            boolean keyShape = (overflow(row) || acousticNine(row)) && !(rendered && channel != Gm.DRUM_CHANNEL);
+            if (keyShape) {
                 addKeyShape(messages, track, channel, row);
             } else {
                 addChannelShape(messages, track, channel, row, preset);

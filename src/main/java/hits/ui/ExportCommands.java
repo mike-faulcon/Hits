@@ -129,8 +129,14 @@ final class ExportCommands {
         if (choice == null) {
             return;
         }
-        if (renderWav(editor.beat().copy(), choice.path(), choice.options(), "Export WAV")) {
-            status.set("Exported " + choice.path().getFileName() + ExportPlan.summary(choice.options()));
+        WavExport rendered = renderWav(editor.beat().copy(), choice.path(), choice.options(), "Export WAV");
+        if (rendered.ok()) {
+            String message = "Exported " + choice.path().getFileName() + ExportPlan.summary(choice.options());
+            if (rendered.warning() != null && !rendered.warning().isBlank()) {
+                message = message + " " + rendered.warning();
+                JOptionPane.showMessageDialog(frame, rendered.warning(), "Hits", JOptionPane.WARNING_MESSAGE);
+            }
+            status.set(message);
         }
     }
 
@@ -144,17 +150,24 @@ final class ExportCommands {
         String name = ExportPlan.dragFileName(beat.name(), options, beat.activeSlot(), extension);
         try {
             Path path = dragFiles.place(name);
+            String warning = null;
             if ("wav".equals(extension)) {
-                if (!renderWav(beat, path, options, "Drag WAV")) {
+                WavExport rendered = renderWav(beat, path, options, "Drag WAV");
+                if (!rendered.ok()) {
                     return null;
                 }
+                warning = rendered.warning();
             } else {
                 BeatFiles.exportMidi(beat, path, options, beatFile.get(), includeSamples());
             }
             if (!Files.isRegularFile(path)) {
                 return null;
             }
-            status.set("Dragging " + path.getFileName() + ExportPlan.summary(options));
+            String message = "Dragging " + path.getFileName() + ExportPlan.summary(options);
+            if (warning != null && !warning.isBlank()) {
+                message = message + " " + warning;
+            }
+            status.set(message);
             return path;
         } catch (RuntimeException | IOException | javax.sound.midi.InvalidMidiDataException exception) {
             JOptionPane.showMessageDialog(frame, Widgets.message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
@@ -162,8 +175,8 @@ final class ExportCommands {
         }
     }
 
-    /** Renders a WAV while a progress dialog is up. False when the user cancels or rendering fails. */
-    private boolean renderWav(Beat beat, Path path, ExportOptions options, String title) {
+    /** Renders a WAV while a progress dialog is up. {@code ok} is false when the user cancels or rendering fails. */
+    private WavExport renderWav(Beat beat, Path path, ExportOptions options, String title) {
         Path soundFont = player.soundFont();
         JDialog dialog = new JDialog(frame, title, Dialog.ModalityType.APPLICATION_MODAL);
         JProgressBar bar = new JProgressBar(0, 100);
@@ -183,11 +196,11 @@ final class ExportCommands {
         dialog.setLocationRelativeTo(frame);
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
-        SwingWorker<Void, Integer> worker = new SwingWorker<>() {
+        SwingWorker<String, Integer> worker = new SwingWorker<>() {
             @Override
-            protected Void doInBackground() throws Exception {
+            protected String doInBackground() throws Exception {
                 javax.sound.midi.Soundbank bank = soundFont == null ? null : SoundFonts.read(soundFont);
-                BeatFiles.exportWav(
+                return BeatFiles.exportWav(
                     beat,
                     path,
                     options,
@@ -196,7 +209,6 @@ final class ExportCommands {
                     this::isCancelled,
                     beatFile.get()
                 );
-                return null;
             }
 
             private void publishPercent(int percent) {
@@ -227,8 +239,8 @@ final class ExportCommands {
         SwingUtilities.invokeLater(worker::execute);
         dialog.setVisible(true);
         try {
-            worker.get();
-            return true;
+            String warning = worker.get();
+            return new WavExport(true, warning);
         } catch (CancellationException exception) {
             status.set("Export cancelled");
         } catch (InterruptedException exception) {
@@ -238,11 +250,27 @@ final class ExportCommands {
             Throwable cause = exception.getCause() == null ? exception : exception.getCause();
             if (cause instanceof WavRenderer.Cancelled) {
                 status.set("Export cancelled");
-                return false;
+                return new WavExport(false, null);
             }
             JOptionPane.showMessageDialog(frame, Widgets.message(cause), "Hits", JOptionPane.ERROR_MESSAGE);
         }
-        return false;
+        return new WavExport(false, null);
+    }
+
+    private record WavExport(boolean ok, String warning) {}
+
+    private static String escapeHtml(String text) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '&' -> out.append("&amp;");
+                case '<' -> out.append("&lt;");
+                case '>' -> out.append("&gt;");
+                default -> out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     /** Save dialog shared by MIDI and WAV. Null when the user cancels. */
@@ -304,8 +332,9 @@ final class ExportCommands {
         if (midi) {
             samples.setSelected(includeSamples());
             accessory.add(samples);
-            if (editor.beat().hasTone()) {
-                JLabel lowCut = new JLabel("<html>Low cut and presence are not in the MIDI file.<br>Playback and WAV export use them.</html>");
+            String filterWarning = editor.beat().midiFilterWarning();
+            if (filterWarning != null) {
+                JLabel lowCut = new JLabel("<html><body style='width:280px'>" + escapeHtml(filterWarning) + "</body></html>");
                 lowCut.setName("export-low-cut");
                 lowCut.setToolTipText("MIDI has no high-pass for this synth. The file writes the ordinary note.");
                 accessory.add(Box.createVerticalStrut(6));

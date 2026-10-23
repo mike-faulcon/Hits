@@ -289,12 +289,12 @@ public final class BeatJson {
         }
         Track[] parsed = new Track[Beat.TRACKS];
         for (int i = 0; i < Beat.TRACKS; i++) {
-            parsed[i] = readTrack(asMap(tracks.get(i)));
+            parsed[i] = readTrack(beat, slot, asMap(tracks.get(i)));
         }
         beat.replaceSlot(slot, parsed);
     }
 
-    private static Track readTrack(Map<String, Object> object) {
+    private static Track readTrack(Beat beat, char slot, Map<String, Object> object) {
         Track track = new Track(
             text(object.get("name")),
             TrackMode.parse(text(object.get("mode"))),
@@ -357,7 +357,9 @@ public final class BeatJson {
             track.setPresence(number(object.get("presence")));
         }
         if (object.get("sample") instanceof Map<?, ?> raw) {
-            track.setSample(readSample(asMap(raw)));
+            Map<String, Object> sample = asMap(raw);
+            track.setSample(readSample(sample));
+            warnGain(beat, slot, track, sample);
         } else if (track.mode() == TrackMode.SAMPLE) {
             track.setSample(new SampleRef("", SampleRef.DEFAULT_ROOT, 0, true));
         }
@@ -381,6 +383,21 @@ public final class BeatJson {
             }
         }
         return track;
+    }
+
+    private static void warnGain(Beat beat, char slot, Track track, Map<String, Object> sample) {
+        if (!sample.containsKey("gain") || sample.get("gain") == null || track.sample() == null) {
+            return;
+        }
+        int requested = number(sample.get("gain"));
+        int stored = track.sample().gain();
+        if (requested == stored) {
+            return;
+        }
+        beat.addLoadWarning(
+            Beat.slotLabel(slot) + " " + track.name()
+                + ": sample gain " + requested + " dB was clamped to " + stored + " dB."
+        );
     }
 
     private static SampleRef readSample(Map<String, Object> object) {

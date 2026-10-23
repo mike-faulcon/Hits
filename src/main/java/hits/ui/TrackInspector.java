@@ -1131,8 +1131,12 @@ final class TrackInspector {
         samplePicker.setSelectedIndex(select);
         choosingSample = false;
         String problem = sampleModeOn ? SamplePaths.problem(track, beatFile.get()) : null;
-        sampleWarning.setText(problem == null ? " " : problem);
-        sampleWarning.setVisible(problem != null);
+        String clamp = sampleModeOn
+            ? editor.beat().gainWarning(editor.beat().activeSlot(), track.name())
+            : null;
+        String warning = clamp == null ? problem : (problem == null ? clamp : clamp + " " + problem);
+        sampleWarning.setText(warning == null ? " " : warning);
+        sampleWarning.setVisible(warning != null);
         if (sampleModeOn && !sampleRoot.getValue().equals(sample.root())) {
             sampleRoot.setValue(sample.root());
         }
@@ -1148,6 +1152,13 @@ final class TrackInspector {
             sampleGain.setValue(gain);
         }
         sampleGainValue.setText(SampleRef.gainText(sampleGain.getValueIsAdjusting() ? sampleGain.getValue() : gain));
+        boolean clamped = clamp != null;
+        sampleGainValue.setForeground(clamped ? Theme.STEP_ACCENT : Theme.TEXT);
+        String clampTip = clamped ? "Clamped to " + SampleRef.gainText(gain) : null;
+        sampleGainValue.setToolTipText(clampTip);
+        sampleGain.setToolTipText(clamped
+            ? clampTip
+            : "Sample gain, from " + SampleRef.gainText(SampleRef.GAIN_MIN) + " to " + SampleRef.gainText(SampleRef.GAIN_MAX) + ".");
         sampleInvert.setSelected(sampleModeOn && sample.invert());
     }
 
