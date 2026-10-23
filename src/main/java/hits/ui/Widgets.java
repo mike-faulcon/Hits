@@ -68,6 +68,9 @@ final class Widgets {
     }
 
     static void paintToggle(JButton button, boolean on) {
+        if (button.isSelected() != on) {
+            button.setSelected(on);
+        }
         button.setBackground(on ? Theme.STEP_ON : Theme.PANEL);
         button.setForeground(on ? Theme.INK : Theme.TEXT);
         button.setOpaque(true);

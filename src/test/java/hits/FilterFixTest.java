@@ -205,7 +205,7 @@ class FilterFixTest {
         String json = BeatJson.write(beat).replace("\"gain\": 24", "\"gain\": 30");
         assertTrue(json.contains("\"gain\": 30"), json);
         Beat loaded = BeatJson.read(json);
-        assertEquals(24, loaded.track(0).sample().gain());
+        assertEquals(24.0, loaded.track(0).sample().gain());
         String warning = loaded.gainWarning('a', "Kick");
         assertEquals("A Kick: sample gain 30 dB was clamped to 24 dB.", warning);
         assertTrue(loaded.copy().loadWarnings().contains(warning));

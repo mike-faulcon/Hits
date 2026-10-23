@@ -16,10 +16,13 @@ import java.util.Map;
  * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
  * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent),
  * a track {@code lowCut} object ({@code hz}, {@code slope}) when the high-pass is on,
- * a track {@code presence} (dB, omitted at 0),
+ * a track {@code presence} (dB, omitted at 0, 0.1 dB steps, written as an integer when whole),
+ * a track {@code eq} object when a peaking band or the high cut is on
+ * ({@code bands} of {@code hz}, {@code gain}, {@code q}, and optional {@code highCut}),
  * and a track {@code sample} object when {@code mode} is {@code sample}
  * ({@code path}, {@code root}, {@code start}, {@code oneShot},
- * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN},
+ * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN}, in 0.1 dB steps,
+ * written as an integer when whole,
  * and optional {@code invert} omitted when false).
  * Mute and solo are original track fields.
  * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
@@ -188,7 +191,11 @@ public final class BeatJson {
             writeLowCut(out, track);
         }
         if (track.hasPresence()) {
-            field(out, 5, "presence", track.presence(), true);
+            indent(out, 5);
+            out.append("\"presence\": ").append(Db.number(track.presence())).append(",\n");
+        }
+        if (track.hasEq()) {
+            writeEq(out, track);
         }
         if (track.mode() == TrackMode.SAMPLE && track.sample() != null) {
             writeSample(out, track.sample());
@@ -226,6 +233,33 @@ public final class BeatJson {
             .append("},\n");
     }
 
+    private static void writeEq(StringBuilder out, Track track) {
+        indent(out, 5);
+        out.append("\"eq\": {");
+        List<EqBand> bands = track.eqBands();
+        if (!bands.isEmpty()) {
+            out.append("\"bands\": [");
+            for (int i = 0; i < bands.size(); i++) {
+                if (i > 0) {
+                    out.append(", ");
+                }
+                EqBand band = bands.get(i);
+                out.append("{\"hz\": ").append(band.hz())
+                    .append(", \"gain\": ").append(Db.number(band.gain()))
+                    .append(", \"q\": ").append(Db.number(band.q()))
+                    .append('}');
+            }
+            out.append(']');
+        }
+        if (track.hasHighCut()) {
+            if (!bands.isEmpty()) {
+                out.append(", ");
+            }
+            out.append("\"highCut\": ").append(track.highCutHz());
+        }
+        out.append("},\n");
+    }
+
     private static void writeSample(StringBuilder out, SampleRef sample) {
         indent(out, 5);
         out.append("\"sample\": {\"path\": \"").append(escape(sample.path()))
@@ -233,7 +267,7 @@ public final class BeatJson {
             .append(", \"start\": ").append(sample.start())
             .append(", \"oneShot\": ").append(sample.oneShot());
         if (sample.gain() != SampleRef.GAIN) {
-            out.append(", \"gain\": ").append(sample.gain());
+            out.append(", \"gain\": ").append(Db.number(sample.gain()));
         }
         if (sample.invert()) {
             out.append(", \"invert\": true");
@@ -354,12 +388,16 @@ public final class BeatJson {
             }
         }
         if (object.containsKey("presence") && object.get("presence") != null) {
-            track.setPresence(number(object.get("presence")));
+            double requested = decimal(object.get("presence"));
+            track.setPresence(requested);
+            warnLevel(beat, slot, track, "presence", requested, track.presence(), 0, Track.PRESENCE_MAX);
+        }
+        if (object.get("eq") instanceof Map<?, ?> rawEq) {
+            readEq(beat, slot, track, asMap(rawEq));
         }
         if (object.get("sample") instanceof Map<?, ?> raw) {
             Map<String, Object> sample = asMap(raw);
-            track.setSample(readSample(sample));
-            warnGain(beat, slot, track, sample);
+            track.setSample(readSample(beat, slot, track, sample));
         } else if (track.mode() == TrackMode.SAMPLE) {
             track.setSample(new SampleRef("", SampleRef.DEFAULT_ROOT, 0, true));
         }
@@ -385,22 +423,116 @@ public final class BeatJson {
         return track;
     }
 
-    private static void warnGain(Beat beat, char slot, Track track, Map<String, Object> sample) {
-        if (!sample.containsKey("gain") || sample.get("gain") == null || track.sample() == null) {
+    private static void readEq(Beat beat, char slot, Track track, Map<String, Object> eq) {
+        if (eq.get("bands") instanceof List<?> list) {
+            int index = 0;
+            for (Object item : list) {
+                if (!(item instanceof Map<?, ?> rawBand)) {
+                    continue;
+                }
+                if (index >= Track.EQ_BANDS) {
+                    beat.addLoadWarning(
+                        Beat.slotLabel(slot) + " " + track.name()
+                            + ": EQ band " + (index + 1) + " was dropped. A row keeps two bands."
+                    );
+                    break;
+                }
+                Map<String, Object> band = asMap(rawBand);
+                boolean gainGiven = band.containsKey("gain") && band.get("gain") != null;
+                double requestedGain = gainGiven ? decimal(band.get("gain")) : 0;
+                if (!gainGiven || Math.abs(requestedGain) < 1e-9) {
+                    index++;
+                    continue;
+                }
+                boolean hzGiven = band.containsKey("hz") && band.get("hz") != null;
+                double requestedHz = hzGiven
+                    ? decimal(band.get("hz"))
+                    : (index == 0 ? Track.EQ_HZ : Track.EQ_HZ_2);
+                boolean qGiven = band.containsKey("q") && band.get("q") != null;
+                double requestedQ = qGiven ? decimal(band.get("q")) : Track.EQ_Q;
+                EqBand stored = track.setEqBand(index, requestedHz, requestedGain, requestedQ);
+                String label = "EQ band " + (index + 1);
+                warnLevel(
+                    beat, slot, track, label + " gain", requestedGain,
+                    stored == null ? 0 : stored.gain(),
+                    Track.EQ_GAIN_MIN, Track.EQ_GAIN_MAX
+                );
+                if (stored != null && hzGiven) {
+                    warnHz(
+                        beat, slot, track, label + " frequency", requestedHz,
+                        stored.hz(), Track.EQ_HZ_MIN, Track.EQ_HZ_MAX
+                    );
+                }
+                if (stored != null && qGiven) {
+                    warnLevel(
+                        beat, slot, track, label + " Q", requestedQ, stored.q(),
+                        Track.EQ_Q_MIN, Track.EQ_Q_MAX
+                    );
+                }
+                index++;
+            }
+        }
+        if (eq.containsKey("highCut") && eq.get("highCut") != null) {
+            double requested = decimal(eq.get("highCut"));
+            if (requested > 0) {
+                int stored = track.setHighCut(requested);
+                warnHz(beat, slot, track, "high cut", requested, stored, Track.HIGH_CUT_MIN, Track.HIGH_CUT_MAX);
+            }
+        }
+    }
+
+    /**
+     * Warns when a level was outside {@code min}..{@code max}, or was not already a 0.1 step.
+     * A value outside the range is reported as clamped. A value inside the range that
+     * moved onto the step is reported as rounded.
+     */
+    private static void warnLevel(
+        Beat beat,
+        char slot,
+        Track track,
+        String label,
+        double requested,
+        double stored,
+        double min,
+        double max
+    ) {
+        boolean outside = requested < min - 1e-9 || requested > max + 1e-9;
+        boolean offStep = !Db.onStep(requested);
+        if (!outside && !offStep) {
             return;
         }
-        int requested = number(sample.get("gain"));
-        int stored = track.sample().gain();
-        if (requested == stored) {
-            return;
-        }
+        String verb = outside ? "clamped" : "rounded";
+        String unit = label.endsWith("Q") ? "" : " dB";
         beat.addLoadWarning(
             Beat.slotLabel(slot) + " " + track.name()
-                + ": sample gain " + requested + " dB was clamped to " + stored + " dB."
+                + ": " + label + " " + Db.exact(requested) + unit
+                + " was " + verb + " to " + Db.number(stored) + unit + "."
         );
     }
 
-    private static SampleRef readSample(Map<String, Object> object) {
+    private static void warnHz(
+        Beat beat,
+        char slot,
+        Track track,
+        String label,
+        double requested,
+        int stored,
+        int min,
+        int max
+    ) {
+        boolean outside = requested < min - 1e-9 || requested > max + 1e-9;
+        boolean offStep = Math.abs(requested - Math.rint(requested)) > 1e-6;
+        if (!outside && !offStep) {
+            return;
+        }
+        String verb = outside ? "clamped" : "rounded";
+        beat.addLoadWarning(
+            Beat.slotLabel(slot) + " " + track.name()
+                + ": " + label + " " + Db.exact(requested) + " Hz was " + verb + " to " + stored + " Hz."
+        );
+    }
+
+    private static SampleRef readSample(Beat beat, char slot, Track track, Map<String, Object> object) {
         String path = object.get("path") instanceof String text ? text : "";
         int root = object.containsKey("root") && object.get("root") != null
             ? number(object.get("root"))
@@ -409,11 +541,17 @@ public final class BeatJson {
             ? number(object.get("start"))
             : 0;
         boolean oneShot = !object.containsKey("oneShot") || object.get("oneShot") == null || bool(object.get("oneShot"));
-        int gain = object.containsKey("gain") && object.get("gain") != null
-            ? number(object.get("gain"))
-            : SampleRef.GAIN;
+        boolean gainGiven = object.containsKey("gain") && object.get("gain") != null;
+        double gain = gainGiven ? decimal(object.get("gain")) : SampleRef.GAIN;
         boolean invert = object.containsKey("invert") && object.get("invert") != null && bool(object.get("invert"));
-        return new SampleRef(path, root, start, oneShot, gain, invert);
+        SampleRef sample = new SampleRef(path, root, start, oneShot, gain, invert);
+        if (gainGiven) {
+            warnLevel(
+                beat, slot, track, "sample gain", gain, sample.gain(),
+                SampleRef.GAIN_MIN, SampleRef.GAIN_MAX
+            );
+        }
+        return sample;
     }
 
     @SuppressWarnings("unchecked")
@@ -454,6 +592,26 @@ public final class BeatJson {
     private static int number(Object value) {
         if (value instanceof Integer integer) {
             return integer;
+        }
+        if (value instanceof Double decimal) {
+            if (decimal.isNaN() || decimal.isInfinite()) {
+                throw new IllegalArgumentException("Expected a number");
+            }
+            return (int) Math.round(decimal);
+        }
+        throw new IllegalArgumentException("Expected a number");
+    }
+
+    /** The number as written. An integer stays exact. A decimal is not rounded here. */
+    private static double decimal(Object value) {
+        if (value instanceof Integer integer) {
+            return integer;
+        }
+        if (value instanceof Double decimal) {
+            if (decimal.isNaN() || decimal.isInfinite()) {
+                throw new IllegalArgumentException("Expected a number");
+            }
+            return decimal;
         }
         throw new IllegalArgumentException("Expected a number");
     }
@@ -576,7 +734,7 @@ public final class BeatJson {
             return value;
         }
 
-        private Integer parseNumber() {
+        private Number parseNumber() {
             int start = index;
             if (peek() == '-') {
                 index++;
@@ -589,7 +747,7 @@ public final class BeatJson {
             }
             String number = source.substring(start, index);
             if (number.contains(".")) {
-                return (int) Math.round(Double.parseDouble(number));
+                return Double.parseDouble(number);
             }
             return Integer.parseInt(number);
         }

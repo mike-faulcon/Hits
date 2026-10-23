@@ -124,8 +124,8 @@ public final class BeatFiles {
         Path beatFile,
         boolean writeSamples
     ) throws IOException, InvalidMidiDataException {
-        // Low cut is not a MIDI controller. The companion SoundFont keeps gain, invert,
-        // and the envelope, and leaves the PCM unfiltered. A drum stays on its ordinary note.
+        // Low cut, presence, and EQ are not MIDI controllers. The companion SoundFont keeps
+        // gain, invert, and the envelope, and leaves the PCM unfiltered. A drum stays on its ordinary note.
         SampleLibrary.Ready ready = SampleLibrary.prepare(
             beat, beatFile, SequenceBuilder.exportSlots(beat, options), null, false
         );

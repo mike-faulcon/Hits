@@ -78,7 +78,9 @@ public final class ToneRender {
             audio[i] = raw[i];
         }
         if (track.hasTone()) {
-            audio = ToneFilter.process(raw, WavAudio.SAMPLE_RATE, track.lowCutHz(), track.lowCutSlope(), track.presence());
+            // Low cut, EQ bands, high cut, presence. The playback gain and the 16-bit
+            // fit below are the gain compensation.
+            audio = ToneFilter.process(raw, WavAudio.SAMPLE_RATE, track);
         }
         double gain = playbackGain();
         if (Math.abs(gain - 1.0) >= 0.02) {

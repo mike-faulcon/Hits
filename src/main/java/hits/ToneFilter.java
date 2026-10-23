@@ -1,9 +1,22 @@
 package hits;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Per-row high-pass and an optional high shelf, applied to PCM before it goes into the
- * sample bank. Gervill has no MIDI high-pass. Butterworth sections are −3 dB at the corner:
- * one section is 12 dB/oct, two are 24 dB/oct.
+ * Per-row tone, applied to PCM before it goes into the sample bank.
+ * Gervill has no MIDI EQ. The stages, each skipped when it is off, run in this order:
+ * <ol>
+ * <li>invert, for a sample row only, before this class sees the PCM</li>
+ * <li>low cut, a Butterworth high-pass, 12 or 24 dB/oct, −3 dB at the corner</li>
+ * <li>EQ bands, peaking biquads, in band order</li>
+ * <li>high cut, a 12 dB/oct Butterworth low-pass, −3 dB at the corner</li>
+ * <li>presence, a high shelf above about 3 kHz</li>
+ * <li>gain compensation: {@link #fit} scales a peak into 16-bit, and the SoundFont
+ * attenuation puts that level back. A recorded drum or note is also scaled by the
+ * capture playback gain before the fit, so the passband matches the built-in sound.
+ * A sample row adds its own gain in that same attenuation.</li>
+ * </ol>
  */
 public final class ToneFilter {
     private ToneFilter() {}
@@ -19,14 +32,30 @@ public final class ToneFilter {
      * Returns {@code samples} itself when both are off, so a plain row is not copied.
      * Samples outside 16-bit are clamped. {@link #fit(double[])} keeps that overshoot instead.
      */
-    public static short[] apply(short[] samples, int rate, int hz, int slope, int presenceDb) {
+    public static short[] apply(short[] samples, int rate, int hz, int slope, double presenceDb) {
+        return apply(samples, rate, hz, slope, List.of(), 0, presenceDb);
+    }
+
+    /**
+     * {@link #process} written back to 16-bit. Returns {@code samples} itself when
+     * every stage is off.
+     */
+    public static short[] apply(
+        short[] samples,
+        int rate,
+        int hz,
+        int slope,
+        List<EqBand> bands,
+        int highCutHz,
+        double presenceDb
+    ) {
         if (samples == null || samples.length == 0) {
             return samples == null ? new short[0] : samples;
         }
-        if (hz <= 0 && presenceDb <= 0) {
+        if (flat(hz, bands, highCutHz, presenceDb)) {
             return samples;
         }
-        double[] audio = process(samples, rate, hz, slope, presenceDb);
+        double[] audio = process(samples, rate, hz, slope, bands, highCutHz, presenceDb);
         short[] out = new short[audio.length];
         for (int i = 0; i < audio.length; i++) {
             out[i] = clamp(audio[i]);
@@ -38,19 +67,36 @@ public final class ToneFilter {
      * The same filter as {@link #apply}, left in floating point so a later stage can
      * scale the peak into 16-bit instead of flattening it.
      */
-    public static double[] process(short[] samples, int rate, int hz, int slope, int presenceDb) {
+    public static double[] process(short[] samples, int rate, int hz, int slope, double presenceDb) {
+        return process(samples, rate, hz, slope, List.of(), 0, presenceDb);
+    }
+
+    /** Low cut, EQ bands, high cut, then presence. See the class note for the full order. */
+    public static double[] process(short[] samples, int rate, Track track) {
+        int hz = track == null ? 0 : track.lowCutHz();
+        int slope = track == null ? Track.LOW_CUT_SLOPE : track.lowCutSlope();
+        List<EqBand> bands = track == null ? List.of() : track.eqBands();
+        int highCut = track == null ? 0 : track.highCutHz();
+        double presence = track == null ? 0 : track.presence();
+        return process(samples, rate, hz, slope, bands, highCut, presence);
+    }
+
+    public static double[] process(
+        short[] samples,
+        int rate,
+        int hz,
+        int slope,
+        List<EqBand> bands,
+        int highCutHz,
+        double presenceDb
+    ) {
         int length = samples == null ? 0 : samples.length;
         double[] audio = new double[length];
         for (int i = 0; i < length; i++) {
             audio[i] = samples[i];
         }
-        if (hz > 0) {
-            for (Section section : highPass(rate, hz, slope)) {
-                section.process(audio);
-            }
-        }
-        if (presenceDb > 0) {
-            highShelf(rate, Track.PRESENCE_HZ, presenceDb).process(audio);
+        for (Section section : sections(rate, hz, slope, bands, highCutHz, presenceDb)) {
+            section.process(audio);
         }
         return audio;
     }
@@ -94,6 +140,98 @@ public final class ToneFilter {
         return highShelf(rate, shelfHz, gainDb).magnitudeDb(freqHz);
     }
 
+    /** Peaking magnitude at {@code freqHz}, in dB. The centre is {@code gainDb}. */
+    public static double peakingDb(int rate, double centerHz, double gainDb, double q, double freqHz) {
+        return Section.peaking(rate, clampHz(rate, centerHz), gainDb, Math.max(0.05, q)).magnitudeDb(freqHz);
+    }
+
+    /** 12 dB/oct low-pass magnitude at {@code freqHz}, in dB. The corner is about −3 dB. */
+    public static double lowPassDb(int rate, double cornerHz, double freqHz) {
+        return Section.lowPass(rate, clampHz(rate, cornerHz), 1 / Math.sqrt(2)).magnitudeDb(freqHz);
+    }
+
+    /**
+     * Bandwidth in octaves of a peaking band with this Q, measured between the
+     * half-gain points. {@code Q = 1 / (2 sinh(ln(2)/2 · BW))}.
+     */
+    public static double bandwidthOctaves(double q) {
+        double safe = Math.max(0.05, q);
+        double x = 1.0 / (2.0 * safe);
+        return Math.log(x + Math.sqrt(x * x + 1.0)) * 2.0 / Math.log(2.0);
+    }
+
+    /**
+     * Combined low cut, EQ, high cut, and presence at {@code freqHz}, in dB.
+     * 0 dB when the row is flat.
+     */
+    public static double responseDb(int rate, Track track, double freqHz) {
+        if (track == null) {
+            return 0;
+        }
+        double db = 0;
+        for (Section section : sections(
+            rate,
+            track.lowCutHz(),
+            track.lowCutSlope(),
+            track.eqBands(),
+            track.highCutHz(),
+            track.presence()
+        )) {
+            db += section.magnitudeDb(freqHz);
+        }
+        return db;
+    }
+
+    private static boolean flat(int hz, List<EqBand> bands, int highCutHz, double presenceDb) {
+        if (hz > 0 || highCutHz > 0 || presenceDb > 0) {
+            return false;
+        }
+        if (bands == null) {
+            return true;
+        }
+        for (EqBand band : bands) {
+            if (band != null && band.active()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<Section> sections(
+        int rate,
+        int lowCutHz,
+        int slope,
+        List<EqBand> bands,
+        int highCutHz,
+        double presenceDb
+    ) {
+        List<Section> chain = new ArrayList<>();
+        if (lowCutHz > 0) {
+            for (Section section : highPass(rate, lowCutHz, slope)) {
+                chain.add(section);
+            }
+        }
+        if (bands != null) {
+            for (EqBand band : bands) {
+                if (band != null && band.active()) {
+                    chain.add(Section.peaking(
+                        rate,
+                        clampHz(rate, band.hz()),
+                        band.gain(),
+                        Math.max(0.05, band.q())
+                    ));
+                }
+            }
+        }
+        if (highCutHz > 0) {
+            chain.add(Section.lowPass(rate, clampHz(rate, highCutHz), 1 / Math.sqrt(2)));
+        }
+        if (presenceDb > 0) {
+            chain.add(highShelf(rate, Track.PRESENCE_HZ, presenceDb));
+        }
+        return chain;
+    }
+
     private static Section[] highPass(int rate, int cornerHz, int slope) {
         double hz = clampHz(rate, cornerHz);
         if (slope >= Track.LOW_CUT_STEEP) {
@@ -109,7 +247,7 @@ public final class ToneFilter {
         return Section.highShelf(rate, clampHz(rate, shelfHz), gainDb);
     }
 
-    private static double clampHz(int rate, int hz) {
+    private static double clampHz(int rate, double hz) {
         double nyquist = Math.max(2, rate) * 0.45;
         return Math.max(1, Math.min(hz, nyquist));
     }
@@ -154,6 +292,34 @@ public final class ToneFilter {
             double b2 = (1 + cos) / 2;
             double a0 = 1 + alpha;
             return new Section(rate, b0 / a0, b1 / a0, b2 / a0, (-2 * cos) / a0, (1 - alpha) / a0);
+        }
+
+        static Section lowPass(int rate, double hz, double q) {
+            double w = 2 * Math.PI * hz / rate;
+            double cos = Math.cos(w);
+            double sin = Math.sin(w);
+            double alpha = sin / (2 * q);
+            double b0 = (1 - cos) / 2;
+            double b1 = 1 - cos;
+            double b2 = (1 - cos) / 2;
+            double a0 = 1 + alpha;
+            return new Section(rate, b0 / a0, b1 / a0, b2 / a0, (-2 * cos) / a0, (1 - alpha) / a0);
+        }
+
+        /** Audio EQ Cookbook peaking EQ. {@code gainDb} is the centre gain. */
+        static Section peaking(int rate, double hz, double gainDb, double q) {
+            double a = Math.pow(10, gainDb / 40.0);
+            double w = 2 * Math.PI * hz / rate;
+            double cos = Math.cos(w);
+            double sin = Math.sin(w);
+            double alpha = sin / (2 * q);
+            double b0 = 1 + alpha * a;
+            double b1 = -2 * cos;
+            double b2 = 1 - alpha * a;
+            double a0 = 1 + alpha / a;
+            double a1 = -2 * cos;
+            double a2 = 1 - alpha / a;
+            return new Section(rate, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
         }
 
         static Section highShelf(int rate, double hz, double gainDb) {

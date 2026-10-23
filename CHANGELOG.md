@@ -1,5 +1,17 @@
 # Changelog
 
+## Row EQ
+
+Each row has a parametric EQ under Low cut and Presence: two peaking bands and a high cut. A band runs from 30 Hz to 12 kHz, gain −18 to +12 dB, Q 0.3 to 8. High cut is a 12 dB/oct low-pass from 1 kHz to 20 kHz and stays off until it is turned on. Flat bands are left out of the file. The inspector draws a small combined response from 30 Hz to 20 kHz.
+
+The filter order on a sample is invert, low cut, EQ bands, high cut, presence, then gain compensation. A drum or note row is captured dry, those stages run on the recording, and the playback gain is part of the compensation. Live playback and WAV export, including `hits render`, use that bank. MIDI export and `--samples-sf2` keep the ordinary note. `hits info`, `hits render` to MIDI, and the export dialog name the rows.
+
+Sample gain, presence, and EQ gain are stored in 0.1 dB steps. A whole number is written without a decimal, so a beat that does not use a fraction saves the same bytes as before. A value that is not on a step is rounded, and a value outside the range is clamped. `hits info` and `hits render` say which row, what was asked, and what was stored. Presence above +12 dB used to clamp with no warning. An EQ gain does the same clamp, and says so.
+
+The inspector's painted controls report the state they draw. A slope or mode button that is filled is selected, so accessibility sees it as checked, and a control drawn on is enabled. On an external MIDI output the filter controls stay grey, not selected, and disabled.
+
+A GM kick (note 36) with a peaking band at 90 Hz, −12 dB, Q 1.4 drops 60–120 Hz by about 9 dB. 30–60 Hz moves about 3.6 dB, because that Q is already about −5 dB at 60 Hz and the kick's sub sits near the top of the band. 200–600 Hz stays inside 1 dB. A GM snare (note 38) with a high cut at 4 kHz lowers the power-weighted spectral centroid (about 244 Hz to about 153 Hz) and the band above 3 kHz by about 8 dB. The centroid stays low because most of the snare's power is in the body, not the hiss.
+
 ## Filter fixes
 
 A low cut or presence on one pattern no longer changes the plain drum on that row in another pattern. The filtered voice uses its own sample-bank channel. The plain voice keeps the channel it would have had alone. Chaining a filtered kick (tune +15 st, presence +12) into an unfiltered kick (tune +19 st) left a +2.3 dB residual in the second bar, with the lows down 4.7 dB and the highs up 3.4 dB. The same comparison is now a −80.8 dB residual, and those bands match within 0.1 dB.

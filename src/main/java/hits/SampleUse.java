@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * Which presets this playback or export actually loaded.
  * A sample row that is not listed falls back to its General MIDI drum, on channel 9.
- * A drum or note is listed only when low cut or presence was baked into a voice.
+ * A drum or note is listed only when low cut, presence, or EQ was baked into a voice.
  * One row can load more than one preset when two patterns name different samples,
  * or the same sample at a different decay, gain, polarity, or low cut.
  * External MIDI outputs use {@link #none()} so every row plays the ordinary note.

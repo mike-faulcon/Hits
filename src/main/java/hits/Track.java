@@ -1,5 +1,8 @@
 package hits;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** One row: a drum voice or a single pitched instrument, 32 steps stored. */
 public final class Track {
     public static final int CAPACITY = 32;
@@ -39,6 +42,34 @@ public final class Track {
     public static final int PRESENCE_MAX = 12;
     /** High-shelf midpoint, in Hz. The boost is above this. */
     public static final int PRESENCE_HZ = 3000;
+    /** Peaking bands on a row. */
+    public static final int EQ_BANDS = 2;
+    /** Lowest peaking frequency, in Hz. */
+    public static final int EQ_HZ_MIN = 30;
+    /** Highest peaking frequency, in Hz. */
+    public static final int EQ_HZ_MAX = 12_000;
+    /** Peaking cut, in dB. */
+    public static final double EQ_GAIN_MIN = -18;
+    /** Peaking boost, in dB. */
+    public static final double EQ_GAIN_MAX = 12;
+    /** Narrowest peaking bandwidth. */
+    public static final double EQ_Q_MIN = 0.3;
+    /** Widest peaking bandwidth. Stored Q is never below this. */
+    public static final double EQ_Q_MAX = 8;
+    /** Q shown until a band is stored. 1 is a medium peak. */
+    public static final double EQ_Q = 1;
+    /** Frequency shown on band 1 until that band is stored. */
+    public static final int EQ_HZ = 90;
+    /** Frequency shown on band 2 until that band is stored. */
+    public static final int EQ_HZ_2 = 2500;
+    /** Slider steps across a log frequency range. */
+    public static final int EQ_SLIDER = 1000;
+    /** Lowest high-cut corner, in Hz. 0 is off and is left out of the file. */
+    public static final int HIGH_CUT_MIN = 1000;
+    /** Highest high-cut corner, in Hz. */
+    public static final int HIGH_CUT_MAX = 20_000;
+    /** Corner shown until high cut is turned on. */
+    public static final int HIGH_CUT = 6000;
 
     private String name;
     private TrackMode mode;
@@ -73,8 +104,12 @@ public final class Track {
     private int lowCutHz;
     /** 12 or 24 dB per octave. Used while {@link #lowCutHz} is on. */
     private int lowCutSlope = LOW_CUT_SLOPE;
-    /** High-shelf gain in dB. 0 is off and is left out of the file. */
-    private int presence;
+    /** High-shelf gain in tenths of a dB. 0 is off and is left out of the file. */
+    private int presenceTenths;
+    /** Peaking bands. A null slot is flat and is left out of the file. */
+    private final EqBand[] eqBands = new EqBand[EQ_BANDS];
+    /** Low-pass corner in Hz. 0 is off and is left out of the file. */
+    private int highCutHz;
     /** Kept while the row is a drum or a note, and written only in sample mode. */
     private SampleRef sample;
     private final Step[] steps = new Step[CAPACITY];
@@ -122,7 +157,7 @@ public final class Track {
             || resonance != other.resonance
             || lowCutHz != other.lowCutHz
             || lowCutSlope != other.lowCutSlope
-            || presence != other.presence) {
+            || !sameTone(other)) {
             return false;
         }
         if (mode == TrackMode.SAMPLE && !sameSample(sample, other.sample)) {
@@ -158,7 +193,9 @@ public final class Track {
         copy.resonance = resonance;
         copy.lowCutHz = lowCutHz;
         copy.lowCutSlope = lowCutSlope;
-        copy.presence = presence;
+        copy.presenceTenths = presenceTenths;
+        copy.highCutHz = highCutHz;
+        System.arraycopy(eqBands, 0, copy.eqBands, 0, EQ_BANDS);
         copy.sample = sample;
         for (int i = 0; i < steps.length; i++) {
             copy.steps[i] = steps[i].copy();
@@ -622,28 +659,165 @@ public final class Track {
         return (int) Math.round(hz);
     }
 
-    /** High-shelf gain in dB, 0 to {@link #PRESENCE_MAX}. 0 is off. */
-    public int presence() {
-        return presence;
+    /** High-shelf gain in dB, 0 to {@link #PRESENCE_MAX}, in 0.1 dB steps. 0 is off. */
+    public double presence() {
+        return Db.fromTenths(presenceTenths);
     }
 
     public boolean hasPresence() {
-        return presence > 0;
+        return presenceTenths > 0;
     }
 
-    public void setPresence(int db) {
-        presence = Math.max(0, Math.min(PRESENCE_MAX, db));
+    public void setPresence(double db) {
+        presenceTenths = Math.max(0, Db.tenths(Db.clamp(db, 0, PRESENCE_MAX)));
     }
 
-    /** Low cut or presence. Playback bakes this into PCM. It is not a MIDI controller. */
+    /** Slider position for a presence gain. 0 is off. {@code 120} is +12 dB. */
+    public static int presenceSlider(double db) {
+        return Math.max(0, Db.tenths(Db.clamp(db, 0, PRESENCE_MAX)));
+    }
+
+    /** Presence gain for a {@link #presenceSlider(double)} position. */
+    public static double presenceFromSlider(int slider) {
+        return Db.fromTenths(Math.max(0, Math.min(presenceSlider(PRESENCE_MAX), slider)));
+    }
+
+    /** Peaking band {@code index}, or null when that band is flat. */
+    public EqBand eqBand(int index) {
+        if (index < 0 || index >= EQ_BANDS) {
+            return null;
+        }
+        return eqBands[index];
+    }
+
+    /** Active peaking bands, in band order. Empty when every band is flat. */
+    public List<EqBand> eqBands() {
+        List<EqBand> active = new ArrayList<>();
+        for (EqBand band : eqBands) {
+            if (band != null && band.active()) {
+                active.add(band);
+            }
+        }
+        return active;
+    }
+
+    /**
+     * Stores one peaking band. A gain that quantizes to 0 clears the band.
+     * Frequency, gain, and Q are kept inside the slider ranges, on 0.1 steps for gain and Q.
+     * Returns the stored band, or null when the band was cleared.
+     */
+    public EqBand setEqBand(int index, double hz, double gain, double q) {
+        if (index < 0 || index >= EQ_BANDS) {
+            return null;
+        }
+        double storedGain = Db.clamp(gain, EQ_GAIN_MIN, EQ_GAIN_MAX);
+        if (Math.abs(storedGain) < 0.05) {
+            eqBands[index] = null;
+            return null;
+        }
+        int storedHz = clampEqHz(hz);
+        double storedQ = Db.clamp(q, EQ_Q_MIN, EQ_Q_MAX);
+        eqBands[index] = new EqBand(storedHz, Db.tenths(storedGain), Db.tenths(storedQ));
+        return eqBands[index];
+    }
+
+    public void clearEqBand(int index) {
+        if (index >= 0 && index < EQ_BANDS) {
+            eqBands[index] = null;
+        }
+    }
+
+    public void clearEq() {
+        for (int i = 0; i < EQ_BANDS; i++) {
+            eqBands[i] = null;
+        }
+        highCutHz = 0;
+    }
+
+    /** High-cut corner in Hz, or 0 when the low-pass is off. */
+    public int highCutHz() {
+        return highCutHz;
+    }
+
+    public boolean hasHighCut() {
+        return highCutHz > 0;
+    }
+
+    /**
+     * Stores a 12 dB/oct low-pass. {@code hz} of 0 or less clears it.
+     * The corner stays inside {@link #HIGH_CUT_MIN}–{@link #HIGH_CUT_MAX}.
+     * Returns the stored corner, or 0 when cleared.
+     */
+    public int setHighCut(double hz) {
+        if (hz <= 0) {
+            clearHighCut();
+            return 0;
+        }
+        int rounded = (int) Math.round(hz);
+        highCutHz = Math.max(HIGH_CUT_MIN, Math.min(HIGH_CUT_MAX, rounded));
+        return highCutHz;
+    }
+
+    public void clearHighCut() {
+        highCutHz = 0;
+    }
+
+    /** True when a peaking band or the high cut is on. */
+    public boolean hasEq() {
+        return highCutHz > 0 || !eqBands().isEmpty();
+    }
+
+    /** Slider position for a peaking frequency on a log scale from 30 Hz to 12 kHz. */
+    public static int eqHzSlider(int hz) {
+        return logSlider(hz, EQ_HZ_MIN, EQ_HZ_MAX);
+    }
+
+    /** Hertz for an {@link #eqHzSlider(int)} position. Rounded to the nearest Hz. */
+    public static int eqHzFromSlider(int slider) {
+        return logHz(slider, EQ_HZ_MIN, EQ_HZ_MAX);
+    }
+
+    /** Slider position for a high-cut corner on a log scale from 1 kHz to 20 kHz. */
+    public static int highCutSlider(int hz) {
+        return logSlider(hz, HIGH_CUT_MIN, HIGH_CUT_MAX);
+    }
+
+    /** Hertz for a {@link #highCutSlider(int)} position. Rounded to the nearest Hz. */
+    public static int highCutFromSlider(int slider) {
+        return logHz(slider, HIGH_CUT_MIN, HIGH_CUT_MAX);
+    }
+
+    /** Slider position for a peaking gain. 0 dB is 0. Each step is 0.1 dB. */
+    public static int eqGainSlider(double db) {
+        return Db.tenths(Db.clamp(db, EQ_GAIN_MIN, EQ_GAIN_MAX));
+    }
+
+    /** Peaking gain for an {@link #eqGainSlider(double)} position. */
+    public static double eqGainFromSlider(int slider) {
+        int tenths = Math.max(Db.tenths(EQ_GAIN_MIN), Math.min(Db.tenths(EQ_GAIN_MAX), slider));
+        return Db.fromTenths(tenths);
+    }
+
+    /** Slider position for a peaking Q. 0.3 is 3. Each step is 0.1. */
+    public static int eqQSlider(double q) {
+        return Db.tenths(Db.clamp(q, EQ_Q_MIN, EQ_Q_MAX));
+    }
+
+    /** Q for an {@link #eqQSlider(double)} position. */
+    public static double eqQFromSlider(int slider) {
+        int tenths = Math.max(Db.tenths(EQ_Q_MIN), Math.min(Db.tenths(EQ_Q_MAX), slider));
+        return Db.fromTenths(tenths);
+    }
+
+    /** Low cut, presence, or EQ. Playback bakes this into PCM. It is not a MIDI controller. */
     public boolean hasTone() {
-        return hasLowCut() || hasPresence();
+        return hasLowCut() || hasPresence() || hasEq();
     }
 
     /**
      * Tune, decay, or an effect differs from a new row.
      * A center drum that returns true needs its own channel, on the GM drum bank.
-     * Low cut and presence are not included. They are not MIDI controllers, so a drum
+     * Low cut, presence, and EQ are not included. They are not MIDI controllers, so a drum
      * that only uses them still shares channel 9 in a MIDI file. Playback gives that
      * drum a channel only when the rendered voice is actually loaded.
      */
@@ -680,8 +854,14 @@ public final class Track {
         if (lowCutHz > 0) {
             join(text, "low cut " + lowCutHz + " Hz " + lowCutSlope + " dB/oct");
         }
-        if (presence > 0) {
-            join(text, "presence +" + presence + " dB");
+        if (presenceTenths > 0) {
+            join(text, "presence " + Db.labeled(presence()));
+        }
+        for (EqBand band : eqBands()) {
+            join(text, "eq " + band.hz() + " Hz " + Db.labeled(band.gain()) + " Q " + Db.number(band.q()));
+        }
+        if (highCutHz > 0) {
+            join(text, "high cut " + highCutHz + " Hz");
         }
         return text.toString();
     }
@@ -781,6 +961,40 @@ public final class Track {
             case 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 47, 48, 50 -> true;
             default -> false;
         };
+    }
+
+    private boolean sameTone(Track other) {
+        if (presenceTenths != other.presenceTenths || highCutHz != other.highCutHz) {
+            return false;
+        }
+        for (int i = 0; i < EQ_BANDS; i++) {
+            EqBand left = eqBands[i];
+            EqBand right = other.eqBands[i];
+            if (left == right) {
+                continue;
+            }
+            if (left == null || right == null || !left.equals(right)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int clampEqHz(double hz) {
+        int rounded = (int) Math.round(hz);
+        return Math.max(EQ_HZ_MIN, Math.min(EQ_HZ_MAX, rounded));
+    }
+
+    private static int logSlider(int hz, int min, int max) {
+        double clamped = Math.max(min, Math.min(max, hz));
+        double t = Math.log(clamped / (double) min) / Math.log(max / (double) min);
+        return (int) Math.round(t * EQ_SLIDER);
+    }
+
+    private static int logHz(int slider, int min, int max) {
+        double t = Math.max(0, Math.min(EQ_SLIDER, slider)) / (double) EQ_SLIDER;
+        double hz = min * Math.pow(max / (double) min, t);
+        return (int) Math.round(hz);
     }
 
     private static int clampProgram(int program) {

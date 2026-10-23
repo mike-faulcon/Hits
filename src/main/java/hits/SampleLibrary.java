@@ -9,14 +9,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Turns sample tracks, and any row with low cut or presence, into one in-memory SoundFont.
+ * Turns sample tracks, and any row with low cut, presence, or EQ, into one in-memory SoundFont.
  * Each distinct sample on a row is its own preset in bank {@link SampleBank#SF2_BANK},
  * so pattern A and pattern B can play different files on the same row. Decay, gain, and
- * polarity are part of that preset. Low cut and presence are baked into its PCM when
+ * polarity are part of that preset. Low cut, EQ, and presence are baked into its PCM when
  * {@code bakeTone} is set. A row whose file cannot be read, or that does not fit in the
  * bank, falls back to its General MIDI drum and is named in {@link Ready#warning()}.
  * <p>
- * {@code bakeTone} is false for MIDI export. The file cannot carry a high-pass, so the
+ * {@code bakeTone} is false for MIDI export. The file cannot carry the filters, so the
  * companion SoundFont keeps gain, invert, and the envelope, and leaves the PCM unfiltered.
  * A drum stays on its ordinary note.
  */
@@ -36,7 +36,7 @@ public final class SampleLibrary {
     /**
      * {@code kits} is the SoundFont the built-in drums and notes are recorded from.
      * Null uses the JDK default, which is what a WAV export does when no SoundFont is loaded.
-     * {@code bakeTone} records low cut and presence. MIDI export passes false.
+     * {@code bakeTone} records low cut, EQ, and presence. MIDI export passes false.
      */
     public static Ready prepare(Beat beat, Path beatFile, List<Character> slots, Soundbank kits, boolean bakeTone) {
         return prepare(beat, beatFile, slots, kits, bakeTone, true);
@@ -102,12 +102,22 @@ public final class SampleLibrary {
             + "|" + toneToken(track, true);
     }
 
-    /** {@code 0} when low cut and presence are off, or when they are not being baked. */
+    /** {@code 0} when low cut, EQ, and presence are off, or when they are not being baked. */
     static String toneToken(Track track, boolean bakeTone) {
-        if (!bakeTone || !track.hasTone()) {
+        if (!bakeTone || track == null || !track.hasTone()) {
             return "0";
         }
-        return track.lowCutHz() + ":" + track.lowCutSlope() + ":" + track.presence();
+        StringBuilder text = new StringBuilder();
+        text.append(track.lowCutHz()).append(':')
+            .append(track.lowCutSlope()).append(':')
+            .append(Db.number(track.presence()));
+        for (EqBand band : track.eqBands()) {
+            text.append(':').append(band.hz())
+                .append(',').append(Db.number(band.gain()))
+                .append(',').append(Db.number(band.q()));
+        }
+        text.append(":h").append(track.highCutHz());
+        return text.toString();
     }
 
     private static Ready prepare(
@@ -189,12 +199,11 @@ public final class SampleLibrary {
             SampleRef sample = track.sample();
             try {
                 SampleAudio.Clip clip = read(sample, beatFile);
+                // Invert, then low cut, EQ bands, high cut, presence, then the 16-bit fit.
                 short[] pcm = sample.invert() ? invert(clip.samples()) : clip.samples();
                 double makeup = 0;
                 if (bakeTone && track.hasTone()) {
-                    double[] filtered = ToneFilter.process(
-                        pcm, clip.rate(), track.lowCutHz(), track.lowCutSlope(), track.presence()
-                    );
+                    double[] filtered = ToneFilter.process(pcm, clip.rate(), track);
                     ToneFilter.Fitted fitted = ToneFilter.fit(filtered);
                     pcm = fitted.samples();
                     makeup = fitted.makeupDb();
