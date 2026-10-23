@@ -83,7 +83,7 @@ class LowCutTest {
         assertEquals(Track.LOW_CUT_MAX, track.lowCutHz());
         assertEquals(24, track.lowCutSlope());
         track.setPresence(40);
-        assertEquals(Track.PRESENCE_MAX, track.presence());
+        assertEquals(12.0, track.presence());
         track.clearLowCut();
         track.setPresence(0);
         assertFalse(track.hasTone());
@@ -122,7 +122,7 @@ class LowCutTest {
         Beat loaded = BeatJson.read(json);
         assertEquals(120, loaded.track(0).lowCutHz());
         assertEquals(24, loaded.track(0).lowCutSlope());
-        assertEquals(6, loaded.track(0).presence());
+        assertEquals(6.0, loaded.track(0).presence());
         assertTrue(loaded.track(0).copy().sameAs(loaded.track(0)));
         assertEquals("low cut 120 Hz 24 dB/oct, presence +6 dB", loaded.track(0).shapeText());
 

@@ -127,9 +127,17 @@ public final class Beat {
      * so a gain above +24 dB is not only stored as 24.
      */
     public String gainWarning(char slot, String name) {
+        return rowWarning(slot, name, "sample gain");
+    }
+
+    /**
+     * A load warning for this pattern's row that mentions {@code phrase}, or null.
+     * The inspector uses it so a clamped presence or EQ gain is not only stored.
+     */
+    public String rowWarning(char slot, String name, String phrase) {
         String prefix = slotLabel(slot) + " " + (name == null ? "" : name) + ":";
         for (String warning : loadWarnings) {
-            if (warning.startsWith(prefix) && warning.contains("sample gain")) {
+            if (warning.startsWith(prefix) && phrase != null && warning.contains(phrase)) {
                 return warning;
             }
         }
@@ -137,8 +145,8 @@ public final class Beat {
     }
 
     /**
-     * Rows that use low cut or presence, as {@code A Kick, B Bass}.
-     * Empty when the beat does not use either control.
+     * Rows that use low cut, presence, or EQ, as {@code A Kick, B Bass}.
+     * Empty when the beat does not use any of them.
      */
     public String filterRowNames() {
         StringBuilder names = new StringBuilder();
@@ -157,7 +165,7 @@ public final class Beat {
     }
 
     /**
-     * MIDI export and a companion SoundFont drop low cut and presence.
+     * MIDI export and a companion SoundFont drop low cut, presence, and EQ.
      * Null when this beat does not use them.
      */
     public String midiFilterWarning() {
@@ -165,7 +173,7 @@ public final class Beat {
         if (rows.isEmpty()) {
             return null;
         }
-        return "Low cut and presence are not in the MIDI file or the companion SoundFont: "
+        return "Low cut, presence, and EQ are not in the MIDI file or the companion SoundFont: "
             + rows
             + ". Playback and WAV export use them.";
     }
@@ -382,7 +390,7 @@ public final class Beat {
             || hasTone();
     }
 
-    /** Low cut or presence on any row, in any pattern. */
+    /** Low cut, presence, or EQ on any row, in any pattern. */
     public boolean hasTone() {
         for (Track[] slot : slots) {
             for (Track track : slot) {

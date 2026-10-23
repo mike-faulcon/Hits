@@ -578,7 +578,7 @@ class SampleTrackTest {
         String json = BeatJson.write(beat);
         assertFalse(json.contains("\"invert\""));
         assertFalse(json.contains("\"gain\""));
-        assertEquals(SampleRef.GAIN, BeatJson.read(json).track(0).sample().gain());
+        assertEquals(8.0, BeatJson.read(json).track(0).sample().gain());
         assertFalse(BeatJson.read(json).track(0).sample().invert());
 
         beat.track(0).setSample(beat.track(0).sample().withGain(-3).withInvert(true));
@@ -586,7 +586,7 @@ class SampleTrackTest {
         assertTrue(flipped.contains("\"gain\": -3"), flipped);
         assertTrue(flipped.contains("\"invert\": true"), flipped);
         SampleRef read = BeatJson.read(flipped).track(0).sample();
-        assertEquals(-3, read.gain());
+        assertEquals(-3.0, read.gain());
         assertTrue(read.invert());
         assertTrue(read.same(beat.track(0).sample()));
 
