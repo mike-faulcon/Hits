@@ -1,5 +1,17 @@
 # Changelog
 
+## More tracks
+
+A beat starts with the eight kit rows and can hold from 1 to 16. **Add row**, **Remove**, **Duplicate**, **Up**, and **Down** change that row on every pattern, in the step grid and in the mixer. The first added row is a sine 808 named Sub, so a stop kick can sit under the kit kick. Later rows are empty drums. Alt+= adds a row, Alt+- removes it, Alt+D duplicates it, and Alt+Up / Alt+Down move it. From 11 rows the grid uses a shorter cell, and the grid and the mixer scroll when the window is shorter than the rows.
+
+The count is the length of each pattern's `tracks` array. There is no new key and no version bump for the count alone. An eight-row beat still loads and saves the same bytes, and a beat that fits the channel pool still renders the same audio, MIDI, and SoundFont. An older Hits that expects eight tracks will not open a longer file. `.btf` is still the 2001 8×16 file.
+
+Every per-row control works on the new rows: drum, note, and sample, presets, tune, decay, cutoff, resonance, reverb, chorus, gain, pan, mute, solo, invert, low cut, the two EQ bands, high cut and its slope, presence, each pattern's steps, and the song chain. Make me a beat still writes the eight kit voices and leaves the extra rows.
+
+MIDI has 16 channels and channel 10 stays drums, so 15 channels are left. An eight-row beat that fits keeps channel == row. Sharing runs only after that assignment runs out of channels. Rows that send the same instrument, pan, tune, decay, and effects then share one channel. Drum notes and step pitches are not part of that match, so two kicks at the same pan can share, and two different pans cannot. `hits info`, `hits render`, and a line on the window name a row that still cannot, and the file is still written. A filtered hit and a plain hit on the same row still need a second channel. When none is left, the plain hit uses the drum channel and the warning says so. A baked filter on a row past the eighth still records into the sample bank.
+
+Still deferred: more than 16 rows, a different count per pattern, program changes so incompatible rows can share a channel across time, sharing that extra filter channel with another row, the metronome on channel 16 while playback also uses it (exports leave the click out), and cutoff or decay on an overflow drum.
+
 ## Row EQ
 
 Each row has a parametric EQ under Low cut and Presence: two peaking bands and a high cut. A band runs from 30 Hz to 12 kHz, gain −18 to +12 dB, Q 0.3 to 8. High cut is a 12 dB/oct low-pass from 1 kHz to 20 kHz and stays off until it is turned on. Flat bands are left out of the file. The inspector draws a small combined response from 30 Hz to 20 kHz.

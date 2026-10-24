@@ -290,7 +290,7 @@ public final class Player implements AutoCloseable {
 
     /** Preview the row's current sound, on the channel playback would use. */
     public void audition(Beat beat, char slot, int row) {
-        if (beat == null || row < 0 || row >= Beat.TRACKS) {
+        if (beat == null || row < 0 || row >= beat.trackCount()) {
             return;
         }
         audition(beat, slot, row, beat.slot(slot)[row].playedNote());
@@ -299,7 +299,7 @@ public final class Player implements AutoCloseable {
     /** Preview one pitch of the row, with the same bank, program, and channel as playback. */
     public void audition(Beat beat, char slot, int row, int note) {
         Receiver current = receiver();
-        if (current == null || beat == null || row < 0 || row >= Beat.TRACKS) {
+        if (current == null || beat == null || row < 0 || row >= beat.trackCount()) {
             return;
         }
         Track track = beat.slot(slot)[row];

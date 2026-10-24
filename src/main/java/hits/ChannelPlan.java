@@ -4,7 +4,9 @@ import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Soundbank;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Which MIDI channel a row uses, stable for every pattern in an export.
@@ -12,7 +14,11 @@ import java.util.List;
  * Every other row gets a channel of its own from {@link #POOL}. Channel 15 is last
  * in that pool because the metronome already uses it. Notes, sample tracks, and pitched presets
  * are placed before drums, so a drum is the row that falls back to channel 9
- * when the pool runs out. A sample that loaded keeps its own channel.
+ * when the pool runs out. Rows that still would not fit, and that send the same
+ * bank, program, pan, tune, decay, and effects, share one channel instead.
+ * A row that still cannot have a channel is named by {@link #channelWarning(Beat)}.
+ * An eight-row beat that fits the pool keeps channel == row, the same as before.
+ * A sample that loaded keeps its own channel.
  * A sample that falls back plays its drum note on channel 9, because Gervill
  * will not switch a melodic channel from the sample bank to the drum bank.
  */
@@ -67,6 +73,11 @@ public final class ChannelPlan {
      * with per-key NRPN. The sample-bank voice stays on {@link #reserved}.
      */
     private final boolean[] acousticNine;
+    /**
+     * The filtered voice and a plain melodic voice on this row could not be split,
+     * so the plain hit plays the filtered recording.
+     */
+    private final boolean[] collided;
 
     private ChannelPlan(
         int[] reserved,
@@ -76,7 +87,8 @@ public final class ChannelPlan {
         Soundbank kits,
         SampleUse samples,
         int[] sampleChannel,
-        boolean[] acousticNine
+        boolean[] acousticNine,
+        boolean[] collided
     ) {
         this.reserved = reserved;
         this.overflow = overflow;
@@ -86,6 +98,7 @@ public final class ChannelPlan {
         this.samples = samples == null ? SampleUse.none() : samples;
         this.sampleChannel = sampleChannel == null ? emptyChannels(reserved.length) : sampleChannel;
         this.acousticNine = acousticNine == null ? new boolean[reserved.length] : acousticNine;
+        this.collided = collided == null ? new boolean[reserved.length] : collided;
     }
 
     private static int[] emptyChannels(int count) {
@@ -140,17 +153,19 @@ public final class ChannelPlan {
         if (samples == null) {
             samples = SampleUse.none();
         }
-        boolean[] needsPrivate = new boolean[Beat.TRACKS];
-        boolean[] melodic = new boolean[Beat.TRACKS];
-        boolean[] presetRow = new boolean[Beat.TRACKS];
-        int[] shapeRow = new int[Beat.TRACKS];
-        boolean[] sampleVoice = new boolean[Beat.TRACKS];
-        boolean[] acousticPrivate = new boolean[Beat.TRACKS];
-        boolean[] acousticMelodic = new boolean[Beat.TRACKS];
+        int count = beat == null ? 0 : beat.trackCount();
+        boolean[] needsPrivate = new boolean[count];
+        boolean[] melodic = new boolean[count];
+        boolean[] presetRow = new boolean[count];
+        int[] shapeRow = new int[count];
+        boolean[] sampleVoice = new boolean[count];
+        boolean[] acousticPrivate = new boolean[count];
+        boolean[] acousticMelodic = new boolean[count];
         if (beat != null && slots != null) {
             for (char slot : slots) {
                 Track[] tracks = beat.slot(slot);
-                for (int row = 0; row < tracks.length; row++) {
+                int rows = Math.min(count, tracks.length);
+                for (int row = 0; row < rows; row++) {
                     Track track = tracks[row];
                     if (track.mode() == TrackMode.DRUM && track.preset() != null) {
                         presetRow[row] = true;
@@ -185,13 +200,228 @@ public final class ChannelPlan {
                 }
             }
         }
-        ChannelPlan assigned = assign(Beat.TRACKS, needsPrivate, melodic);
-        int[] sampleChannel = emptyChannels(Beat.TRACKS);
-        boolean[] acousticNine = new boolean[Beat.TRACKS];
-        separate(assigned, sampleVoice, acousticPrivate, acousticMelodic, sampleChannel, acousticNine);
+        ChannelPlan assigned = assign(count, needsPrivate, melodic);
+        if (overflows(assigned) && beat != null) {
+            assigned = share(
+                assigned,
+                needsPrivate,
+                melodic,
+                signatures(beat, slots, count, kits, samples, needsPrivate)
+            );
+        }
+        int[] sampleChannel = emptyChannels(count);
+        boolean[] acousticNine = new boolean[count];
+        boolean[] collided = new boolean[count];
+        separate(assigned, sampleVoice, acousticPrivate, acousticMelodic, sampleChannel, acousticNine, collided);
         return new ChannelPlan(
-            assigned.reserved, assigned.overflow, presetRow, shapeRow, kits, samples, sampleChannel, acousticNine
+            assigned.reserved,
+            assigned.overflow,
+            presetRow,
+            shapeRow,
+            kits,
+            samples,
+            sampleChannel,
+            acousticNine,
+            collided
         );
+    }
+
+    /**
+     * Why this plan cannot play every row on its own channel, or null when it can.
+     * Compatible rows already share. The named rows are the ones that still collide.
+     */
+    public String channelWarning(Beat beat) {
+        if (beat == null) {
+            return null;
+        }
+        List<String> crowded = new ArrayList<>();
+        List<String> plain = new ArrayList<>();
+        int rows = Math.min(reserved.length, beat.trackCount());
+        Track[] tracks = beat.activeTracks();
+        for (int row = 0; row < rows; row++) {
+            String label = (row + 1) + " " + tracks[row].name();
+            if (overflow(row) || collided(row)) {
+                crowded.add(label);
+            } else if (acousticNine(row)) {
+                plain.add(label);
+            }
+        }
+        if (crowded.isEmpty() && plain.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder();
+        if (!crowded.isEmpty()) {
+            text.append("Not enough MIDI channels. Channel 10 is drums, and the other 15 are already used. ");
+            text.append(String.join(", ", crowded));
+            text.append(crowded.size() == 1 ? " shares" : " share");
+            text.append(" a channel, so the sound can be wrong. ");
+            text.append("Rows with the same instrument, pan, tune, decay, and effects share one channel.");
+        }
+        if (!plain.isEmpty()) {
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            text.append(String.join(", ", plain));
+            text.append(plain.size() == 1 ? " has" : " have");
+            text.append(" a filtered hit and a plain hit and no free channel, so the plain hit uses the drum channel.");
+        }
+        return text.toString();
+    }
+
+    /** True when {@code row} cannot be rendered on a channel that matches its sound. */
+    public boolean misrendered(int row) {
+        return overflow(row) || acousticNine(row) || collided(row);
+    }
+
+    private boolean collided(int row) {
+        return row >= 0 && row < collided.length && collided[row];
+    }
+
+    private static boolean overflows(ChannelPlan plan) {
+        for (boolean flag : plan.overflow) {
+            if (flag) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Puts rows that send the same channel state on one channel.
+     * Used only after {@link #assign} ran out of channels, so a beat that already
+     * fits keeps the channels it had, including channel == row on an eight-row beat.
+     */
+    private static ChannelPlan share(
+        ChannelPlan assigned,
+        boolean[] needsPrivate,
+        boolean[] melodic,
+        String[] signatures
+    ) {
+        int count = assigned.reserved.length;
+        int[] leader = new int[count];
+        for (int row = 0; row < count; row++) {
+            leader[row] = -1;
+        }
+        Map<String, Integer> groups = new LinkedHashMap<>();
+        for (int row = 0; row < count; row++) {
+            if (row >= needsPrivate.length || !needsPrivate[row]) {
+                continue;
+            }
+            String signature = signatures != null && row < signatures.length && signatures[row] != null
+                ? signatures[row]
+                : "row" + row;
+            Integer existing = groups.get(signature);
+            if (existing == null) {
+                groups.put(signature, row);
+                leader[row] = row;
+            } else {
+                leader[row] = existing;
+            }
+        }
+        boolean[] groupNeeds = new boolean[count];
+        boolean[] groupMelodic = new boolean[count];
+        for (int row = 0; row < count; row++) {
+            if (leader[row] < 0) {
+                continue;
+            }
+            int lead = leader[row];
+            groupNeeds[lead] = true;
+            if (row < melodic.length && melodic[row]) {
+                groupMelodic[lead] = true;
+            }
+        }
+        ChannelPlan grouped = assign(count, groupNeeds, groupMelodic);
+        int[] reserved = grouped.reserved.clone();
+        boolean[] overflow = grouped.overflow.clone();
+        for (int row = 0; row < count; row++) {
+            int lead = leader[row];
+            if (lead >= 0 && lead != row) {
+                reserved[row] = reserved[lead];
+                overflow[row] = overflow[lead];
+            }
+        }
+        return new ChannelPlan(
+            reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null
+        );
+    }
+
+    private static String[] signatures(
+        Beat beat,
+        List<Character> slots,
+        int count,
+        Soundbank kits,
+        SampleUse samples,
+        boolean[] needsPrivate
+    ) {
+        String[] keys = new String[count];
+        for (int row = 0; row < count; row++) {
+            if (row >= needsPrivate.length || !needsPrivate[row]) {
+                continue;
+            }
+            StringBuilder key = new StringBuilder();
+            if (slots != null) {
+                for (char slot : slots) {
+                    Track[] tracks = beat.slot(slot);
+                    if (row >= tracks.length) {
+                        continue;
+                    }
+                    key.append(slot).append('=').append(voiceSignature(tracks[row], row, kits, samples)).append(';');
+                }
+            }
+            keys[row] = key.toString();
+        }
+        return keys;
+    }
+
+    /**
+     * Channel-wide state. Drum notes and step pitches are not included, so two kicks
+     * at the same pan can share, and two notes on the same program can share.
+     * A different pan, tune, decay, or effect cannot.
+     */
+    private static String voiceSignature(Track track, int row, Soundbank kits, SampleUse samples) {
+        boolean rendered = track.mode() != TrackMode.SAMPLE && samples.plays(track, row);
+        String kind;
+        int bank;
+        int program;
+        if (track.mode() == TrackMode.SAMPLE && samples.plays(track, row)) {
+            kind = "sample";
+            bank = SampleBank.MIDI_BANK;
+            program = samples.program(track, row);
+        } else if (rendered) {
+            kind = "rendered";
+            bank = SampleBank.MIDI_BANK;
+            program = samples.program(track, row);
+        } else if (track.mode() == TrackMode.DRUM && track.preset() != null) {
+            kind = "preset";
+            bank = track.bank();
+            program = track.preset().program();
+        } else if (track.mode() == TrackMode.NOTE) {
+            kind = "note";
+            bank = track.bank();
+            program = track.program();
+        } else {
+            kind = "drum";
+            bank = track.bank() == 0 ? Gm.DRUM_BANK : track.bank();
+            program = SoundCatalog.playedKit(kits, track.kit());
+        }
+        String release = Integer.toString(track.decay());
+        String reverb = track.hasReverb() ? Integer.toString(track.reverb()) : "-";
+        if (track.mode() == TrackMode.DRUM && track.preset() != null) {
+            if (track.decay() == Track.DECAY) {
+                release = "g" + track.gate();
+            }
+            if (!track.hasReverb()) {
+                reverb = "g" + track.gate();
+            }
+        }
+        return kind + "|" + bank + "|" + program
+            + "|p" + track.pan()
+            + "|t" + track.tune()
+            + "|d" + release
+            + "|r" + reverb
+            + "|c" + (track.hasChorus() ? track.chorus() : "-")
+            + "|f" + (track.hasCutoff() ? track.cutoff() : "-")
+            + "|q" + (track.hasResonance() ? track.resonance() : "-");
     }
 
     /**
@@ -207,7 +437,8 @@ public final class ChannelPlan {
         boolean[] acousticPrivate,
         boolean[] acousticMelodic,
         int[] sampleChannel,
-        boolean[] acousticNine
+        boolean[] acousticNine,
+        boolean[] collided
     ) {
         boolean[] taken = new boolean[16];
         taken[Gm.DRUM_CHANNEL] = true;
@@ -229,6 +460,8 @@ public final class ChannelPlan {
                 taken[extra] = true;
             } else if (row >= acousticMelodic.length || !acousticMelodic[row]) {
                 acousticNine[row] = true;
+            } else if (row < collided.length) {
+                collided[row] = true;
             }
         }
     }
@@ -272,7 +505,7 @@ public final class ChannelPlan {
         boolean[] taken = new boolean[16];
         place(reserved, overflow, taken, needsPrivate, melodic, true);
         place(reserved, overflow, taken, needsPrivate, melodic, false);
-        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null);
+        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null);
     }
 
     private static void place(

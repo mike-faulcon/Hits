@@ -138,7 +138,8 @@ public final class SampleLibrary {
         if (beat != null && slots != null) {
             List<List<Pending>> pending = new ArrayList<>();
             List<Rendered> extras = new ArrayList<>();
-            for (int row = 0; row < Beat.TRACKS; row++) {
+            int rows = beat.trackCount();
+            for (int row = 0; row < rows; row++) {
                 pending.add(collect(beat, beatFile, slots, row, bakeTone, warnings, build));
                 if (build && bakeTone) {
                     collectRendered(beat, slots, row, kits, beatFile, extras, rendered, warnings);

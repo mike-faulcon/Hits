@@ -1,13 +1,18 @@
 package hits.ui;
 
+import hits.Beat;
 import hits.Chain;
+import hits.ChannelPlan;
 import hits.Editor;
 import hits.Kits;
 import hits.Player;
+import hits.SampleLibrary;
+import hits.SampleUse;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
@@ -15,11 +20,14 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.KeyboardFocusManager;
 import java.awt.KeyEventDispatcher;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Studio window. Builds the desk and connects the panels.
@@ -38,6 +46,35 @@ final class StudioFrame extends JFrame {
     private final JPanel viewCards = new JPanel(views);
     private final JButton stepsView = Widgets.button("Steps");
     private final JButton mixerView = Widgets.button("Mixer");
+    private final JButton addRow = rowButton(
+        "Add row",
+        "add-row",
+        "Add a row on every pattern. Alt and equals. The first extra row is a sine 808 named Sub."
+    );
+    private final JButton removeRow = rowButton(
+        "Remove",
+        "remove-row",
+        "Remove the selected row from every pattern. Alt and minus."
+    );
+    private final JButton duplicateRow = rowButton(
+        "Duplicate",
+        "duplicate-row",
+        "Copy the selected row onto the next row, in every pattern. Alt+D."
+    );
+    private final JButton moveUp = rowButton(
+        "Up",
+        "move-row-up",
+        "Move the selected row up, in every pattern. Alt+Up."
+    );
+    private final JButton moveDown = rowButton(
+        "Down",
+        "move-row-down",
+        "Move the selected row down, in every pattern. Alt+Down."
+    );
+    private final JLabel channelWarning = Widgets.label(" ");
+    private String channelVoiceKey = "";
+    private SampleUse channelUse = SampleUse.none();
+    private int revealedRow = -1;
     private boolean mixerShown;
     private final BeatsFolder beatsFolder;
     private final TransportBar transport;
@@ -52,6 +89,7 @@ final class StudioFrame extends JFrame {
     private KeyEventDispatcher keys;
     private KeyEventDispatcher tapKeys;
     private KeyEventDispatcher nudgeKeys;
+    private KeyEventDispatcher rowKeys;
 
     StudioFrame(Editor editor, Player player) {
         super("Hits");
@@ -195,6 +233,11 @@ final class StudioFrame extends JFrame {
         mixer.wire();
         stepsView.addActionListener(event -> showMixer(false));
         mixerView.addActionListener(event -> showMixer(true));
+        addRow.addActionListener(event -> editor.addRow());
+        removeRow.addActionListener(event -> editor.removeRow());
+        duplicateRow.addActionListener(event -> editor.duplicateRow());
+        moveUp.addActionListener(event -> editor.moveRow(-1));
+        moveDown.addActionListener(event -> editor.moveRow(1));
         output.wire();
         KeyboardShortcuts.install(
             getRootPane(),
@@ -214,10 +257,19 @@ final class StudioFrame extends JFrame {
         keys = KeyboardShortcuts.spacePlay(this, () -> transport.togglePlay(this));
         tapKeys = KeyboardShortcuts.tapTempo(this, transport::tapTempo);
         nudgeKeys = KeyboardShortcuts.nudge(this, () -> editor.bumpStepNudge(-1), () -> editor.bumpStepNudge(1));
+        rowKeys = KeyboardShortcuts.rows(
+            this,
+            editor::addRow,
+            editor::removeRow,
+            editor::duplicateRow,
+            () -> editor.moveRow(-1),
+            () -> editor.moveRow(1)
+        );
         KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
         manager.addKeyEventDispatcher(keys);
         manager.addKeyEventDispatcher(tapKeys);
         manager.addKeyEventDispatcher(nudgeKeys);
+        manager.addKeyEventDispatcher(rowKeys);
     }
 
     private void changed(boolean musical) {
@@ -230,6 +282,8 @@ final class StudioFrame extends JFrame {
 
     private void refresh() {
         sync.run(() -> {
+            refreshRows();
+            refreshChannels();
             transport.refresh();
             chain.refresh();
             inspector.refresh();
@@ -239,6 +293,10 @@ final class StudioFrame extends JFrame {
             updateTitle();
             pattern.revalidate();
             pattern.repaint();
+            if (editor.trackIndex() != revealedRow) {
+                revealedRow = editor.trackIndex();
+                pattern.revealSelection();
+            }
             transport.updatePlayButton();
         });
     }
@@ -248,9 +306,110 @@ final class StudioFrame extends JFrame {
         mixerView.setToolTipText("Level, pan, reverb, and chorus for every track, and the master volume.");
         Widgets.fix(stepsView, 72, 32);
         Widgets.fix(mixerView, 80, 32);
-        JPanel bar = Widgets.row(stepsView, mixerView);
+        channelWarning.setName("channel-warning");
+        channelWarning.setForeground(Theme.STEP_ACCENT);
+        channelWarning.setVisible(false);
+        channelWarning.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JPanel buttons = Widgets.row(stepsView, mixerView, addRow, removeRow, duplicateRow, moveUp, moveDown);
+        buttons.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JPanel bar = new JPanel();
+        bar.setLayout(new javax.swing.BoxLayout(bar, javax.swing.BoxLayout.Y_AXIS));
+        bar.setOpaque(false);
         bar.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 0));
+        bar.add(buttons);
+        bar.add(channelWarning);
         return bar;
+    }
+
+    private void refreshRows() {
+        showRowActions(
+            addRow,
+            duplicateRow,
+            removeRow,
+            moveUp,
+            moveDown,
+            editor.beat().trackCount(),
+            editor.trackIndex()
+        );
+    }
+
+    /** Enables the row buttons for {@code count} rows and a selection at {@code index}. */
+    static void showRowActions(
+        JButton add,
+        JButton duplicate,
+        JButton remove,
+        JButton up,
+        JButton down,
+        int count,
+        int index
+    ) {
+        add.setEnabled(count < Beat.MAX_TRACKS);
+        duplicate.setEnabled(count < Beat.MAX_TRACKS);
+        remove.setEnabled(count > Beat.MIN_TRACKS);
+        up.setEnabled(index > 0);
+        down.setEnabled(index + 1 < count);
+    }
+
+    /**
+     * Channel plan for every pattern. Sample and filter voices are included on the built-in synth.
+     * A slider drag keeps the last plan until the mouse goes up, so the bank is not rebuilt on every tick.
+     */
+    private void refreshChannels() {
+        Beat beat = editor.beat();
+        List<Character> slots = new ArrayList<>();
+        for (int i = 0; i < Beat.SLOT_COUNT; i++) {
+            slots.add(Beat.slotLetter(i));
+        }
+        SampleUse use = SampleUse.none();
+        if (player.isBuiltIn()) {
+            if (!editor.isAdjusting()) {
+                String key = SampleLibrary.cacheKey(beat, session.file(), slots, player.soundbank(), true);
+                if (!key.equals(channelVoiceKey)) {
+                    channelUse = SampleLibrary.prepare(beat, session.file(), slots, player.soundbank(), true).use();
+                    if (channelUse == null) {
+                        channelUse = SampleUse.none();
+                    }
+                    channelVoiceKey = key;
+                }
+            }
+            use = channelUse;
+        } else {
+            channelUse = SampleUse.none();
+            channelVoiceKey = "";
+        }
+        ChannelPlan plan = ChannelPlan.of(beat, slots, player.soundbank(), use);
+        inspector.showChannels(plan);
+        String warning = plan.channelWarning(beat);
+        boolean on = warning != null && !warning.isBlank();
+        channelWarning.setVisible(on);
+        if (!on) {
+            channelWarning.setText(" ");
+            channelWarning.getAccessibleContext().setAccessibleName("Channels");
+            channelWarning.setToolTipText(null);
+            return;
+        }
+        channelWarning.setText("<html><body style='width: 640px'>" + html(warning) + "</body></html>");
+        channelWarning.getAccessibleContext().setAccessibleName(warning);
+        channelWarning.setToolTipText(warning);
+    }
+
+    private static String html(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    static JButton rowButton(String text, String name, String tip) {
+        JButton button = Widgets.button(text);
+        button.setName(name);
+        String accessible = switch (name) {
+            case "remove-row" -> "Remove row";
+            case "duplicate-row" -> "Duplicate row";
+            case "move-row-up" -> "Move row up";
+            case "move-row-down" -> "Move row down";
+            default -> text;
+        };
+        button.getAccessibleContext().setAccessibleName(accessible);
+        button.setToolTipText(tip);
+        return button;
     }
 
     private void showMixer(boolean mixer) {
@@ -311,6 +470,10 @@ final class StudioFrame extends JFrame {
         if (nudgeKeys != null) {
             manager.removeKeyEventDispatcher(nudgeKeys);
             nudgeKeys = null;
+        }
+        if (rowKeys != null) {
+            manager.removeKeyEventDispatcher(rowKeys);
+            rowKeys = null;
         }
         playhead.stop();
         exports.close();

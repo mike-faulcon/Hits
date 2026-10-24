@@ -305,7 +305,7 @@ public final class SequenceBuilder {
         List<Character> spanSlots = spanSlots(beat, chosen, song);
         ChannelPlan plan = ChannelPlan.of(beat, spanSlots, kits, samples);
         boolean joined = spanSlots.size() > 1;
-        Track[] midiTracks = new Track[Beat.TRACKS];
+        Track[] midiTracks = new Track[beat.trackCount()];
         ChannelMemory memory = new ChannelMemory();
         for (int pass = 0; pass < times; pass++) {
             long origin = pass * span;

@@ -7,6 +7,7 @@ import java.nio.file.Path;
 /**
  * The 2001 .btf file: 8×16 on/off bytes, then eight pairs of instrument index and MIDI note.
  * Instrument indexes on the machine that wrote these files match General MIDI program numbers.
+ * A loaded beat keeps those eight rows. JSON is what stores a longer beat.
  */
 public final class BtfFormat {
     public static final int COLS = 16;

@@ -29,29 +29,30 @@ final class MixerPanel {
     private final JLabel masterValue = Widgets.label(Integer.toString(Beat.MASTER));
     private final JCheckBox allPatterns = new JCheckBox("All patterns", true);
     private final SliderDrag masterDrag;
-    private final JLabel[] names = new JLabel[Beat.TRACKS];
-    private final JButton[] mutes = new JButton[Beat.TRACKS];
-    private final JButton[] solos = new JButton[Beat.TRACKS];
-    private final JSlider[] levels = new JSlider[Beat.TRACKS];
-    private final JLabel[] levelValues = new JLabel[Beat.TRACKS];
-    private final JSlider[] pans = new JSlider[Beat.TRACKS];
-    private final JLabel[] panValues = new JLabel[Beat.TRACKS];
-    private final JCheckBox[] reverbOn = new JCheckBox[Beat.TRACKS];
-    private final JSlider[] reverbs = new JSlider[Beat.TRACKS];
-    private final JLabel[] reverbValues = new JLabel[Beat.TRACKS];
-    private final JCheckBox[] chorusOn = new JCheckBox[Beat.TRACKS];
-    private final JSlider[] choruses = new JSlider[Beat.TRACKS];
-    private final JLabel[] chorusValues = new JLabel[Beat.TRACKS];
-    private final SliderDrag[] levelDrags = new SliderDrag[Beat.TRACKS];
-    private final SliderDrag[] panDrags = new SliderDrag[Beat.TRACKS];
-    private final SliderDrag[] reverbDrags = new SliderDrag[Beat.TRACKS];
-    private final SliderDrag[] chorusDrags = new SliderDrag[Beat.TRACKS];
+    private final JPanel[] strips = new JPanel[Beat.MAX_TRACKS];
+    private final JLabel[] names = new JLabel[Beat.MAX_TRACKS];
+    private final JButton[] mutes = new JButton[Beat.MAX_TRACKS];
+    private final JButton[] solos = new JButton[Beat.MAX_TRACKS];
+    private final JSlider[] levels = new JSlider[Beat.MAX_TRACKS];
+    private final JLabel[] levelValues = new JLabel[Beat.MAX_TRACKS];
+    private final JSlider[] pans = new JSlider[Beat.MAX_TRACKS];
+    private final JLabel[] panValues = new JLabel[Beat.MAX_TRACKS];
+    private final JCheckBox[] reverbOn = new JCheckBox[Beat.MAX_TRACKS];
+    private final JSlider[] reverbs = new JSlider[Beat.MAX_TRACKS];
+    private final JLabel[] reverbValues = new JLabel[Beat.MAX_TRACKS];
+    private final JCheckBox[] chorusOn = new JCheckBox[Beat.MAX_TRACKS];
+    private final JSlider[] choruses = new JSlider[Beat.MAX_TRACKS];
+    private final JLabel[] chorusValues = new JLabel[Beat.MAX_TRACKS];
+    private final SliderDrag[] levelDrags = new SliderDrag[Beat.MAX_TRACKS];
+    private final SliderDrag[] panDrags = new SliderDrag[Beat.MAX_TRACKS];
+    private final SliderDrag[] reverbDrags = new SliderDrag[Beat.MAX_TRACKS];
+    private final SliderDrag[] chorusDrags = new SliderDrag[Beat.MAX_TRACKS];
 
     MixerPanel(Editor editor, Sync sync) {
         this.editor = editor;
         this.sync = sync;
         this.masterDrag = new SliderDrag(editor, sync);
-        for (int row = 0; row < Beat.TRACKS; row++) {
+        for (int row = 0; row < Beat.MAX_TRACKS; row++) {
             levelDrags[row] = new SliderDrag(editor, sync);
             panDrags[row] = new SliderDrag(editor, sync);
             reverbDrags[row] = new SliderDrag(editor, sync);
@@ -68,7 +69,7 @@ final class MixerPanel {
         master.setToolTipText("Master volume. 127 is full. This turns every track down together.");
         masterDrag.wire(master, beat -> beat.setMaster(master.getValue()));
         allPatterns.setToolTipText("Level, pan, reverb, and chorus apply to every pattern whose row has the same name and sound. A different instrument on that row is left alone. Turn this off to edit only the pattern on screen. Mute and solo stay on this pattern.");
-        for (int row = 0; row < Beat.TRACKS; row++) {
+        for (int row = 0; row < Beat.MAX_TRACKS; row++) {
             int index = row;
             levels[row].setToolTipText("Track level. 100 leaves each hit as programmed. 0 is silent.");
             pans[row].setToolTipText("Pan. C is center. L is left, R is right.");
@@ -78,7 +79,11 @@ final class MixerPanel {
             reverbOn[row].setToolTipText(reverbTip);
             choruses[row].setToolTipText(chorusTip);
             chorusOn[row].setToolTipText(chorusTip);
+            mutes[row].setName("mute-" + row);
+            mutes[row].getAccessibleContext().setAccessibleName("Mute row " + (row + 1));
             mutes[row].setToolTipText("Mute this track.");
+            solos[row].setName("solo-" + row);
+            solos[row].getAccessibleContext().setAccessibleName("Solo row " + (row + 1));
             solos[row].setToolTipText("Solo this track. While any solo is on, only soloed tracks play.");
             levelDrags[row].wire(levels[row], beat -> Mix.setLevel(
                 beat, editor.viewSlot(), index, levels[index].getValue(), allPatterns.isSelected()));
@@ -124,7 +129,12 @@ final class MixerPanel {
         }
         masterValue.setText(Integer.toString(beat.master()));
         Track[] tracks = editor.viewTracks();
-        for (int row = 0; row < Beat.TRACKS; row++) {
+        for (int row = 0; row < Beat.MAX_TRACKS; row++) {
+            boolean shown = row < tracks.length;
+            strips[row].setVisible(shown);
+            if (!shown) {
+                continue;
+            }
             Track track = tracks[row];
             names[row].setText((row + 1) + "  " + track.name());
             names[row].setForeground(Beat.audibleIn(tracks, track) ? Theme.TEXT : Theme.MUTED);
@@ -141,6 +151,7 @@ final class MixerPanel {
             paintChip(mutes[row], track.mute(), Theme.MUTE_ON);
             paintChip(solos[row], track.solo(), Theme.SOLO);
         }
+        panel.revalidate();
     }
 
     private JPanel build() {
@@ -163,9 +174,11 @@ final class MixerPanel {
         body.add(Box.createVerticalStrut(10));
         body.add(masterRow());
         body.add(Box.createVerticalStrut(12));
-        for (int row = 0; row < Beat.TRACKS; row++) {
-            body.add(trackRow(row));
-            body.add(Box.createVerticalStrut(4));
+        for (int row = 0; row < Beat.MAX_TRACKS; row++) {
+            strips[row] = trackRow(row);
+            strips[row].setVisible(row < Beat.TRACKS);
+            body.add(strips[row]);
+            body.add(Box.createVerticalStrut(2));
         }
         return body;
     }
@@ -296,6 +309,9 @@ final class MixerPanel {
     }
 
     private static void paintChip(JButton button, boolean on, Color color) {
+        if (button.isSelected() != on) {
+            button.setSelected(on);
+        }
         button.setBackground(on ? color : Theme.PANEL);
         button.setForeground(on ? Theme.INK : Theme.TEXT);
         button.setOpaque(true);

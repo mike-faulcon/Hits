@@ -146,10 +146,64 @@ public final class Editor {
     }
 
     public void selectTrack(int index) {
-        if (index < 0 || index >= Beat.TRACKS) {
+        if (index < 0 || index >= beat.trackCount()) {
             return;
         }
         trackIndex = index;
+        stepIndex = -1;
+        fire(false);
+    }
+
+    /** Appends a row on every pattern and selects it. One undo step. No-op at 16 rows. */
+    public void addRow() {
+        if (beat.trackCount() >= Beat.MAX_TRACKS) {
+            return;
+        }
+        int next = beat.trackCount();
+        edit(Beat::addTrack);
+        trackIndex = Math.min(next, beat.trackCount() - 1);
+        stepIndex = -1;
+        fire(false);
+    }
+
+    /** Drops the selected row from every pattern. One undo step. No-op when it is the only row. */
+    public void removeRow() {
+        int index = trackIndex;
+        if (beat.trackCount() <= Beat.MIN_TRACKS) {
+            return;
+        }
+        edit(current -> current.removeTrack(index));
+        if (trackIndex > index) {
+            trackIndex--;
+        }
+        if (trackIndex >= beat.trackCount()) {
+            trackIndex = beat.trackCount() - 1;
+        }
+        stepIndex = -1;
+        fire(false);
+    }
+
+    /** Copies the selected row onto the next row, in every pattern. One undo step. */
+    public void duplicateRow() {
+        int index = trackIndex;
+        if (beat.trackCount() >= Beat.MAX_TRACKS) {
+            return;
+        }
+        edit(current -> current.duplicateTrack(index));
+        trackIndex = Math.min(index + 1, beat.trackCount() - 1);
+        stepIndex = -1;
+        fire(false);
+    }
+
+    /** Moves the selected row by {@code delta} positions in every pattern. One undo step. */
+    public void moveRow(int delta) {
+        int index = trackIndex;
+        int target = index + delta;
+        if (target < 0 || target >= beat.trackCount()) {
+            return;
+        }
+        edit(current -> current.moveTrack(index, delta));
+        trackIndex = target;
         stepIndex = -1;
         fire(false);
     }
@@ -161,7 +215,7 @@ public final class Editor {
 
     /** Points the velocity slider at a step without toggling it. */
     public void selectStep(int row, int column) {
-        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.gridColumns(viewSlot())) {
+        if (row < 0 || row >= beat.trackCount() || column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         trackIndex = row;
@@ -231,7 +285,7 @@ public final class Editor {
     }
 
     public void tap(int row, int column, boolean accent) {
-        if (row < 0 || row >= Beat.TRACKS || column < 0 || column >= beat.gridColumns(viewSlot())) {
+        if (row < 0 || row >= beat.trackCount() || column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         trackIndex = row;
@@ -241,6 +295,9 @@ public final class Editor {
     }
 
     public void toggleMute(int row) {
+        if (row < 0 || row >= beat.trackCount()) {
+            return;
+        }
         trackIndex = row;
         char slot = viewSlot();
         edit(current -> {
@@ -250,6 +307,9 @@ public final class Editor {
     }
 
     public void toggleSolo(int row) {
+        if (row < 0 || row >= beat.trackCount()) {
+            return;
+        }
         trackIndex = row;
         char slot = viewSlot();
         edit(current -> {
@@ -283,7 +343,11 @@ public final class Editor {
     }
 
     public void endAdjust() {
+        if (!adjusting) {
+            return;
+        }
         adjusting = false;
+        fire(false);
     }
 
     public void undo() {
@@ -327,8 +391,23 @@ public final class Editor {
     }
 
     private void fire(boolean musical) {
+        clampSelection();
         for (Listener listener : List.copyOf(listeners)) {
             listener.changed(musical);
+        }
+    }
+
+    /** Keeps the selection on a row that still exists after undo, remove, or a shorter file. */
+    private void clampSelection() {
+        int count = Math.max(Beat.MIN_TRACKS, beat.trackCount());
+        if (trackIndex >= count) {
+            trackIndex = count - 1;
+        }
+        if (trackIndex < 0) {
+            trackIndex = 0;
+        }
+        if (stepIndex >= beat.gridColumns(viewSlot())) {
+            stepIndex = -1;
         }
     }
 }
