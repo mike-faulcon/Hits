@@ -3,7 +3,11 @@ package hits;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A saved beat: tempo, swing, length, eight pattern slots, and an optional song chain. */
+/**
+ * A saved beat: tempo, swing, length, eight pattern slots, one to sixteen rows,
+ * and an optional song chain. A new beat still has the eight kit rows.
+ * Every pattern has the same rows, so adding or reordering one updates the others.
+ */
 public final class Beat {
     public static final int VERSION = 1;
     /**
@@ -18,6 +22,13 @@ public final class Beat {
     /** Master fader at full. Track levels are not turned down any further. */
     public static final int MASTER = 127;
     public static final int TRACKS = 8;
+    /** Fewest rows a beat can keep. One row still plays. */
+    public static final int MIN_TRACKS = 1;
+    /**
+     * Most rows a beat can keep. MIDI has 16 channels and channel 10 stays the drum channel,
+     * so a seventeenth distinct instrument cannot have a channel of its own.
+     */
+    public static final int MAX_TRACKS = 16;
     /** Shortest pattern. One step still loops. */
     public static final int MIN_STEPS = 1;
     /** Longest pattern. Matches {@link Track#CAPACITY}. The root length stays 16 or 32. */
@@ -46,7 +57,9 @@ public final class Beat {
     private final int[] slotSteps = new int[SLOT_COUNT];
     private char active;
     private int master = MASTER;
-    private final Track[][] slots = new Track[SLOT_COUNT][TRACKS];
+    /** How many rows every pattern has. A new beat uses {@link #TRACKS}. */
+    private int trackCount = TRACKS;
+    private final Track[][] slots = new Track[SLOT_COUNT][];
     private List<Chain.Part> chain = List.of();
     /** Load-time notes, such as a sample gain that was clamped. Not written to the file. */
     private final List<String> loadWarnings = new ArrayList<>();
@@ -57,8 +70,9 @@ public final class Beat {
         this.swing = 50;
         this.stepCount = 16;
         this.active = 'a';
-        for (Track[] slot : slots) {
-            fillKit(slot);
+        for (int i = 0; i < SLOT_COUNT; i++) {
+            slots[i] = new Track[TRACKS];
+            fillKit(slots[i]);
         }
     }
 
@@ -104,6 +118,9 @@ public final class Beat {
         copy.active = active;
         copy.master = master;
         copy.chain = chain;
+        if (trackCount != TRACKS) {
+            copy.resize(trackCount);
+        }
         for (int i = 0; i < SLOT_COUNT; i++) {
             copyTracks(slots[i], copy.slots[i]);
         }
@@ -291,6 +308,95 @@ public final class Beat {
         return slots[slotIndex(slot)];
     }
 
+    /** Rows in every pattern. A new kit has {@link #TRACKS}. The file stores this many track objects. */
+    public int trackCount() {
+        return trackCount;
+    }
+
+    /**
+     * Gives every pattern {@code count} rows, from {@link #MIN_TRACKS} to {@link #MAX_TRACKS}.
+     * New rows are the kit voice, then a sine 808 named Sub, then plain drums.
+     * Dropped rows leave every pattern.
+     */
+    public void setTrackCount(int count) {
+        resize(count);
+    }
+
+    /** Appends one row to every pattern. False when the beat already has {@link #MAX_TRACKS}. */
+    public boolean addTrack() {
+        if (trackCount >= MAX_TRACKS) {
+            return false;
+        }
+        resize(trackCount + 1);
+        return true;
+    }
+
+    /** Drops row {@code index} from every pattern. False at {@link #MIN_TRACKS} or a bad index. */
+    public boolean removeTrack(int index) {
+        if (trackCount <= MIN_TRACKS || index < 0 || index >= trackCount) {
+            return false;
+        }
+        int next = trackCount - 1;
+        for (int slot = 0; slot < SLOT_COUNT; slot++) {
+            Track[] current = slots[slot];
+            Track[] shrunk = new Track[next];
+            int write = 0;
+            for (int row = 0; row < current.length; row++) {
+                if (row != index) {
+                    shrunk[write++] = current[row];
+                }
+            }
+            slots[slot] = shrunk;
+        }
+        trackCount = next;
+        return true;
+    }
+
+    /**
+     * Inserts a copy of row {@code index} just after it, in every pattern.
+     * False when the beat already has {@link #MAX_TRACKS} or the index is bad.
+     */
+    public boolean duplicateTrack(int index) {
+        if (trackCount >= MAX_TRACKS || index < 0 || index >= trackCount) {
+            return false;
+        }
+        int next = trackCount + 1;
+        for (int slot = 0; slot < SLOT_COUNT; slot++) {
+            Track[] current = slots[slot];
+            Track[] grown = new Track[next];
+            System.arraycopy(current, 0, grown, 0, index + 1);
+            grown[index + 1] = current[index].copy();
+            System.arraycopy(current, index + 1, grown, index + 2, current.length - index - 1);
+            slots[slot] = grown;
+        }
+        trackCount = next;
+        return true;
+    }
+
+    /**
+     * Moves row {@code index} by {@code delta} positions in every pattern.
+     * False when that would leave the list.
+     */
+    public boolean moveTrack(int index, int delta) {
+        int target = index + delta;
+        if (delta == 0 || index < 0 || target < 0 || index >= trackCount || target >= trackCount) {
+            return false;
+        }
+        for (int slot = 0; slot < SLOT_COUNT; slot++) {
+            Track[] current = slots[slot];
+            Track[] next = current.clone();
+            Track moved = next[index];
+            if (target > index) {
+                System.arraycopy(current, index + 1, next, index, target - index);
+            } else {
+                System.arraycopy(current, target, next, target + 1, index - target);
+            }
+            next[target] = moved;
+            slots[slot] = next;
+        }
+        return true;
+    }
+
     public Track track(int index) {
         return activeTracks()[index];
     }
@@ -346,7 +452,7 @@ public final class Beat {
         }
         Track[] tracks = slot(source);
         Track[] target = slot(dest);
-        for (int i = 0; i < TRACKS; i++) {
+        for (int i = 0; i < trackCount; i++) {
             target[i] = tracks[i].copy();
         }
     }
@@ -552,9 +658,21 @@ public final class Beat {
         chain = List.copyOf(next);
     }
 
+    /**
+     * Replaces one pattern's rows. A different length resizes every pattern first,
+     * so a file with sixteen tracks does not leave pattern C on eight.
+     */
     public void replaceSlot(char slot, Track[] tracks) {
+        if (tracks == null || tracks.length < MIN_TRACKS || tracks.length > MAX_TRACKS) {
+            throw new IllegalArgumentException(
+                "A slot needs " + MIN_TRACKS + " to " + MAX_TRACKS + " tracks"
+            );
+        }
+        if (tracks.length != trackCount) {
+            resize(tracks.length);
+        }
         Track[] target = slot(slot);
-        for (int i = 0; i < TRACKS; i++) {
+        for (int i = 0; i < trackCount; i++) {
             target[i] = tracks[i];
         }
     }
@@ -569,10 +687,13 @@ public final class Beat {
     }
 
     private boolean matchesKit(char slot) {
-        Track[] kit = new Track[TRACKS];
+        Track[] kit = new Track[trackCount];
         fillKit(kit);
         Track[] current = this.slot(slot);
-        for (int i = 0; i < TRACKS; i++) {
+        if (current.length != kit.length) {
+            return false;
+        }
+        for (int i = 0; i < trackCount; i++) {
             if (!current[i].sameAs(kit[i])) {
                 return false;
             }
@@ -644,14 +765,56 @@ public final class Beat {
         return false;
     }
 
+    private void resize(int count) {
+        int next = clampTrackCount(count);
+        if (next == trackCount && slots[0] != null && slots[0].length == next) {
+            return;
+        }
+        for (int slot = 0; slot < SLOT_COUNT; slot++) {
+            Track[] current = slots[slot];
+            Track[] resized = new Track[next];
+            for (int row = 0; row < next; row++) {
+                if (current != null && row < current.length) {
+                    resized[row] = current[row];
+                } else {
+                    resized[row] = freshRow(row);
+                }
+            }
+            slots[slot] = resized;
+        }
+        trackCount = next;
+    }
+
+    /** Keeps a requested row count inside {@link #MIN_TRACKS} and {@link #MAX_TRACKS}. */
+    public static int clampTrackCount(int count) {
+        return Math.max(MIN_TRACKS, Math.min(MAX_TRACKS, count));
+    }
+
     private static void fillKit(Track[] tracks) {
-        for (int i = 0; i < TRACKS; i++) {
-            tracks[i] = new Track(KIT_NAMES[i], TrackMode.DRUM, 0, KIT_NOTES[i]);
+        for (int i = 0; i < tracks.length; i++) {
+            tracks[i] = freshRow(i);
         }
     }
 
+    /**
+     * Kit voice for the first eight rows. Row nine is a sine 808 under the kick.
+     * Later rows are empty drums the user can retune.
+     */
+    private static Track freshRow(int index) {
+        if (index >= 0 && index < TRACKS) {
+            return new Track(KIT_NAMES[index], TrackMode.DRUM, 0, KIT_NOTES[index]);
+        }
+        if (index == TRACKS) {
+            Track sub = new Track("Sub", TrackMode.SAMPLE, 0, 36);
+            sub.setSample(SampleRef.builtin(BuiltinSamples.EIGHT_OH_EIGHT, 36));
+            return sub;
+        }
+        return new Track("Track " + (index + 1), TrackMode.DRUM, 0, 36);
+    }
+
     private static void copyTracks(Track[] from, Track[] to) {
-        for (int i = 0; i < TRACKS; i++) {
+        int rows = Math.min(from.length, to.length);
+        for (int i = 0; i < rows; i++) {
             to[i] = from[i].copy();
         }
     }

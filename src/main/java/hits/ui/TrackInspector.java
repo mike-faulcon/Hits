@@ -66,6 +66,8 @@ final class TrackInspector {
     private final JComboBox<String> kits = new JComboBox<>();
     private final JComboBox<String> programs = new JComboBox<>();
     private final JLabel channelNote = Widgets.label("Out of channels.");
+    /** Plan from the studio, including loaded samples. Null until the first refresh. */
+    private ChannelPlan channelPlan;
     private final JLabel kitNote = Widgets.label(" ");
     private final List<DrumPick> drumPicks = new ArrayList<>();
     private final List<Integer> kitPrograms = new ArrayList<>();
@@ -279,9 +281,10 @@ final class TrackInspector {
         drums.setToolTipText("Drum key, or a pitched percussion preset. A preset plays a melodic instrument at its own pitch, on this row's channel.");
         kits.setToolTipText("Drum kit on this row. Standard is the kit in the loaded bank. Another kit uses its own channel. A pitched preset replaces the kit.");
         programs.setToolTipText("Instrument from the loaded soundbank. The numbers are bank and program.");
-        channelNote.setForeground(Theme.MUTED);
+        channelNote.setName("channel-note");
+        channelNote.setForeground(Theme.STEP_ACCENT);
         channelNote.setVisible(false);
-        channelNote.setToolTipText("Every other channel is in use, so this drum shares the drum channel.");
+        channelNote.setToolTipText("This row cannot have its own MIDI channel, so the sound can be wrong.");
         kitNote.setName("kit-warning");
         kitNote.setForeground(Theme.MUTED);
         kitNote.setVisible(false);
@@ -544,9 +547,17 @@ final class TrackInspector {
         boolean drum = track.mode() == TrackMode.DRUM;
         kits.setVisible(drum);
         Soundbank bank = player.soundbank();
-        ChannelPlan plan = ChannelPlan.of(beat, everySlot(), bank);
-        boolean overflow = drum && !ChannelPlan.sharesDrumChannel(track, bank) && plan.overflow(editor.trackIndex());
+        ChannelPlan plan = channelPlan == null ? ChannelPlan.of(beat, everySlot(), bank) : channelPlan;
+        boolean overflow = plan.misrendered(editor.trackIndex());
         channelNote.setVisible(overflow);
+        if (overflow) {
+            String warning = plan.channelWarning(beat);
+            String text = warning == null ? "Out of channels." : warning;
+            String safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+            channelNote.setText("<html><body style='width: 260px'>" + safe + "</body></html>");
+            channelNote.getAccessibleContext().setAccessibleName(text);
+            channelNote.setToolTipText(text);
+        }
         String fallback = SoundCatalog.kitFallback(bank, track);
         kitNote.setVisible(fallback != null);
         if (fallback != null) {
@@ -1506,6 +1517,11 @@ final class TrackInspector {
             match = programs.getItemCount() - 1;
         }
         programs.setSelectedIndex(match);
+    }
+
+    /** The studio's channel plan, so the note matches the banner above the grid. */
+    void showChannels(ChannelPlan plan) {
+        channelPlan = plan;
     }
 
     private static List<Character> everySlot() {

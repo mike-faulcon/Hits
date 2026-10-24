@@ -26,6 +26,9 @@ import java.util.Map;
  * written as an integer when whole,
  * and optional {@code invert} omitted when false).
  * Mute and solo are original track fields.
+ * A pattern's {@code tracks} array holds {@link Beat#MIN_TRACKS} to {@link Beat#MAX_TRACKS} rows.
+ * Eight rows is the kit, and a beat that still has eight writes the same track objects as before.
+ * Every pattern in the file has the same number of rows. There is no new key for the count.
  * Slots C–H are omitted unless that pattern differs from the empty kit or its length differs from the root.
  * A slot {@code steps} key is written only when that pattern's length differs from the root {@code steps},
  * which stays 16 or 32. A beat that uses none of the version 2 fields is still written as version 1.
@@ -86,12 +89,12 @@ public final class BeatJson {
             beat.setMaster(number(root.get("master")));
         }
         Map<String, Object> slots = requireObject(root, "slots");
-        readSlot(beat, 'a', requireObject(slots, "a"));
-        readSlot(beat, 'b', requireObject(slots, "b"));
+        readSlot(beat, 'a', requireObject(slots, "a"), true);
+        readSlot(beat, 'b', requireObject(slots, "b"), false);
         for (char slot = 'c'; slot <= 'h'; slot++) {
             Object value = slots.get(String.valueOf(slot));
             if (value != null) {
-                readSlot(beat, slot, asMap(value));
+                readSlot(beat, slot, asMap(value), false);
             }
         }
         if (root.containsKey("chain") && root.get("chain") != null) {
@@ -317,16 +320,26 @@ public final class BeatJson {
         return out.toString();
     }
 
-    private static void readSlot(Beat beat, char slot, Map<String, Object> object) {
+    private static void readSlot(Beat beat, char slot, Map<String, Object> object, boolean definesCount) {
         if (object.containsKey("steps") && object.get("steps") != null) {
             beat.setSlotSteps(slot, number(object.get("steps")));
         }
         List<?> tracks = asList(object.get("tracks"));
-        if (tracks.size() != Beat.TRACKS) {
-            throw new IllegalArgumentException("A slot needs " + Beat.TRACKS + " tracks");
+        int count = tracks.size();
+        if (count < Beat.MIN_TRACKS || count > Beat.MAX_TRACKS) {
+            throw new IllegalArgumentException(
+                "A slot needs " + Beat.MIN_TRACKS + " to " + Beat.MAX_TRACKS + " tracks"
+            );
         }
-        Track[] parsed = new Track[Beat.TRACKS];
-        for (int i = 0; i < Beat.TRACKS; i++) {
+        if (definesCount) {
+            if (count != beat.trackCount()) {
+                beat.setTrackCount(count);
+            }
+        } else if (count != beat.trackCount()) {
+            throw new IllegalArgumentException("Every pattern needs " + beat.trackCount() + " tracks");
+        }
+        Track[] parsed = new Track[count];
+        for (int i = 0; i < count; i++) {
             parsed[i] = readTrack(beat, slot, asMap(tracks.get(i)));
         }
         beat.replaceSlot(slot, parsed);

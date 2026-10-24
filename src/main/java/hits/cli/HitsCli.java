@@ -3,6 +3,7 @@ package hits.cli;
 import hits.Beat;
 import hits.BeatFiles;
 import hits.Chain;
+import hits.ChannelPlan;
 import hits.ExportOptions;
 import hits.GrooveGenerator;
 import hits.Notes;
@@ -50,6 +51,7 @@ public final class HitsCli {
         + "The output type comes from the extension (.wav, .mid, or .midi).\n"
         + "WAV uses the built-in General MIDI synth plus the beat's sample bank, and does not open an audio device.\n"
         + "Low cut, presence, and EQ are in the WAV. A MIDI file keeps the ordinary note and does not carry them, and says so on stderr.\n"
+        + "Rows that need more than the 16 MIDI channels share a channel when the instrument, pan, and effects match. hits info and hits render name a row that still cannot.\n"
         + "A user SoundFont is not loaded. --samples-sf2 writes <name>-samples.sf2 beside a MIDI file.\n"
         + "Exit codes: 0 ok, 1 the beat or the render failed, 2 the command line was wrong.\n";
 
@@ -134,7 +136,10 @@ public final class HitsCli {
             ? new ExportOptions(true, false, 1, true)
             : ExportOptions.matchingPlayback();
         warnLoads(beat, err);
-        warnSamples(beat, parsed.beat, SequenceBuilder.exportSlots(beat, options), err);
+        List<Character> slots = SequenceBuilder.exportSlots(beat, options);
+        SampleLibrary.Ready ready = SampleLibrary.prepare(beat, parsed.beat, slots);
+        warnSamples(ready, err);
+        warnChannels(beat, slots, ready.use(), err);
         if (midi || parsed.samplesSf2) {
             warnFilters(beat, err);
         }
@@ -195,6 +200,7 @@ public final class HitsCli {
             List<Character> slots = usedSlots(beat);
             SampleLibrary.Ready ready = SampleLibrary.prepare(beat, parsed.beat, slots);
             warnSamples(ready, err);
+            warnChannels(beat, slots, ready.use(), err);
             out.print(describe(beat, parsed.beat, ready.use()));
         } catch (InvalidMidiDataException exception) {
             err.println("Could not describe " + parsed.beat + ": " + detail(exception));
@@ -280,6 +286,20 @@ public final class HitsCli {
             return;
         }
         for (String warning : beat.loadWarnings()) {
+            err.println(warning);
+        }
+    }
+
+    /**
+     * Names rows that cannot have a MIDI channel of their own.
+     * Compatible rows already share, so this is the case that would play the wrong sound.
+     */
+    private static void warnChannels(Beat beat, List<Character> slots, SampleUse samples, PrintStream err) {
+        if (beat == null || slots == null || slots.isEmpty()) {
+            return;
+        }
+        String warning = ChannelPlan.of(beat, slots, SoundCatalog.builtin(), samples).channelWarning(beat);
+        if (warning != null) {
             err.println(warning);
         }
     }

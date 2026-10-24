@@ -62,6 +62,14 @@ final class KeyboardShortcuts {
         return new NudgeKeys(window, earlier, later);
     }
 
+    /**
+     * Alt+Up and Alt+Down move the selected row. Alt+= adds one, Alt+- removes it,
+     * and Alt+D duplicates it. A text field still receives the character.
+     */
+    static KeyEventDispatcher rows(Window window, Runnable add, Runnable remove, Runnable duplicate, Runnable up, Runnable down) {
+        return new RowKeys(window, add, remove, duplicate, up, down);
+    }
+
     static boolean typing() {
         return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner() instanceof JTextComponent;
     }
@@ -186,5 +194,80 @@ final class KeyboardShortcuts {
             }
             return null;
         }
+    }
+
+    private static final class RowKeys implements KeyEventDispatcher {
+        private final Window window;
+        private final Runnable add;
+        private final Runnable remove;
+        private final Runnable duplicate;
+        private final Runnable up;
+        private final Runnable down;
+
+        private RowKeys(
+            Window window,
+            Runnable add,
+            Runnable remove,
+            Runnable duplicate,
+            Runnable up,
+            Runnable down
+        ) {
+            this.window = window;
+            this.add = add;
+            this.remove = remove;
+            this.duplicate = duplicate;
+            this.up = up;
+            this.down = down;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent event) {
+            if (!rowShortcut(event)) {
+                return false;
+            }
+            Runnable action = action(event.getKeyCode());
+            if (action == null) {
+                return false;
+            }
+            Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+            if (focused != window) {
+                return focused != null && focused.getOwner() == window;
+            }
+            SwingUtilities.invokeLater(action);
+            return true;
+        }
+
+        private Runnable action(int keyCode) {
+            return switch (keyCode) {
+                case KeyEvent.VK_UP -> up;
+                case KeyEvent.VK_DOWN -> down;
+                case KeyEvent.VK_EQUALS, KeyEvent.VK_PLUS, KeyEvent.VK_ADD -> add;
+                case KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> remove;
+                case KeyEvent.VK_D -> duplicate;
+                default -> null;
+            };
+        }
+    }
+
+    /**
+     * Alt alone, plus a row key, and the cursor is not in a text field.
+     * Equals, plus, and the numpad add key add a row. Minus removes it.
+     * D duplicates it. Up and Down move it.
+     */
+    static boolean rowShortcut(KeyEvent event) {
+        if (event.getID() != KeyEvent.KEY_PRESSED || typing()) {
+            return false;
+        }
+        int mods = event.getModifiersEx();
+        if ((mods & InputEvent.ALT_DOWN_MASK) == 0 || (mods & ~InputEvent.ALT_DOWN_MASK) != 0) {
+            return false;
+        }
+        return switch (event.getKeyCode()) {
+            case KeyEvent.VK_UP, KeyEvent.VK_DOWN,
+                KeyEvent.VK_EQUALS, KeyEvent.VK_PLUS, KeyEvent.VK_ADD,
+                KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT,
+                KeyEvent.VK_D -> true;
+            default -> false;
+        };
     }
 }

@@ -244,19 +244,23 @@ public final class GrooveGenerator {
         return next;
     }
 
-    /** Writes a groove onto the active pattern. Names, sounds, and the other patterns stay. */
+    /**
+     * Writes a groove onto the kit rows of the active pattern.
+     * Names, sounds, and the other patterns stay. Rows past the eight kit voices stay too.
+     */
     public static void apply(Beat beat, Groove groove) {
         beat.setBpm(groove.bpm());
         beat.setSwing(groove.swing());
         int limit = beat.stepCount(beat.activeSlot());
-        for (int track = 0; track < Beat.TRACKS; track++) {
+        int rows = Math.min(Beat.TRACKS, beat.trackCount());
+        for (int track = 0; track < rows; track++) {
             writeSteps(beat.activeTracks()[track], groove.hits(track), limit);
         }
     }
 
-    /** Writes one row of velocities onto the active pattern. */
+    /** Writes one row of velocities onto the active pattern. A row past the kit still takes the hits. */
     public static void applyTrack(Beat beat, int track, int[] velocities) {
-        if (track < 0 || track >= Beat.TRACKS || velocities == null) {
+        if (beat == null || track < 0 || track >= beat.trackCount() || velocities == null) {
             return;
         }
         writeSteps(beat.activeTracks()[track], velocities, beat.stepCount(beat.activeSlot()));

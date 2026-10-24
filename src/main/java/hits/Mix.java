@@ -52,7 +52,7 @@ public final class Mix {
     }
 
     private static void apply(Beat beat, char slot, int row, boolean allPatterns, Consumer<Track> edit) {
-        if (beat == null || row < 0 || row >= Beat.TRACKS) {
+        if (beat == null || row < 0 || row >= beat.trackCount()) {
             return;
         }
         char current = Beat.normalizeSlot(slot);

@@ -146,9 +146,10 @@ final class PatternPanel extends JPanel implements Scrollable {
     public Dimension getPreferredSize() {
         int columns = editor.beat().gridColumns(editor.viewSlot());
         int groups = Math.max(0, columns / 4 - 1);
+        int rows = rowCount();
         return new Dimension(
             GUTTER + 16 + columns * MIN_CELL_WIDTH + groups * GROUP_GAP,
-            HEADER + Beat.TRACKS * MIN_CELL + LANE_RESERVE
+            HEADER + rows * minCell(rows) + LANE_RESERVE
         );
     }
 
@@ -171,14 +172,14 @@ final class PatternPanel extends JPanel implements Scrollable {
             g.drawString(label, center - g.getFontMetrics().stringWidth(label) / 2, 18);
             g.setComposite(AlphaComposite.SrcOver);
         }
-        for (int row = 0; row < Beat.TRACKS; row++) {
+        for (int row = 0; row < metrics.rows; row++) {
             paintRow(g, metrics, names, row, length);
         }
         paintLane(g, metrics, length);
         g.setColor(Theme.GRID_LINE);
         for (int column = 4; column < metrics.columns; column += 4) {
             int line = metrics.stepX(column) - metrics.groupGap / 2;
-            g.fillRect(line, metrics.header, 2, Beat.TRACKS * metrics.cellHeight);
+            g.fillRect(line, metrics.header, 2, metrics.rows * metrics.cellHeight);
         }
         if (playhead >= 0 && playhead < metrics.columns) {
             int x = metrics.stepX(playhead) + metrics.cellWidth / 2;
@@ -504,8 +505,32 @@ final class PatternPanel extends JPanel implements Scrollable {
         int groups = Math.max(0, columns / 4 - 1);
         int availableWidth = width - GUTTER - 12 - groups * GROUP_GAP;
         int cellWidth = Math.max(MIN_CELL_WIDTH, availableWidth / Math.max(1, columns));
-        int cellHeight = Math.max(MIN_CELL, (height - HEADER - LANE_RESERVE) / Beat.TRACKS);
-        return new Metrics(GUTTER, HEADER, GROUP_GAP, cellWidth, cellHeight, columns);
+        int rows = rowCount();
+        int cellHeight = Math.max(minCell(rows), (height - HEADER - LANE_RESERVE) / rows);
+        return new Metrics(GUTTER, HEADER, GROUP_GAP, cellWidth, cellHeight, columns, rows);
+    }
+
+    private int rowCount() {
+        return Math.max(1, editor.beat().trackCount());
+    }
+
+    /** Sixteen rows use a shorter cell so the grid can sit in a short window, and still scrolls. */
+    private static int minCell(int rows) {
+        if (rows >= 14) {
+            return 20;
+        }
+        if (rows >= 11) {
+            return 22;
+        }
+        return MIN_CELL;
+    }
+
+    /** Scrolls the selected row into view after a row is added or moved. */
+    void revealSelection() {
+        Metrics metrics = metrics();
+        int row = Math.max(0, Math.min(metrics.rows - 1, editor.trackIndex()));
+        int y = metrics.header + row * metrics.cellHeight;
+        scrollRectToVisible(new Rectangle(0, y, Math.max(1, getWidth()), metrics.cellHeight));
     }
 
     private static String clip(FontMetrics metrics, String text, int width) {
@@ -544,7 +569,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         return getParent() != null && getPreferredSize().height <= getParent().getHeight();
     }
 
-    private record Metrics(int gutter, int header, int groupGap, int cellWidth, int cellHeight, int columns) {
+    private record Metrics(int gutter, int header, int groupGap, int cellWidth, int cellHeight, int columns, int rows) {
         int stepX(int column) {
             return gutter + 8 + column * cellWidth + (column / 4) * groupGap;
         }
@@ -572,7 +597,7 @@ final class PatternPanel extends JPanel implements Scrollable {
                 return -1;
             }
             int row = (y - header) / cellHeight;
-            if (row < 0 || row >= Beat.TRACKS) {
+            if (row < 0 || row >= rows) {
                 return -1;
             }
             return row;
@@ -587,7 +612,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         }
 
         int laneTop() {
-            return header + Beat.TRACKS * cellHeight + 4;
+            return header + rows * cellHeight + 4;
         }
 
         int laneColumn(int x, int y) {

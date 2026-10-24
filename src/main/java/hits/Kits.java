@@ -81,9 +81,14 @@ public final class Kits {
         hit(xylo, 12, 90);
     }
 
+    /** Puts the eight kit rows back. A shorter beat keeps the rows it has. Extra rows stay. */
     private static void resetDrums(Beat beat) {
-        Track[] fresh = Beat.drumKit(beat.name()).slot('a');
-        beat.replaceSlot(beat.activeSlot(), fresh);
+        Beat kit = Beat.drumKit(beat.name());
+        Track[] target = beat.slot(beat.activeSlot());
+        int rows = Math.min(kit.trackCount(), target.length);
+        for (int i = 0; i < rows; i++) {
+            target[i] = kit.track(i).copy();
+        }
     }
 
     private static void asNote(Track track, String name, int program, int note, int gate) {
