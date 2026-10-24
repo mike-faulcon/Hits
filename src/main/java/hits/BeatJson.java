@@ -18,7 +18,8 @@ import java.util.Map;
  * a track {@code lowCut} object ({@code hz}, {@code slope}) when the high-pass is on,
  * a track {@code presence} (dB, omitted at 0, 0.1 dB steps, written as an integer when whole),
  * a track {@code eq} object when a peaking band or the high cut is on
- * ({@code bands} of {@code hz}, {@code gain}, {@code q}, and optional {@code highCut}),
+ * ({@code bands} of {@code hz}, {@code gain}, {@code q}, optional {@code highCut},
+ * and optional {@code highCutSlope} in dB/oct, omitted at 12),
  * and a track {@code sample} object when {@code mode} is {@code sample}
  * ({@code path}, {@code root}, {@code start}, {@code oneShot},
  * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN}, in 0.1 dB steps,
@@ -256,6 +257,9 @@ public final class BeatJson {
                 out.append(", ");
             }
             out.append("\"highCut\": ").append(track.highCutHz());
+            if (track.highCutSlope() != Track.HIGH_CUT_SLOPE) {
+                out.append(", \"highCutSlope\": ").append(track.highCutSlope());
+            }
         }
         out.append("},\n");
     }
@@ -475,8 +479,22 @@ public final class BeatJson {
         if (eq.containsKey("highCut") && eq.get("highCut") != null) {
             double requested = decimal(eq.get("highCut"));
             if (requested > 0) {
-                int stored = track.setHighCut(requested);
+                boolean slopeGiven = eq.containsKey("highCutSlope") && eq.get("highCutSlope") != null;
+                double requestedSlope = Track.HIGH_CUT_SLOPE;
+                int slope = Track.HIGH_CUT_SLOPE;
+                if (slopeGiven) {
+                    requestedSlope = decimal(eq.get("highCutSlope"));
+                    slope = (int) Math.round(requestedSlope);
+                }
+                int stored = track.setHighCut(requested, slope);
                 warnHz(beat, slot, track, "high cut", requested, stored, Track.HIGH_CUT_MIN, Track.HIGH_CUT_MAX);
+                if (slopeGiven && Math.abs(requestedSlope - track.highCutSlope()) > 1e-6) {
+                    beat.addLoadWarning(
+                        Beat.slotLabel(slot) + " " + track.name()
+                            + ": high cut slope " + Db.exact(requestedSlope)
+                            + " dB/oct was changed to " + track.highCutSlope() + " dB/oct."
+                    );
+                }
             }
         }
     }

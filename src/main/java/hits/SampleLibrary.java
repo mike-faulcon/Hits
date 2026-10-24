@@ -117,6 +117,9 @@ public final class SampleLibrary {
                 .append(',').append(Db.number(band.q()));
         }
         text.append(":h").append(track.highCutHz());
+        if (track.highCutHz() > 0) {
+            text.append('s').append(track.highCutSlope());
+        }
         return text.toString();
     }
 

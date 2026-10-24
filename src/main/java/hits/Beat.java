@@ -146,6 +146,7 @@ public final class Beat {
 
     /**
      * Rows that use low cut, presence, or EQ, as {@code A Kick, B Bass}.
+     * A high cut also names its slope, as {@code A Kick high cut 12 dB/oct}.
      * Empty when the beat does not use any of them.
      */
     public String filterRowNames() {
@@ -159,6 +160,9 @@ public final class Beat {
                     names.append(", ");
                 }
                 names.append(slotLabel(slot)).append(' ').append(track.name());
+                if (track.hasHighCut()) {
+                    names.append(" high cut ").append(track.highCutSlope()).append(" dB/oct");
+                }
             }
         }
         return names.toString();

@@ -115,6 +115,20 @@ class FilterFixTest {
     }
 
     @Test
+    void nearNeutralFilterMatchesThePlainKick() throws Exception {
+        double[] plain = render(kick(0, 0, 0, 100), temp.resolve("neutral-plain.wav"));
+        Beat presence = kick(0, 0, 0, 100);
+        presence.track(0).setPresence(0.1);
+        Beat eq = kick(0, 0, 0, 100);
+        eq.track(0).setEqBand(0, 12_000, 0.1, 1);
+        Beat high = kick(0, 0, 0, 100);
+        high.track(0).setHighCut(20_000);
+        assertNear(plain, render(presence, temp.resolve("neutral-presence.wav")), "presence 0.1 dB");
+        assertNear(plain, render(eq, temp.resolve("neutral-eq.wav")), "eq +0.1 dB at 12 kHz");
+        assertNear(plain, render(high, temp.resolve("neutral-high.wav")), "high cut 20 kHz");
+    }
+
+    @Test
     void sampleLowCutDoesNotClipAndKeepsItsLevel() throws Exception {
         int count = RATE / 2;
         short[] source = new short[count];
@@ -450,6 +464,43 @@ class FilterFixTest {
             }
         }
         return 0;
+    }
+
+    private void assertNear(double[] plain, double[] other, String label) {
+        int plainAt = onset(plain);
+        int otherAt = onset(other);
+        int delta = otherAt - plainAt;
+        double level = windowDb(other, otherAt) - windowDb(plain, plainAt);
+        int lag = correlationLag(plain, other, plainAt);
+        System.out.println(String.format(
+            Locale.ROOT,
+            "U1 %s onset %+d lag %+d level %+.4f dB",
+            label, delta, lag, level
+        ));
+        assertEquals(0, delta, label + " onset");
+        assertEquals(0, lag, label + " alignment");
+        assertTrue(Math.abs(level) < 0.02, label + " level " + level + " dB");
+    }
+
+    /** Shift of {@code other} that best matches {@code plain}, in samples. Positive means other is later. */
+    private static int correlationLag(double[] plain, double[] other, int from) {
+        int best = 0;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        int length = Math.min(2000, plain.length - from);
+        for (int shift = -4; shift <= 4; shift++) {
+            double score = 0;
+            for (int i = 0; i < length; i++) {
+                int j = from + i + shift;
+                if (j >= 0 && j < other.length) {
+                    score += plain[from + i] * other[j];
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = shift;
+            }
+        }
+        return best;
     }
 
     /** RMS from 15 ms to 80 ms after the onset, in dBFS. */

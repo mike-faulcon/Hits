@@ -36,8 +36,11 @@ public final class Track {
     public static final int LOW_CUT_SLOPE = 12;
     /** Steep high-pass, two Butterworth sections. */
     public static final int LOW_CUT_STEEP = 24;
-    /** Slider steps across the log low-cut range. 0 is {@link #LOW_CUT_MIN}, this is {@link #LOW_CUT_MAX}. */
-    public static final int LOW_CUT_SLIDER = 1000;
+    /**
+     * Last slider index for low cut. 0 is {@link #LOW_CUT_MIN} and this is {@link #LOW_CUT_MAX}.
+     * Positions are log-spaced stops that land on round Hertz values.
+     */
+    public static final int LOW_CUT_SLIDER = lowCutStops().length - 1;
     /** High-shelf boost, in dB. 0 is off and is left out of the file. */
     public static final int PRESENCE_MAX = 12;
     /** High-shelf midpoint, in Hz. The boost is above this. */
@@ -62,14 +65,22 @@ public final class Track {
     public static final int EQ_HZ = 90;
     /** Frequency shown on band 2 until that band is stored. */
     public static final int EQ_HZ_2 = 2500;
-    /** Slider steps across a log frequency range. */
-    public static final int EQ_SLIDER = 1000;
+    /** Last slider index for a peaking frequency. Positions are round Hertz stops on a log scale. */
+    public static final int EQ_SLIDER = eqStops().length - 1;
     /** Lowest high-cut corner, in Hz. 0 is off and is left out of the file. */
     public static final int HIGH_CUT_MIN = 1000;
     /** Highest high-cut corner, in Hz. */
     public static final int HIGH_CUT_MAX = 20_000;
     /** Corner shown until high cut is turned on. */
     public static final int HIGH_CUT = 6000;
+    /** Last slider index for high cut. 0 is {@link #HIGH_CUT_MIN} and this is {@link #HIGH_CUT_MAX}. */
+    public static final int HIGH_CUT_SLIDER = highCutStops().length - 1;
+    /** Gentle high cut, one real pole. */
+    public static final int HIGH_CUT_GENTLE = 6;
+    /** High cut slope when the file omits it. One 12 dB/oct Butterworth section. */
+    public static final int HIGH_CUT_SLOPE = 12;
+    /** Steep high cut, two Butterworth sections. */
+    public static final int HIGH_CUT_STEEP = 24;
 
     private String name;
     private TrackMode mode;
@@ -110,6 +121,8 @@ public final class Track {
     private final EqBand[] eqBands = new EqBand[EQ_BANDS];
     /** Low-pass corner in Hz. 0 is off and is left out of the file. */
     private int highCutHz;
+    /** 6, 12, or 24 dB per octave. 12 is left out of the file. Used while {@link #highCutHz} is on. */
+    private int highCutSlope = HIGH_CUT_SLOPE;
     /** Kept while the row is a drum or a note, and written only in sample mode. */
     private SampleRef sample;
     private final Step[] steps = new Step[CAPACITY];
@@ -195,6 +208,7 @@ public final class Track {
         copy.lowCutSlope = lowCutSlope;
         copy.presenceTenths = presenceTenths;
         copy.highCutHz = highCutHz;
+        copy.highCutSlope = highCutSlope;
         System.arraycopy(eqBands, 0, copy.eqBands, 0, EQ_BANDS);
         copy.sample = sample;
         for (int i = 0; i < steps.length; i++) {
@@ -643,20 +657,16 @@ public final class Track {
     }
 
     /**
-     * Slider position for {@code hz} on a log scale from {@link #LOW_CUT_MIN} to {@link #LOW_CUT_MAX}.
-     * 0 is 20 Hz. {@link #LOW_CUT_SLIDER} is 2 kHz.
+     * Slider position for {@code hz}. Stops are round Hertz on a log scale from
+     * {@link #LOW_CUT_MIN} to {@link #LOW_CUT_MAX}. 0 is 20 Hz. {@link #LOW_CUT_SLIDER} is 2 kHz.
      */
     public static int lowCutSlider(int hz) {
-        double clamped = Math.max(LOW_CUT_MIN, Math.min(LOW_CUT_MAX, hz));
-        double t = Math.log(clamped / LOW_CUT_MIN) / Math.log(LOW_CUT_MAX / (double) LOW_CUT_MIN);
-        return (int) Math.round(t * LOW_CUT_SLIDER);
+        return stopIndex(lowCutStops(), hz);
     }
 
-    /** Hertz for a {@link #lowCutSlider(int)} position. Rounded to the nearest Hz. */
+    /** Hertz for a {@link #lowCutSlider(int)} position. One of the round stops, so it round-trips. */
     public static int lowCutHz(int slider) {
-        double t = Math.max(0, Math.min(LOW_CUT_SLIDER, slider)) / (double) LOW_CUT_SLIDER;
-        double hz = LOW_CUT_MIN * Math.pow(LOW_CUT_MAX / (double) LOW_CUT_MIN, t);
-        return (int) Math.round(hz);
+        return stopAt(lowCutStops(), slider);
     }
 
     /** High-shelf gain in dB, 0 to {@link #PRESENCE_MAX}, in 0.1 dB steps. 0 is off. */
@@ -731,7 +741,7 @@ public final class Track {
         for (int i = 0; i < EQ_BANDS; i++) {
             eqBands[i] = null;
         }
-        highCutHz = 0;
+        clearHighCut();
     }
 
     /** High-cut corner in Hz, or 0 when the low-pass is off. */
@@ -744,22 +754,48 @@ public final class Track {
     }
 
     /**
-     * Stores a 12 dB/oct low-pass. {@code hz} of 0 or less clears it.
+     * Stores a low-pass at the current slope. {@code hz} of 0 or less clears it.
      * The corner stays inside {@link #HIGH_CUT_MIN}–{@link #HIGH_CUT_MAX}.
      * Returns the stored corner, or 0 when cleared.
      */
     public int setHighCut(double hz) {
+        return setHighCut(hz, highCutSlope);
+    }
+
+    /**
+     * Stores a low-pass and its slope. {@code slope} is kept as 6, 12, or 24 dB/oct.
+     * Anything else becomes the nearest of those. 12 is the file default.
+     */
+    public int setHighCut(double hz, int slope) {
         if (hz <= 0) {
             clearHighCut();
             return 0;
         }
         int rounded = (int) Math.round(hz);
         highCutHz = Math.max(HIGH_CUT_MIN, Math.min(HIGH_CUT_MAX, rounded));
+        highCutSlope = highCutSlope(slope);
         return highCutHz;
+    }
+
+    /** 6, 12, or 24. Meaningful while {@link #highCutHz()} is on. */
+    public int highCutSlope() {
+        return highCutSlope;
+    }
+
+    /** Nearest of 6, 12, and 24 dB/oct. */
+    public static int highCutSlope(int slope) {
+        if (slope <= (HIGH_CUT_GENTLE + HIGH_CUT_SLOPE) / 2) {
+            return HIGH_CUT_GENTLE;
+        }
+        if (slope >= (HIGH_CUT_SLOPE + HIGH_CUT_STEEP) / 2) {
+            return HIGH_CUT_STEEP;
+        }
+        return HIGH_CUT_SLOPE;
     }
 
     public void clearHighCut() {
         highCutHz = 0;
+        highCutSlope = HIGH_CUT_SLOPE;
     }
 
     /** True when a peaking band or the high cut is on. */
@@ -767,24 +803,24 @@ public final class Track {
         return highCutHz > 0 || !eqBands().isEmpty();
     }
 
-    /** Slider position for a peaking frequency on a log scale from 30 Hz to 12 kHz. */
+    /** Slider position for a peaking frequency. Stops are round Hertz on a log scale, 30 Hz to 12 kHz. */
     public static int eqHzSlider(int hz) {
-        return logSlider(hz, EQ_HZ_MIN, EQ_HZ_MAX);
+        return stopIndex(eqStops(), hz);
     }
 
-    /** Hertz for an {@link #eqHzSlider(int)} position. Rounded to the nearest Hz. */
+    /** Hertz for an {@link #eqHzSlider(int)} position. One of the round stops, so it round-trips. */
     public static int eqHzFromSlider(int slider) {
-        return logHz(slider, EQ_HZ_MIN, EQ_HZ_MAX);
+        return stopAt(eqStops(), slider);
     }
 
-    /** Slider position for a high-cut corner on a log scale from 1 kHz to 20 kHz. */
+    /** Slider position for a high-cut corner. Stops are round Hertz on a log scale, 1 kHz to 20 kHz. */
     public static int highCutSlider(int hz) {
-        return logSlider(hz, HIGH_CUT_MIN, HIGH_CUT_MAX);
+        return stopIndex(highCutStops(), hz);
     }
 
-    /** Hertz for a {@link #highCutSlider(int)} position. Rounded to the nearest Hz. */
+    /** Hertz for a {@link #highCutSlider(int)} position. One of the round stops, so it round-trips. */
     public static int highCutFromSlider(int slider) {
-        return logHz(slider, HIGH_CUT_MIN, HIGH_CUT_MAX);
+        return stopAt(highCutStops(), slider);
     }
 
     /** Slider position for a peaking gain. 0 dB is 0. Each step is 0.1 dB. */
@@ -861,7 +897,7 @@ public final class Track {
             join(text, "eq " + band.hz() + " Hz " + Db.labeled(band.gain()) + " Q " + Db.number(band.q()));
         }
         if (highCutHz > 0) {
-            join(text, "high cut " + highCutHz + " Hz");
+            join(text, "high cut " + highCutHz + " Hz " + highCutSlope + " dB/oct");
         }
         return text.toString();
     }
@@ -964,7 +1000,9 @@ public final class Track {
     }
 
     private boolean sameTone(Track other) {
-        if (presenceTenths != other.presenceTenths || highCutHz != other.highCutHz) {
+        if (presenceTenths != other.presenceTenths
+            || highCutHz != other.highCutHz
+            || highCutSlope != other.highCutSlope) {
             return false;
         }
         for (int i = 0; i < EQ_BANDS; i++) {
@@ -985,16 +1023,101 @@ public final class Track {
         return Math.max(EQ_HZ_MIN, Math.min(EQ_HZ_MAX, rounded));
     }
 
-    private static int logSlider(int hz, int min, int max) {
-        double clamped = Math.max(min, Math.min(max, hz));
-        double t = Math.log(clamped / (double) min) / Math.log(max / (double) min);
-        return (int) Math.round(t * EQ_SLIDER);
+    private static int[] lowCutStops() {
+        return frequencyStops(LOW_CUT_MIN, LOW_CUT_MAX);
     }
 
-    private static int logHz(int slider, int min, int max) {
-        double t = Math.max(0, Math.min(EQ_SLIDER, slider)) / (double) EQ_SLIDER;
-        double hz = min * Math.pow(max / (double) min, t);
-        return (int) Math.round(hz);
+    private static int[] eqStops() {
+        return frequencyStops(EQ_HZ_MIN, EQ_HZ_MAX);
+    }
+
+    private static int[] highCutStops() {
+        return frequencyStops(HIGH_CUT_MIN, HIGH_CUT_MAX);
+    }
+
+    /**
+     * About twelve stops per octave, each rounded onto a step that gets wider with the
+     * frequency: 1 Hz under 100, then 5, 10, 50, 100, and 500. The ends stay exact.
+     * A value such as 50, 100, 250, 950, or 2500 is a stop when it sits in the range,
+     * so the slider can land on it and the label matches the stored Hertz.
+     */
+    private static int[] frequencyStops(int min, int max) {
+        double octaves = Math.log(max / (double) min) / Math.log(2);
+        int steps = Math.max(2, (int) Math.round(octaves * 12));
+        ArrayList<Integer> values = new ArrayList<>();
+        int previous = Integer.MIN_VALUE;
+        for (int i = 0; i <= steps; i++) {
+            double t = i / (double) steps;
+            double hz = min * Math.pow(max / (double) min, t);
+            int nice = niceHz(hz, min, max);
+            if (nice != previous) {
+                values.add(nice);
+                previous = nice;
+            }
+        }
+        if (values.isEmpty() || values.get(0) != min) {
+            values.add(0, min);
+        }
+        if (values.get(values.size() - 1) != max) {
+            values.add(max);
+        }
+        int[] stops = new int[values.size()];
+        for (int i = 0; i < stops.length; i++) {
+            stops[i] = values.get(i);
+        }
+        return stops;
+    }
+
+    private static int niceHz(double hz, int min, int max) {
+        double step = hz < 100 ? 1 : hz < 250 ? 5 : hz < 1000 ? 10 : hz < 2500 ? 50 : hz < 10000 ? 100 : 500;
+        int rounded = (int) Math.round(hz / step) * (int) step;
+        return Math.max(min, Math.min(max, rounded));
+    }
+
+    private static int stopIndex(int[] stops, int hz) {
+        int clamped = Math.max(stops[0], Math.min(stops[stops.length - 1], hz));
+        int best = 0;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int i = 0; i < stops.length; i++) {
+            int distance = Math.abs(stops[i] - clamped);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private static int stopAt(int[] stops, int slider) {
+        int index = Math.max(0, Math.min(stops.length - 1, slider));
+        return stops[index];
+    }
+
+    /**
+     * Hertz typed into a frequency field. {@code 950}, {@code 950 Hz}, and {@code 2,500}
+     * are accepted. Anything else, including a decimal, is ignored.
+     */
+    public static Integer parseHz(String text) {
+        if (text == null) {
+            return null;
+        }
+        String trimmed = text.trim().replace(",", "");
+        if (trimmed.length() >= 2 && trimmed.regionMatches(true, trimmed.length() - 2, "hz", 0, 2)) {
+            trimmed = trimmed.substring(0, trimmed.length() - 2).trim();
+        }
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < trimmed.length(); i++) {
+            if (!Character.isDigit(trimmed.charAt(i))) {
+                return null;
+            }
+        }
+        try {
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
 
     private static int clampProgram(int program) {
