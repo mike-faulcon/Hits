@@ -33,11 +33,11 @@ public final class EqShot {
             Beat beat = Beat.drumKit("eq");
             Track kick = beat.track(0);
             kick.setName("Kick");
-            kick.setLowCut(80, 24);
+            kick.setLowCut(120, 24);
             kick.setPresence(4.5);
-            kick.setEqBand(0, 90, -12, 1.4);
-            kick.setEqBand(1, 2400, 3.5, 0.7);
-            kick.setHighCut(6000);
+            kick.setEqBand(0, 950, -6, 1.4);
+            kick.setEqBand(1, 2500, 3.5, 0.7);
+            kick.setHighCut(6000, 24);
             holder.editor = new Editor(beat);
             holder.player = new Player();
             holder.player.open();

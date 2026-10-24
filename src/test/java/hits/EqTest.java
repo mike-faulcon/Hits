@@ -20,6 +20,7 @@ import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -56,6 +57,133 @@ class EqTest {
         double octave = ToneFilter.lowPassDb(rate, 4000, 8000);
         assertEquals(-12.3, octave, 1.5, "12 dB/oct one octave above the corner, got " + octave);
         assertTrue(ToneFilter.lowPassDb(rate, 4000, 500) > -0.4, "passband of the high cut");
+        assertEquals(
+            ToneFilter.lowPassDb(rate, 4000, 8000),
+            ToneFilter.lowPassDb(rate, 4000, Track.HIGH_CUT_SLOPE, 8000),
+            1e-9
+        );
+
+        assertEquals(-3.01, ToneFilter.lowPassDb(rate, 1000, Track.HIGH_CUT_GENTLE, 1000), 0.8, "6 dB/oct corner");
+        double gentle = ToneFilter.lowPassDb(rate, 1000, Track.HIGH_CUT_GENTLE, 2000);
+        assertEquals(-6.2, gentle, 1.5, "6 dB/oct one octave above, got " + gentle);
+        assertEquals(-3.01, ToneFilter.lowPassDb(rate, 1000, Track.HIGH_CUT_STEEP, 1000), 0.8, "24 dB/oct corner");
+        double steep = ToneFilter.lowPassDb(rate, 1000, Track.HIGH_CUT_STEEP, 2000);
+        assertEquals(-24, steep, 3.0, "24 dB/oct one octave above, got " + steep);
+        assertTrue(ToneFilter.lowPassDb(rate, 1000, Track.HIGH_CUT_GENTLE, 200) > -0.5, "6 dB/oct passband");
+        assertTrue(ToneFilter.lowPassDb(rate, 1000, Track.HIGH_CUT_STEEP, 200) > -0.5, "24 dB/oct passband");
+    }
+
+    @Test
+    void frequencySliderLandsOnRoundHertz() {
+        for (int hz : new int[] {30, 50, 90, 100, 250, 950, 2500, 6000, 12_000}) {
+            assertEquals(hz, Track.eqHzFromSlider(Track.eqHzSlider(hz)), "eq " + hz);
+        }
+        assertEquals(20, Track.lowCutHz(0));
+        assertEquals(2000, Track.lowCutHz(Track.LOW_CUT_SLIDER));
+        assertEquals(120, Track.lowCutHz(Track.lowCutSlider(120)));
+        assertEquals(800, Track.lowCutHz(Track.lowCutSlider(800)));
+        assertEquals(1000, Track.highCutFromSlider(0));
+        assertEquals(20_000, Track.highCutFromSlider(Track.HIGH_CUT_SLIDER));
+        assertEquals(6000, Track.highCutFromSlider(Track.highCutSlider(6000)));
+        assertEquals(2500, Track.highCutFromSlider(Track.highCutSlider(2500)));
+        int previous = 0;
+        for (int i = 0; i <= Track.EQ_SLIDER; i++) {
+            int hz = Track.eqHzFromSlider(i);
+            assertTrue(hz > previous, "eq stop " + i);
+            assertEquals(i, Track.eqHzSlider(hz), "eq round trip " + hz);
+            previous = hz;
+        }
+        previous = 0;
+        for (int i = 0; i <= Track.LOW_CUT_SLIDER; i++) {
+            int hz = Track.lowCutHz(i);
+            assertTrue(hz > previous, "low cut stop " + i);
+            assertEquals(i, Track.lowCutSlider(hz), "low cut round trip " + hz);
+            previous = hz;
+        }
+        previous = 0;
+        for (int i = 0; i <= Track.HIGH_CUT_SLIDER; i++) {
+            int hz = Track.highCutFromSlider(i);
+            assertTrue(hz > previous, "high cut stop " + i);
+            assertEquals(i, Track.highCutSlider(hz), "high cut round trip " + hz);
+            previous = hz;
+        }
+        assertEquals(950, Track.parseHz("950"));
+        assertEquals(950, Track.parseHz("950 Hz"));
+        assertEquals(2500, Track.parseHz("2,500"));
+        assertNull(Track.parseHz("12.5"));
+        assertNull(Track.parseHz("—"));
+    }
+
+    @Test
+    void responseCoversTheWholeRowFilter() {
+        Track track = new Track("Kick", TrackMode.DRUM, 0, 36);
+        track.setLowCut(200, 12);
+        track.setEqBand(0, 1000, 6, 2);
+        track.setHighCut(4000, 24);
+        track.setPresence(3);
+        double low = ToneFilter.responseDb(RATE, track, 40);
+        double mid = ToneFilter.responseDb(RATE, track, 1000);
+        double high = ToneFilter.responseDb(RATE, track, 12_000);
+        assertTrue(low < -12, "low cut in the curve " + low);
+        assertTrue(mid > 3, "peaking in the curve " + mid);
+        assertTrue(high < -12, "high cut in the curve " + high);
+    }
+
+    @Test
+    void highCutSlopeIsAdditiveAndRoundTrips() throws Exception {
+        Beat beat = Beat.drumKit("slope");
+        beat.track(0).setName("Kick");
+        beat.track(0).setEqBand(0, 90, -12, 1.4);
+        beat.track(0).setEqBand(1, 2400, 3.5, 0.7);
+        beat.track(0).setHighCut(6000, 12);
+        String json = BeatJson.write(beat);
+        assertTrue(json.contains(
+            "\"eq\": {\"bands\": [{\"hz\": 90, \"gain\": -12, \"q\": 1.4}, {\"hz\": 2400, \"gain\": 3.5, \"q\": 0.7}], \"highCut\": 6000}"
+        ), json);
+        assertFalse(json.contains("highCutSlope"), json);
+        assertEquals(json, BeatJson.write(BeatJson.read(json)));
+        assertEquals(Track.HIGH_CUT_SLOPE, BeatJson.read(json).track(0).highCutSlope());
+
+        beat.track(0).setHighCut(6000, 24);
+        String steep = BeatJson.write(beat);
+        assertTrue(steep.contains("\"highCut\": 6000, \"highCutSlope\": 24"), steep);
+        assertEquals(steep, BeatJson.write(BeatJson.read(steep)));
+        assertEquals(24, BeatJson.read(steep).track(0).highCutSlope());
+
+        beat.track(0).setHighCut(6000, 6);
+        String gentle = BeatJson.write(beat);
+        assertTrue(gentle.contains("\"highCutSlope\": 6"), gentle);
+        assertEquals(6, BeatJson.read(gentle).track(0).highCutSlope());
+        assertEquals(gentle, BeatJson.write(BeatJson.read(gentle)));
+        assertTrue(beat.track(0).shapeText().contains("high cut 6000 Hz 6 dB/oct"), beat.track(0).shapeText());
+        assertTrue(beat.midiFilterWarning().contains("A Kick high cut 6 dB/oct"), beat.midiFilterWarning());
+        assertTrue(beat.midiFilterWarning().contains("not in the MIDI file"), beat.midiFilterWarning());
+        assertFalse(SampleLibrary.toneToken(beat.track(0), true).equals(SampleLibrary.toneToken(BeatJson.read(steep).track(0), true)));
+
+        Beat changed = BeatJson.read(gentle.replace("\"highCutSlope\": 6", "\"highCutSlope\": 24.4"));
+        assertEquals(24, changed.track(0).highCutSlope());
+        assertEquals(
+            "A Kick: high cut slope 24.4 dB/oct was changed to 24 dB/oct.",
+            changed.rowWarning('a', "Kick", "high cut slope")
+        );
+
+        Beat ignored = BeatJson.read(gentle.replace("\"highCut\": 6000, \"highCutSlope\": 6", "\"highCutSlope\": 24"));
+        assertFalse(ignored.track(0).hasHighCut());
+        assertEquals(Track.HIGH_CUT_SLOPE, ignored.track(0).highCutSlope());
+        assertTrue(ignored.loadWarnings().isEmpty(), ignored.loadWarnings().toString());
+
+        Path file = temp.resolve("slope.json");
+        Files.writeString(file, gentle);
+        Cli info = cli("info", file.toString());
+        assertEquals(0, info.code, info.err);
+        assertTrue(info.out.contains("high cut 6000 Hz 6 dB/oct"), info.out);
+        assertTrue(info.err.contains("high cut 6 dB/oct"), info.err);
+        assertTrue(info.err.contains("not in the MIDI file"), info.err);
+        Path mid = temp.resolve("slope.mid");
+        Cli midi = cli("render", file.toString(), "--out", mid.toString());
+        assertEquals(0, midi.code, midi.err);
+        assertTrue(midi.err.contains("A Kick high cut 6 dB/oct"), midi.err);
+        assertTrue(midi.err.contains("not in the MIDI file"), midi.err);
     }
 
     @Test

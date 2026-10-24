@@ -10,7 +10,8 @@ import java.util.List;
  * <li>invert, for a sample row only, before this class sees the PCM</li>
  * <li>low cut, a Butterworth high-pass, 12 or 24 dB/oct, −3 dB at the corner</li>
  * <li>EQ bands, peaking biquads, in band order</li>
- * <li>high cut, a 12 dB/oct Butterworth low-pass, −3 dB at the corner</li>
+ * <li>high cut, a Butterworth low-pass at 6, 12, or 24 dB/oct, −3 dB at the corner.
+ * 12 is the default</li>
  * <li>presence, a high shelf above about 3 kHz</li>
  * <li>gain compensation: {@link #fit} scales a peak into 16-bit, and the SoundFont
  * attenuation puts that level back. A recorded drum or note is also scaled by the
@@ -55,7 +56,7 @@ public final class ToneFilter {
         if (flat(hz, bands, highCutHz, presenceDb)) {
             return samples;
         }
-        double[] audio = process(samples, rate, hz, slope, bands, highCutHz, presenceDb);
+        double[] audio = process(samples, rate, hz, slope, bands, highCutHz, Track.HIGH_CUT_SLOPE, presenceDb);
         short[] out = new short[audio.length];
         for (int i = 0; i < audio.length; i++) {
             out[i] = clamp(audio[i]);
@@ -77,8 +78,9 @@ public final class ToneFilter {
         int slope = track == null ? Track.LOW_CUT_SLOPE : track.lowCutSlope();
         List<EqBand> bands = track == null ? List.of() : track.eqBands();
         int highCut = track == null ? 0 : track.highCutHz();
+        int highSlope = track == null ? Track.HIGH_CUT_SLOPE : track.highCutSlope();
         double presence = track == null ? 0 : track.presence();
-        return process(samples, rate, hz, slope, bands, highCut, presence);
+        return process(samples, rate, hz, slope, bands, highCut, highSlope, presence);
     }
 
     public static double[] process(
@@ -90,12 +92,26 @@ public final class ToneFilter {
         int highCutHz,
         double presenceDb
     ) {
+        return process(samples, rate, hz, slope, bands, highCutHz, Track.HIGH_CUT_SLOPE, presenceDb);
+    }
+
+    /** Low cut, EQ, high cut at {@code highCutSlope} dB/oct, then presence. */
+    public static double[] process(
+        short[] samples,
+        int rate,
+        int hz,
+        int slope,
+        List<EqBand> bands,
+        int highCutHz,
+        int highCutSlope,
+        double presenceDb
+    ) {
         int length = samples == null ? 0 : samples.length;
         double[] audio = new double[length];
         for (int i = 0; i < length; i++) {
             audio[i] = samples[i];
         }
-        for (Section section : sections(rate, hz, slope, bands, highCutHz, presenceDb)) {
+        for (Section section : sections(rate, hz, slope, bands, highCutHz, highCutSlope, presenceDb)) {
             section.process(audio);
         }
         return audio;
@@ -147,7 +163,19 @@ public final class ToneFilter {
 
     /** 12 dB/oct low-pass magnitude at {@code freqHz}, in dB. The corner is about −3 dB. */
     public static double lowPassDb(int rate, double cornerHz, double freqHz) {
-        return Section.lowPass(rate, clampHz(rate, cornerHz), 1 / Math.sqrt(2)).magnitudeDb(freqHz);
+        return lowPassDb(rate, cornerHz, Track.HIGH_CUT_SLOPE, freqHz);
+    }
+
+    /**
+     * Low-pass magnitude at {@code freqHz}, in dB.
+     * {@code slope} is 6, 12, or 24 dB/oct. The corner is about −3 dB.
+     */
+    public static double lowPassDb(int rate, double cornerHz, int slope, double freqHz) {
+        double db = 0;
+        for (Section section : lowPass(rate, cornerHz, slope)) {
+            db += section.magnitudeDb(freqHz);
+        }
+        return db;
     }
 
     /**
@@ -175,6 +203,7 @@ public final class ToneFilter {
             track.lowCutSlope(),
             track.eqBands(),
             track.highCutHz(),
+            track.highCutSlope(),
             track.presence()
         )) {
             db += section.magnitudeDb(freqHz);
@@ -203,6 +232,7 @@ public final class ToneFilter {
         int slope,
         List<EqBand> bands,
         int highCutHz,
+        int highCutSlope,
         double presenceDb
     ) {
         List<Section> chain = new ArrayList<>();
@@ -224,7 +254,9 @@ public final class ToneFilter {
             }
         }
         if (highCutHz > 0) {
-            chain.add(Section.lowPass(rate, clampHz(rate, highCutHz), 1 / Math.sqrt(2)));
+            for (Section section : lowPass(rate, highCutHz, highCutSlope)) {
+                chain.add(section);
+            }
         }
         if (presenceDb > 0) {
             chain.add(highShelf(rate, Track.PRESENCE_HZ, presenceDb));
@@ -241,6 +273,21 @@ public final class ToneFilter {
             };
         }
         return new Section[] {Section.highPass(rate, hz, 1 / Math.sqrt(2))};
+    }
+
+    /** 6 dB/oct is one real pole. 24 dB/oct is two Butterworth sections. Anything else is 12. */
+    private static Section[] lowPass(int rate, double cornerHz, int slope) {
+        double hz = clampHz(rate, cornerHz);
+        if (slope <= Track.HIGH_CUT_GENTLE) {
+            return new Section[] {Section.lowPassFirst(rate, hz)};
+        }
+        if (slope >= Track.HIGH_CUT_STEEP) {
+            return new Section[] {
+                Section.lowPass(rate, hz, 1.3065629648763766),
+                Section.lowPass(rate, hz, 0.541196100146197)
+            };
+        }
+        return new Section[] {Section.lowPass(rate, hz, 1 / Math.sqrt(2))};
     }
 
     private static Section highShelf(int rate, int shelfHz, double gainDb) {
@@ -292,6 +339,14 @@ public final class ToneFilter {
             double b2 = (1 + cos) / 2;
             double a0 = 1 + alpha;
             return new Section(rate, b0 / a0, b1 / a0, b2 / a0, (-2 * cos) / a0, (1 - alpha) / a0);
+        }
+
+        /** First-order Butterworth low-pass. −3 dB at {@code hz}, about 6 dB down an octave later. */
+        static Section lowPassFirst(int rate, double hz) {
+            double k = Math.tan(Math.PI * hz / rate);
+            double norm = 1.0 / (1.0 + k);
+            double b0 = k * norm;
+            return new Section(rate, b0, b0, 0, (k - 1.0) * norm, 0);
         }
 
         static Section lowPass(int rate, double hz, double q) {

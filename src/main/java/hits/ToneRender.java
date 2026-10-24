@@ -43,6 +43,11 @@ public final class ToneRender {
     private static volatile double playbackGain = Double.NaN;
     /** Samples of leading silence the offline synth inserts. {@code -1} until measured. */
     private static volatile int leadSamples = -1;
+    /**
+     * Extra samples a dry capture is late versus the same hit with no reverb message.
+     * {@code -1} until measured.
+     */
+    private static volatile int skewSamples = -1;
 
     private ToneRender() {}
 
@@ -173,7 +178,10 @@ public final class ToneRender {
             if (peak(mono) < 40) {
                 throw new IOException("The built-in sound did not render.");
             }
-            short[] trimmed = dropLead(mono, leadIn());
+            // leadIn is the sample-bank replay delay. captureSkew is the extra sample
+            // the dry setup adds on this capture, which replay does not. Trimming both
+            // puts a near-neutral hit on the same sample as the unfiltered one.
+            short[] trimmed = dropLead(mono, leadIn() + captureSkew());
             int releaseAt = note ? noteReleaseAt(WavAudio.SAMPLE_RATE) : 0;
             int minEnd = note ? releaseAt + WavAudio.SAMPLE_RATE * 3 / 10 : 0;
             return trimTail(trimmed, minEnd);
@@ -192,10 +200,10 @@ public final class ToneRender {
     }
 
     /**
-     * How much louder the sample bank plays a recording back, measured once with a sine
-     * at {@link #CAPTURE_VELOCITY}. Captured hits are scaled by this so the passband
-     * stays at the built-in level. A peak that would not fit is scaled down in
-     * {@link ToneFilter#fit} and restored with SoundFont attenuation.
+     * How much louder the sample bank plays a dry recording back, measured once with a sine
+     * at {@link #CAPTURE_VELOCITY} and with reverb and chorus off. Captured hits are scaled
+     * by this so the passband stays at the built-in level. A peak that would not fit is
+     * scaled down in {@link ToneFilter#fit} and restored with SoundFont attenuation.
      */
     private static double playbackGain() throws IOException {
         if (!Double.isNaN(playbackGain)) {
@@ -269,9 +277,12 @@ public final class ToneRender {
     }
 
     /**
-     * The sine is played the way a captured hit is played back: velocity
-     * {@link #CAPTURE_VELOCITY}, and the synth's own reverb. The impulse that
-     * measures latency is a separate, dry note so the onset is not the room.
+     * The sine is played the way the dry capture is scaled: velocity
+     * {@link #CAPTURE_VELOCITY}, reverb 0, and chorus 0. The row's own reverb is
+     * applied later, the same as an unfiltered row. Leaving the synth's default
+     * reverb on this steady tone pulls the measured gain about 0.24 dB high, and
+     * every baked hit comes back that much louder. The impulse that measures
+     * latency is a separate dry note so the onset is not the room.
      */
     private static Sequence calibrationSequence() throws InvalidMidiDataException {
         Sequence sequence = new Sequence(Sequence.PPQ, SequenceBuilder.PPQ);
@@ -282,6 +293,8 @@ public final class ToneRender {
         control(midi, 0, SampleBank.SF2_BANK, 0);
         control(midi, 32, 0, 0);
         control(midi, 10, 64, 0);
+        control(midi, 91, 0, 0);
+        control(midi, 93, 0, 0);
         ShortMessage program = new ShortMessage();
         program.setMessage(ShortMessage.PROGRAM_CHANGE, 0, 0, 0);
         midi.add(new MidiEvent(program, 0));
@@ -328,6 +341,87 @@ public final class ToneRender {
         ShortMessage message = new ShortMessage();
         message.setMessage(ShortMessage.CONTROL_CHANGE, 0, controller, value);
         midi.add(new MidiEvent(message, tick));
+    }
+
+    /**
+     * Samples a dry capture is later than the unfiltered hit.
+     * <p>
+     * Capture records the built-in sound with reverb and chorus at 0, and that setup is
+     * written the way an export writes a drum kit: the program change, then the reverb
+     * message, then a pan for every row. On this synth that burst lands one sample later
+     * than the same kick with no reverb message, which is how a plain row is played.
+     * Replay of the recording does not send that reverb message, so the bank latency alone
+     * would leave the baked hit one sample late. The offset is measured with the same two
+     * note setups and trimmed off with {@link #leadIn()}.
+     */
+    private static int captureSkew() throws IOException {
+        if (skewSamples >= 0) {
+            return skewSamples;
+        }
+        synchronized (ToneRender.class) {
+            if (skewSamples >= 0) {
+                return skewSamples;
+            }
+            try {
+                Soundbank kits = SoundCatalog.builtin();
+                short[] plain = WavRenderer.renderMono(skewSequence(false), kits, null);
+                short[] dry = WavRenderer.renderMono(skewSequence(true), kits, null);
+                int delta = onset(dry) - onset(plain);
+                skewSamples = Math.max(0, Math.min(delta, 8));
+                return skewSamples;
+            } catch (InvalidMidiDataException exception) {
+                throw new IOException("The dry-capture offset could not be measured.", exception);
+            }
+        }
+    }
+
+    /** A GM kick, with or without the dry capture's reverb message after the program change. */
+    private static Sequence skewSequence(boolean dry) throws InvalidMidiDataException {
+        Sequence sequence = new Sequence(Sequence.PPQ, SequenceBuilder.PPQ);
+        Track midi = sequence.createTrack();
+        MetaMessage tempo = new MetaMessage();
+        tempo.setMessage(0x51, new byte[] {0x07, (byte) 0xA1, 0x20}, 3);
+        midi.add(new MidiEvent(tempo, 0));
+        control(midi, 0, Gm.DRUM_BANK, 0);
+        control(midi, 32, 0, 0);
+        ShortMessage program = new ShortMessage();
+        program.setMessage(ShortMessage.PROGRAM_CHANGE, 0, 0, 0);
+        midi.add(new MidiEvent(program, 0));
+        if (dry) {
+            control(midi, 91, 0, 0);
+            control(midi, 93, 0, 0);
+        }
+        control(midi, 10, 64, 0);
+        for (int row = 0; row < Beat.TRACKS - 1; row++) {
+            ShortMessage pan = new ShortMessage();
+            pan.setMessage(ShortMessage.CONTROL_CHANGE, Gm.DRUM_CHANNEL, 10, 64);
+            midi.add(new MidiEvent(pan, 0));
+        }
+        ShortMessage on = new ShortMessage();
+        on.setMessage(ShortMessage.NOTE_ON, 0, 36, CAPTURE_VELOCITY);
+        midi.add(new MidiEvent(on, 0));
+        ShortMessage off = new ShortMessage();
+        off.setMessage(ShortMessage.NOTE_OFF, 0, 36, 0);
+        midi.add(new MidiEvent(off, SequenceBuilder.PPQ));
+        MetaMessage end = new MetaMessage();
+        end.setMessage(0x2F, new byte[0], 0);
+        midi.add(new MidiEvent(end, SequenceBuilder.PPQ));
+        return sequence;
+    }
+
+    /** First sample at least a tenth of the peak. The kick's attack is unambiguous at that gate. */
+    private static int onset(short[] pcm) {
+        int peak = peak(pcm);
+        int gate = Math.max(20, peak / 10);
+        if (pcm == null) {
+            return 0;
+        }
+        for (int i = 0; i < pcm.length; i++) {
+            if (Math.abs(pcm[i]) >= gate) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     /** Drops the offline synth's leading latency. The instrument's own attack stays. */
@@ -476,5 +570,6 @@ public final class ToneRender {
         }
         playbackGain = Double.NaN;
         leadSamples = -1;
+        skewSamples = -1;
     }
 }
