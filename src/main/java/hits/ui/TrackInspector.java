@@ -40,6 +40,7 @@ import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
@@ -131,7 +132,7 @@ final class TrackInspector {
     private final JLabel resonanceValue = Widgets.label("—");
     private final JCheckBox lowCutOn = new JCheckBox("Low cut");
     private final JSlider lowCut = Widgets.slider(0, Track.LOW_CUT_SLIDER, Track.lowCutSlider(120));
-    private final JLabel lowCutValue = Widgets.label("—");
+    private final JTextField lowCutValue = hzField("low-cut-value", "Low cut frequency");
     private final JButton slope12 = Widgets.button("12");
     private final JButton slope24 = Widgets.button("24");
     private final JSlider presence = Widgets.slider(0, Track.presenceSlider(Track.PRESENCE_MAX), 0);
@@ -139,13 +140,21 @@ final class TrackInspector {
     private final EqBandControls eq1;
     private final EqBandControls eq2;
     private final JCheckBox highCutOn = new JCheckBox("High cut");
-    private final JSlider highCut = Widgets.slider(0, Track.EQ_SLIDER, Track.highCutSlider(Track.HIGH_CUT));
-    private final JLabel highCutValue = Widgets.label("—");
+    private final JSlider highCut = Widgets.slider(0, Track.HIGH_CUT_SLIDER, Track.highCutSlider(Track.HIGH_CUT));
+    private final JTextField highCutValue = hzField("high-cut-value", "High cut frequency");
+    private final JButton highSlope6 = Widgets.button("6");
+    private final JButton highSlope12 = Widgets.button("12");
+    private final JButton highSlope24 = Widgets.button("24");
     private final EqCurve eqCurve = new EqCurve();
+    private final JLabel eqCaption = Widgets.label("Low cut, EQ, high cut, and presence");
     private final SliderDrag highCutDrag;
     /** High-cut corner the slider shows while the filter is off. */
     private int shownHighCut = Track.HIGH_CUT;
+    /** High-cut slope the buttons show. Kept while High cut is off so it can be chosen first. */
+    private int shownHighSlope = Track.HIGH_CUT_SLOPE;
     private String eqContext = "";
+    /** Slot and row that own the frequency field currently being typed. */
+    private String hzEditContext = "";
     private final SliderDrag gateDrag;
     private final SliderDrag decayDrag;
     private final SliderDrag cutoffDrag;
@@ -345,16 +354,21 @@ final class TrackInspector {
                 track.setLowCut(Track.lowCutHz(lowCut.getValue()), slopeChoice());
             }
         });
+        bindHz(lowCutValue, this::commitLowCutHz);
         presenceDrag.wire(presence, beat -> onScreen(beat).setPresence(Track.presenceFromSlider(presence.getValue())));
         eq1.wire();
         eq2.wire();
         highCutDrag.wire(highCut, beat -> {
             Track track = onScreen(beat);
             if (track.hasHighCut()) {
-                track.setHighCut(Track.highCutFromSlider(highCut.getValue()));
+                track.setHighCut(Track.highCutFromSlider(highCut.getValue()), highSlopeChoice());
             }
         });
+        bindHz(highCutValue, this::commitHighCutHz);
         highCutOn.addActionListener(event -> applyHighCutToggle());
+        highSlope6.addActionListener(event -> applyHighSlope(Track.HIGH_CUT_GENTLE));
+        highSlope12.addActionListener(event -> applyHighSlope(Track.HIGH_CUT_SLOPE));
+        highSlope24.addActionListener(event -> applyHighSlope(Track.HIGH_CUT_STEEP));
         tuneSemi.addChangeListener(event -> applyTune());
         tuneCents.addChangeListener(event -> applyTune());
         cutoffOn.addActionListener(event -> applyCutoffToggle());
@@ -741,6 +755,7 @@ final class TrackInspector {
     }
 
     private static final String LOW_CUT_TIP = "High-pass, from 20 Hz to 2 kHz. Off leaves the row as it is. "
+        + "Type a frequency, or use the slider, which lands on round Hertz. "
         + "12 or 24 dB per octave. The filter is baked into playback and WAV export. "
         + "A MIDI file writes the ordinary note and does not carry it.";
     private static final String LOW_CUT_EXTERNAL = "Low cut, presence, and EQ play on the built-in synth. "
@@ -749,8 +764,11 @@ final class TrackInspector {
     private static final String PRESENCE_TIP = "High shelf above about 3 kHz, from 0 to +12 dB in 0.1 dB steps. "
         + "0 leaves the highs as they are. Playback and WAV export use it. A MIDI file does not.";
     private static final String EQ_TIP = "Two peaking bands, 30 Hz to 12 kHz, gain −18 to +12 dB, Q 0.3 to 8. "
-        + "High cut is a 12 dB/oct low-pass from 1 kHz to 20 kHz, off until you turn it on. "
+        + "Type a frequency, or use the slider, which lands on round Hertz such as 50, 100, 250, 950, and 2500. "
+        + "High cut is a low-pass from 1 kHz to 20 kHz at 6, 12, or 24 dB per octave, off until you turn it on. "
+        + "12 is the default and is left out of the file. "
         + "Flat bands are left out of the file. Playback and WAV export use them. A MIDI file does not.";
+    private static final String EQ_CURVE_TIP = "The curve is the whole row filter: low cut, the peaking bands, high cut, and presence.";
 
     private void showLowCut(Track track) {
         boolean live = player.isBuiltIn();
@@ -768,7 +786,10 @@ final class TrackInspector {
         if (track.hasLowCut() && !lowCut.getValueIsAdjusting()) {
             lowCut.setValue(Track.lowCutSlider(track.lowCutHz()));
         }
-        lowCutValue.setText(track.hasLowCut() ? track.lowCutHz() + " Hz" : "—");
+        int shownCut = lowCut.getValueIsAdjusting()
+            ? Track.lowCutHz(lowCut.getValue())
+            : track.lowCutHz();
+        showHz(lowCutValue, track.hasLowCut() ? shownCut + " Hz" : "—", on);
         paintSlope();
         String tip = live ? LOW_CUT_TIP : LOW_CUT_EXTERNAL;
         if (!live && track.hasLowCut()) {
@@ -779,7 +800,9 @@ final class TrackInspector {
         lowCutValue.setToolTipText(tip);
         slope12.setToolTipText(tip + " 12 dB per octave.");
         slope24.setToolTipText(tip + " 24 dB per octave.");
-        lowCutValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
+        if (!on) {
+            lowCutValue.setForeground(Theme.MUTED);
+        }
     }
 
     private void paintSlope() {
@@ -824,9 +847,81 @@ final class TrackInspector {
         editor.edit(beat -> {
             Track track = onScreen(beat);
             if (highCutOn.isSelected()) {
-                track.setHighCut(Track.highCutFromSlider(highCut.getValue()));
+                int hz = highCut.getValueIsAdjusting()
+                    ? Track.highCutFromSlider(highCut.getValue())
+                    : shownHighCut;
+                track.setHighCut(hz, shownHighSlope);
             } else {
                 track.clearHighCut();
+            }
+        });
+    }
+
+    private void applyHighSlope(int slope) {
+        if (sync.on()) {
+            return;
+        }
+        shownHighSlope = slope;
+        Track current = editor.selectedTrack();
+        if (!current.hasHighCut() || current.highCutSlope() == slope) {
+            paintHighSlope();
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.hasHighCut()) {
+                track.setHighCut(track.highCutHz(), slope);
+            }
+        });
+    }
+
+    private int highSlopeChoice() {
+        return shownHighSlope;
+    }
+
+    private void commitLowCutHz() {
+        Track current = editor.selectedTrack();
+        if (!current.hasLowCut()) {
+            return;
+        }
+        Integer typed = Track.parseHz(lowCutValue.getText());
+        if (typed == null) {
+            lowCutValue.setText(current.lowCutHz() + " Hz");
+            return;
+        }
+        int clamped = Math.max(Track.LOW_CUT_MIN, Math.min(Track.LOW_CUT_MAX, typed));
+        if (clamped == current.lowCutHz()) {
+            lowCutValue.setText(clamped + " Hz");
+            return;
+        }
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.hasLowCut()) {
+                track.setLowCut(clamped, slopeChoice());
+            }
+        });
+    }
+
+    private void commitHighCutHz() {
+        Track current = editor.selectedTrack();
+        if (!current.hasHighCut()) {
+            return;
+        }
+        Integer typed = Track.parseHz(highCutValue.getText());
+        if (typed == null) {
+            highCutValue.setText(current.highCutHz() + " Hz");
+            return;
+        }
+        int clamped = Math.max(Track.HIGH_CUT_MIN, Math.min(Track.HIGH_CUT_MAX, typed));
+        if (clamped == current.highCutHz()) {
+            highCutValue.setText(clamped + " Hz");
+            return;
+        }
+        int slope = shownHighSlope;
+        editor.edit(beat -> {
+            Track track = onScreen(beat);
+            if (track.hasHighCut()) {
+                track.setHighCut(clamped, slope);
             }
         });
     }
@@ -839,6 +934,7 @@ final class TrackInspector {
             eq1.adopt(track.eqBand(0));
             eq2.adopt(track.eqBand(1));
             shownHighCut = track.hasHighCut() ? track.highCutHz() : Track.HIGH_CUT;
+            shownHighSlope = track.hasHighCut() ? track.highCutSlope() : Track.HIGH_CUT_SLOPE;
         } else {
             if (track.eqBand(0) != null) {
                 eq1.adopt(track.eqBand(0));
@@ -848,19 +944,25 @@ final class TrackInspector {
             }
             if (track.hasHighCut()) {
                 shownHighCut = track.highCutHz();
+                shownHighSlope = track.highCutSlope();
             }
         }
         eq1.show(track, live);
         eq2.show(track, live);
         highCutOn.setSelected(track.hasHighCut());
         highCutOn.setEnabled(live);
-        highCut.setEnabled(live && track.hasHighCut());
+        boolean highOn = live && track.hasHighCut();
+        highCut.setEnabled(highOn);
         if (track.hasHighCut() && !highCut.getValueIsAdjusting()) {
             highCut.setValue(Track.highCutSlider(track.highCutHz()));
         } else if (!track.hasHighCut() && !highCut.getValueIsAdjusting()) {
             highCut.setValue(Track.highCutSlider(shownHighCut));
         }
-        highCutValue.setText(track.hasHighCut() ? track.highCutHz() + " Hz" : "—");
+        int shownCorner = highCut.getValueIsAdjusting()
+            ? Track.highCutFromSlider(highCut.getValue())
+            : (track.hasHighCut() ? track.highCutHz() : 0);
+        showHz(highCutValue, track.hasHighCut() ? shownCorner + " Hz" : "—", highOn);
+        paintHighSlope();
         String tip = live ? EQ_TIP : LOW_CUT_EXTERNAL;
         if (!live && track.hasEq()) {
             tip = "Stored: " + track.shapeText() + ". " + tip;
@@ -868,15 +970,28 @@ final class TrackInspector {
         highCutOn.setToolTipText(tip);
         highCut.setToolTipText(tip);
         highCutValue.setToolTipText(tip);
-        highCutValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
-        eqCurve.show(track, live, tip);
+        highSlope6.setToolTipText(tip + " 6 dB per octave.");
+        highSlope12.setToolTipText(tip + " 12 dB per octave.");
+        highSlope24.setToolTipText(tip + " 24 dB per octave.");
+        eqCaption.setToolTipText(EQ_CURVE_TIP);
+        eqCurve.show(track, live, EQ_CURVE_TIP);
+    }
+
+    private void paintHighSlope() {
+        boolean live = player.isBuiltIn();
+        highSlope6.setEnabled(live);
+        highSlope12.setEnabled(live);
+        highSlope24.setEnabled(live);
+        Widgets.paintToggle(highSlope6, live && shownHighSlope == Track.HIGH_CUT_GENTLE);
+        Widgets.paintToggle(highSlope12, live && shownHighSlope == Track.HIGH_CUT_SLOPE);
+        Widgets.paintToggle(highSlope24, live && shownHighSlope == Track.HIGH_CUT_STEEP);
     }
 
     private JPanel lowCutRow() {
         lowCutOn.setOpaque(false);
         lowCutOn.setForeground(Theme.TEXT);
         lowCutOn.setFocusable(false);
-        lowCutValue.setPreferredSize(new Dimension(72, 32));
+        lowCutValue.setPreferredSize(new Dimension(88, 32));
         JPanel panel = new JPanel(new BorderLayout(8, 0));
         panel.setOpaque(false);
         lowCutOn.setPreferredSize(new Dimension(108, 32));
@@ -933,12 +1048,38 @@ final class TrackInspector {
         constraints.insets = new Insets(2, 0, 2, 0);
         addRow(panel, constraints, title);
         addRow(panel, constraints, eqCurve);
+        eqCaption.setName("eq-curve-caption");
+        eqCaption.setForeground(Theme.MUTED);
+        eqCaption.setFont(eqCaption.getFont().deriveFont(Font.PLAIN, 11f));
+        eqCaption.setToolTipText(EQ_CURVE_TIP);
+        addRow(panel, constraints, eqCaption);
         addRow(panel, constraints, eq1.block());
         addRow(panel, constraints, eq2.block());
         highCut.setName("high-cut");
         highCutOn.setName("high-cut-on");
-        highCutValue.setName("high-cut-value");
         addRow(panel, constraints, highCutRow());
+        addRow(panel, constraints, highSlopeRow());
+        return panel;
+    }
+
+    private JPanel highSlopeRow() {
+        highSlope6.setName("high-cut-6");
+        highSlope12.setName("high-cut-12");
+        highSlope24.setName("high-cut-24");
+        highSlope6.getAccessibleContext().setAccessibleName("High cut 6 dB per octave");
+        highSlope12.getAccessibleContext().setAccessibleName("High cut 12 dB per octave");
+        highSlope24.getAccessibleContext().setAccessibleName("High cut 24 dB per octave");
+        Widgets.fix(highSlope6, 48, 32);
+        Widgets.fix(highSlope12, 48, 32);
+        Widgets.fix(highSlope24, 48, 32);
+        JLabel title = Widgets.label("Slope");
+        title.setPreferredSize(new Dimension(108, 32));
+        title.setName("high-cut-slope");
+        JPanel panel = new JPanel(new BorderLayout(8, 0));
+        panel.setOpaque(false);
+        panel.add(title, BorderLayout.WEST);
+        panel.add(Widgets.row(highSlope6, highSlope12, highSlope24), BorderLayout.CENTER);
+        paintHighSlope();
         return panel;
     }
 
@@ -946,7 +1087,7 @@ final class TrackInspector {
         highCutOn.setOpaque(false);
         highCutOn.setForeground(Theme.TEXT);
         highCutOn.setFocusable(false);
-        highCutValue.setPreferredSize(new Dimension(84, 32));
+        highCutValue.setPreferredSize(new Dimension(88, 32));
         JPanel panel = new JPanel(new BorderLayout(8, 0));
         panel.setOpaque(false);
         highCutOn.setPreferredSize(new Dimension(108, 32));
@@ -961,7 +1102,7 @@ final class TrackInspector {
     private final class EqBandControls {
         private final int index;
         private final JSlider hz;
-        private final JLabel hzValue;
+        private final JTextField hzValue;
         private final JSlider gain;
         private final JLabel gainValue;
         private final JSlider q;
@@ -979,13 +1120,13 @@ final class TrackInspector {
             hz = Widgets.slider(0, Track.EQ_SLIDER, Track.eqHzSlider(defaultHz));
             gain = Widgets.slider(Track.eqGainSlider(Track.EQ_GAIN_MIN), Track.eqGainSlider(Track.EQ_GAIN_MAX), 0);
             q = Widgets.slider(Track.eqQSlider(Track.EQ_Q_MIN), Track.eqQSlider(Track.EQ_Q_MAX), Track.eqQSlider(Track.EQ_Q));
-            hzValue = Widgets.label(defaultHz + " Hz");
+            hzValue = hzField("eq-" + band + "-hz-value", "Band " + band + " frequency");
+            hzValue.setText(defaultHz + " Hz");
             gainValue = Widgets.label("0 dB");
             qValue = Widgets.label(Db.number(Track.EQ_Q));
             hz.setName("eq-" + band + "-hz");
             gain.setName("eq-" + band + "-gain");
             q.setName("eq-" + band + "-q");
-            hzValue.setName("eq-" + band + "-hz-value");
             gainValue.setName("eq-" + band + "-gain-value");
             qValue.setName("eq-" + band + "-q-value");
             hzDrag = new SliderDrag(editor, sync);
@@ -997,23 +1138,50 @@ final class TrackInspector {
             hzDrag.wire(hz, beat -> apply(beat));
             gainDrag.wire(gain, beat -> apply(beat));
             qDrag.wire(q, beat -> apply(beat));
+            bindHz(hzValue, this::commitHz);
         }
 
         private void apply(Beat beat) {
             Track track = onScreen(beat);
-            shownHz = Track.eqHzFromSlider(hz.getValue());
+            if (hz.getValueIsAdjusting()) {
+                shownHz = Track.eqHzFromSlider(hz.getValue());
+            }
             shownQ = Track.eqQFromSlider(q.getValue());
             double gainDb = Track.eqGainFromSlider(gain.getValue());
             if (Math.abs(gainDb) < 0.05) {
                 track.clearEqBand(index);
                 return;
             }
-            track.setEqBand(
-                index,
-                Track.eqHzFromSlider(hz.getValue()),
-                gainDb,
-                Track.eqQFromSlider(q.getValue())
-            );
+            track.setEqBand(index, shownHz, gainDb, shownQ);
+        }
+
+        private void commitHz() {
+            Track current = editor.selectedTrack();
+            EqBand band = current.eqBand(index);
+            int fallback = band == null ? shownHz : band.hz();
+            Integer typed = Track.parseHz(hzValue.getText());
+            if (typed == null) {
+                hzValue.setText(fallback + " Hz");
+                return;
+            }
+            int clamped = Math.max(Track.EQ_HZ_MIN, Math.min(Track.EQ_HZ_MAX, typed));
+            shownHz = clamped;
+            hzValue.setText(clamped + " Hz");
+            if (band == null || clamped == band.hz()) {
+                sync.run(() -> hz.setValue(Track.eqHzSlider(clamped)));
+                return;
+            }
+            double gainDb = band.gain();
+            double width = band.q();
+            editor.edit(beat -> {
+                Track track = onScreen(beat);
+                EqBand currentBand = track.eqBand(index);
+                if (currentBand != null) {
+                    track.setEqBand(index, clamped, currentBand.gain(), currentBand.q());
+                } else if (Math.abs(gainDb) >= 0.05) {
+                    track.setEqBand(index, clamped, gainDb, width);
+                }
+            });
         }
 
         private void adopt(EqBand band) {
@@ -1039,10 +1207,10 @@ final class TrackInspector {
                 shownHz = frequency;
                 shownQ = width;
             }
-            int frequency = Track.eqHzFromSlider(hz.getValue());
+            int frequency = hz.getValueIsAdjusting() ? Track.eqHzFromSlider(hz.getValue()) : shownHz;
             double gainDb = Track.eqGainFromSlider(gain.getValue());
             double width = Track.eqQFromSlider(q.getValue());
-            hzValue.setText(frequency + " Hz");
+            showHz(hzValue, frequency + " Hz", live);
             gainValue.setText(Math.abs(gainDb) < 0.05 ? "0 dB" : Db.labeled(gainDb));
             qValue.setText(Db.number(width));
             hz.setEnabled(live);
@@ -1056,7 +1224,6 @@ final class TrackInspector {
             for (JComponent control : new JComponent[] {hz, hzValue, gain, gainValue, q, qValue}) {
                 control.setToolTipText(tip);
             }
-            hzValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
             qValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
             gainValue.setForeground(!live ? Theme.MUTED : warning != null ? Theme.STEP_ACCENT : Theme.TEXT);
         }
@@ -1074,7 +1241,7 @@ final class TrackInspector {
             addRow(panel, constraints, labeled(name, EQ_TIP, hz, hzValue));
             addRow(panel, constraints, labeled("Gain", EQ_TIP, gain, gainValue));
             addRow(panel, constraints, labeled("Q", EQ_TIP, q, qValue));
-            hzValue.setPreferredSize(new Dimension(84, 32));
+            hzValue.setPreferredSize(new Dimension(88, 32));
             gainValue.setPreferredSize(new Dimension(84, 32));
             qValue.setPreferredSize(new Dimension(84, 32));
             return panel;
@@ -1089,8 +1256,8 @@ final class TrackInspector {
         private EqCurve() {
             setName("eq-curve");
             setOpaque(true);
-            setPreferredSize(new Dimension(280, 72));
-            setMinimumSize(new Dimension(160, 56));
+            setPreferredSize(new Dimension(280, 108));
+            setMinimumSize(new Dimension(160, 88));
         }
 
         private void show(Track track, boolean live, String tip) {
@@ -1105,23 +1272,57 @@ final class TrackInspector {
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                 int width = Math.max(2, getWidth());
                 int height = Math.max(2, getHeight());
                 g.setColor(Theme.BG);
                 g.fillRect(0, 0, width, height);
+                g.setFont(getFont().deriveFont(10f));
+                FontMetrics metrics = g.getFontMetrics();
+                int left = Math.max(28, metrics.stringWidth("−12") + 8);
+                int top = 6;
+                int right = width - 4;
+                int plotBottom = height - metrics.getHeight() - 4;
+                int plotH = Math.max(2, plotBottom - top);
+                int plotW = Math.max(2, right - left);
+
                 g.setColor(Theme.GRID_LINE);
-                int zero = dbY(0, height);
-                g.drawLine(0, zero, width - 1, zero);
+                for (int db : new int[] {12, 0, -12}) {
+                    int y = top + dbY(db, plotH);
+                    g.drawLine(left, y, right, y);
+                }
+                for (int hz : new int[] {100, 1_000, 10_000}) {
+                    int x = left + hzX(hz, plotW);
+                    g.drawLine(x, top, x, plotBottom);
+                }
+
+                g.setColor(Theme.MUTED);
+                for (int db : new int[] {12, 0, -12}) {
+                    String label = db > 0 ? "+" + db : db == 0 ? "0" : "−" + -db;
+                    int y = top + dbY(db, plotH) + metrics.getAscent() / 2 - 1;
+                    y = Math.max(metrics.getAscent(), Math.min(plotBottom, y));
+                    g.drawString(label, 2, y);
+                }
+                for (int hz : new int[] {100, 1_000, 10_000}) {
+                    String label = hz >= 1000 ? (hz / 1000) + "k" : Integer.toString(hz);
+                    int x = left + hzX(hz, plotW) - metrics.stringWidth(label) / 2;
+                    x = Math.max(left, Math.min(right - metrics.stringWidth(label), x));
+                    g.drawString(label, x, height - 3);
+                }
+
                 g.setColor(live ? Theme.STEP_ON : Theme.MUTED);
-                int previous = -1;
-                for (int x = 0; x < width; x++) {
-                    double hz = 30 * Math.pow(20_000.0 / 30.0, x / (double) (width - 1));
+                int previousY = -1;
+                int previousX = left;
+                for (int x = 0; x <= plotW; x++) {
+                    double hz = 30 * Math.pow(20_000.0 / 30.0, x / (double) plotW);
                     double db = track == null ? 0 : ToneFilter.responseDb(WavAudio.SAMPLE_RATE, track, hz);
-                    int y = dbY(db, height);
-                    if (previous >= 0) {
-                        g.drawLine(x - 1, previous, x, y);
+                    int y = top + dbY(db, plotH);
+                    int px = left + x;
+                    if (previousY >= 0) {
+                        g.drawLine(previousX, previousY, px, y);
                     }
-                    previous = y;
+                    previousY = y;
+                    previousX = px;
                 }
             } finally {
                 g.dispose();
@@ -1133,6 +1334,13 @@ final class TrackInspector {
             double max = Track.EQ_GAIN_MAX;
             double clamped = Math.max(min, Math.min(max, db));
             return (int) Math.round((max - clamped) / (max - min) * (height - 1));
+        }
+
+        /** Log position of {@code hz} across 30 Hz to 20 kHz. */
+        private static int hzX(int hz, int width) {
+            double t = Math.log(hz / 30.0) / Math.log(20_000.0 / 30.0);
+            t = Math.max(0, Math.min(1, t));
+            return (int) Math.round(t * (width - 1));
         }
     }
 
@@ -1757,11 +1965,11 @@ final class TrackInspector {
         return panel;
     }
 
-    private static JPanel labeled(String name, String tip, JSlider slider, JLabel value) {
+    private static JPanel labeled(String name, String tip, JSlider slider, JComponent value) {
         return labeled(Widgets.label(name), tip, slider, value);
     }
 
-    private static JPanel labeled(JLabel title, String tip, JSlider slider, JLabel value) {
+    private static JPanel labeled(JLabel title, String tip, JSlider slider, JComponent value) {
         JPanel panel = new JPanel(new BorderLayout(8, 0));
         panel.setOpaque(false);
         title.setToolTipText(tip);
@@ -1773,5 +1981,59 @@ final class TrackInspector {
         value.setPreferredSize(new Dimension(44, 32));
         panel.add(value, BorderLayout.EAST);
         return panel;
+    }
+
+    /** Frequency field. The stored Hertz is shown, and Enter or leaving the field stores a typed value. */
+    private static JTextField hzField(String name, String accessible) {
+        JTextField field = new JTextField("—", 6);
+        field.setName(name);
+        field.getAccessibleContext().setAccessibleName(accessible);
+        field.setHorizontalAlignment(SwingConstants.RIGHT);
+        field.setForeground(Theme.TEXT);
+        field.setBackground(Theme.BG);
+        field.setCaretColor(Theme.TEXT);
+        field.setOpaque(true);
+        field.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(Theme.STEP_OFF),
+            BorderFactory.createEmptyBorder(2, 4, 2, 4)
+        ));
+        field.setPreferredSize(new Dimension(88, 32));
+        field.setMinimumSize(new Dimension(72, 28));
+        return field;
+    }
+
+    private static void showHz(JTextField field, String text, boolean enabled) {
+        field.setEnabled(enabled);
+        field.setForeground(enabled ? Theme.TEXT : Theme.MUTED);
+        field.setBackground(enabled ? Theme.BG : Theme.PANEL);
+        if (!field.isFocusOwner()) {
+            field.setText(text);
+        }
+    }
+
+    private void bindHz(JTextField field, Runnable commit) {
+        field.addActionListener(event -> commitHz(field, commit));
+        field.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusGained(FocusEvent event) {
+                hzEditContext = hzContext(field);
+            }
+
+            @Override
+            public void focusLost(FocusEvent event) {
+                commitHz(field, commit);
+            }
+        });
+    }
+
+    private void commitHz(JTextField field, Runnable commit) {
+        if (sync.on() || !hzContext(field).equals(hzEditContext)) {
+            return;
+        }
+        commit.run();
+    }
+
+    private String hzContext(JTextField field) {
+        return editor.viewSlot() + ":" + editor.trackIndex() + ":" + field.getName();
     }
 }

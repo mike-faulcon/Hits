@@ -7,6 +7,7 @@ import hits.Player;
 import javax.accessibility.AccessibleState;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -30,8 +31,8 @@ class InspectorAccessTest {
         Beat beat = Beat.drumKit("access");
         beat.track(0).setName("Kick");
         beat.track(0).setLowCut(120, 24);
-        beat.track(0).setEqBand(0, 90, -12, 1.4);
-        beat.track(0).setHighCut(6000);
+        beat.track(0).setEqBand(0, 950, -12, 1.4);
+        beat.track(0).setHighCut(6000, 24);
         Editor editor = new Editor(beat);
         Player player = new Player();
         player.open();
@@ -51,16 +52,51 @@ class InspectorAccessTest {
         assertMatches(slope12);
         assertMatches(slope24);
 
+        JButton high6 = find(panel, "high-cut-6");
+        JButton high12 = find(panel, "high-cut-12");
+        JButton high24 = find(panel, "high-cut-24");
+        assertNotNull(high6, "high-cut-6");
+        assertNotNull(high12, "high-cut-12");
+        assertNotNull(high24, "high-cut-24");
+        assertMatches(high6);
+        assertMatches(high12);
+        assertMatches(high24);
+        JTextField frequency = findField(panel, "eq-1-hz-value");
+        JTextField highCut = findField(panel, "high-cut-value");
+        assertNotNull(frequency, "eq-1-hz-value");
+        assertNotNull(highCut, "high-cut-value");
+        assertEquals("950 Hz", frequency.getText());
+        assertEquals("Band 1 frequency", frequency.getAccessibleContext().getAccessibleName());
+        assertEquals("High cut frequency", highCut.getAccessibleContext().getAccessibleName());
+        assertEquals("High cut 24 dB per octave", high24.getAccessibleContext().getAccessibleName());
+
         if (player.isBuiltIn()) {
             assertTrue(slope24.isSelected(), "24 dB slope is drawn selected");
             assertTrue(slope24.isEnabled());
             assertFalse(slope12.isSelected());
             assertTrue(slope24.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.ENABLED));
             assertTrue(slope24.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.CHECKED));
+            assertTrue(high24.isSelected(), "24 dB high cut is drawn selected");
+            assertTrue(high24.isEnabled());
+            assertFalse(high6.isSelected());
+            assertFalse(high12.isSelected());
+            assertTrue(high6.isEnabled());
+            assertTrue(high12.isEnabled());
+            assertTrue(high24.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.CHECKED));
+            assertFalse(high12.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.CHECKED));
+            assertTrue(frequency.isEnabled());
+            assertTrue(highCut.isEnabled());
+            assertEquals("6000 Hz", highCut.getText());
         } else {
             assertFalse(slope24.isSelected(), "a greyed slope is not drawn selected");
             assertFalse(slope24.isEnabled());
             assertFalse(slope12.isSelected());
+            assertFalse(high24.isSelected(), "a greyed high-cut slope is not drawn selected");
+            assertFalse(high24.isEnabled());
+            assertFalse(high6.isSelected());
+            assertFalse(high12.isSelected());
+            assertFalse(frequency.isEnabled());
+            assertFalse(highCut.isEnabled());
         }
         player.close();
     }
@@ -83,6 +119,21 @@ class InspectorAccessTest {
         if (root instanceof Container container) {
             for (Component child : container.getComponents()) {
                 JButton found = find(child, name);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JTextField findField(Component root, String name) {
+        if (root instanceof JTextField field && name.equals(field.getName())) {
+            return field;
+        }
+        if (root instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                JTextField found = findField(child, name);
                 if (found != null) {
                     return found;
                 }
