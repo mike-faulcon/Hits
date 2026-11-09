@@ -1,5 +1,9 @@
 # Changelog
 
+## UI polish
+
+Help → Keyboard Shortcuts, or F1, lists the keys and mouse gestures the window handles. M mutes the selected row and S solos it. Controls have tooltips, including those shortcuts. An empty pattern says to click a square and press Space. The first launch still starts on Boom bap. The drum sound picker no longer leaves a tall empty box, the tempo value is labeled BPM, and the step count says steps. A damaged beat, a newer file, and a failed WAV or SoundFont now explain the problem in plain language. Undo and redo were already there for grid edits and for adding, removing, and reordering rows. Saved beats still load, save, and render the same bytes.
+
 ## Pitch slides
 
 A step on a note row or a sample row, including Sub, can slide. The step holds the previous note and bends to its own pitch. There is no second attack. Slide time is 10–500 ms. 80 ms is the default and is left out of the file. The curve is linear or exponential in pitch. Linear is left out of the file.

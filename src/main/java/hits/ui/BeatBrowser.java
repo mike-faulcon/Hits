@@ -46,6 +46,7 @@ final class BeatBrowser {
         this.status = status;
         beatsTitle.setFont(beatsTitle.getFont().deriveFont(Font.BOLD, 13f));
         beatsTitle.setToolTipText(beatsFolder.get().toString());
+        beatList.setToolTipText("Beats in this folder. Double-click a name to open it.");
     }
 
     void onLoad(Runnable action) {
@@ -214,6 +215,7 @@ final class BeatBrowser {
         actions.add(reggaeButton);
         south.add(actions, BorderLayout.SOUTH);
         panel.add(south, BorderLayout.SOUTH);
+        Tips.share(panel);
         return panel;
     }
 }

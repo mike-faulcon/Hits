@@ -68,7 +68,7 @@ final class FileCommands {
             editor.replace(loaded, false);
             status.set("Loaded " + entry.label());
         } catch (RuntimeException | IOException exception) {
-            JOptionPane.showMessageDialog(frame, exception.getMessage(), "Hits", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(frame, Widgets.message(exception), "Hits", JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -114,7 +114,7 @@ final class FileCommands {
         }
         session.forget();
         editor.replace(Beat.drumKit("untitled"), false);
-        status.set("New kit");
+        status.set("Empty kit. " + PatternHints.EMPTY);
     }
 
     void applyKit(String name, Consumer<Beat> kit) {

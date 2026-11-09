@@ -81,10 +81,10 @@ final class MixerPanel {
             chorusOn[row].setToolTipText(chorusTip);
             mutes[row].setName("mute-" + row);
             mutes[row].getAccessibleContext().setAccessibleName("Mute row " + (row + 1));
-            mutes[row].setToolTipText("Mute this track.");
+            mutes[row].setToolTipText("Mute this row. M mutes the selected row.");
             solos[row].setName("solo-" + row);
             solos[row].getAccessibleContext().setAccessibleName("Solo row " + (row + 1));
-            solos[row].setToolTipText("Solo this track. While any solo is on, only soloed tracks play.");
+            solos[row].setToolTipText("Solo this row. S solos the selected row. While any solo is on, only soloed rows play.");
             levelDrags[row].wire(levels[row], beat -> Mix.setLevel(
                 beat, editor.viewSlot(), index, levels[index].getValue(), allPatterns.isSelected()));
             panDrags[row].wire(pans[row], beat -> Mix.setPan(
@@ -120,6 +120,7 @@ final class MixerPanel {
             mutes[row].addActionListener(event -> editor.toggleMute(index));
             solos[row].addActionListener(event -> editor.toggleSolo(index));
         }
+        Tips.share(panel);
     }
 
     void refresh() {

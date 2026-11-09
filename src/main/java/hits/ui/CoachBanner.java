@@ -42,7 +42,7 @@ final class CoachBanner {
         JPanel panel = new JPanel(new BorderLayout(12, 0));
         panel.setBackground(Theme.SELECT);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-        JLabel text = new JLabel("Starting on Boom bap.  Space plays.  Click a square to add a hit.  Shift-click makes it loud.");
+        JLabel text = new JLabel("Starting on Boom bap so you can hear a beat.  Click a square to change a hit.  Space plays.  Help lists the keys.");
         text.setForeground(Theme.TEXT);
         panel.add(text, BorderLayout.CENTER);
         JButton dismiss = Widgets.button("Got it");

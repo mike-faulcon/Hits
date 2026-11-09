@@ -38,6 +38,7 @@ import javax.swing.SwingConstants;
 import javax.sound.midi.Soundbank;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -80,7 +81,7 @@ final class TrackInspector {
     private Soundbank programBank;
     private boolean programsReady;
     private final List<JButton> noteButtons = new ArrayList<>();
-    private final JPanel soundPicker = new JPanel(new CardLayout());
+    private final JPanel soundPicker = new SoundCards();
     private final JSlider gate = Widgets.slider(5, 100, 45);
     private final JLabel gateValue = Widgets.label("45%");
     private final JSlider velocity = Widgets.slider(1, 127, 100);
@@ -260,8 +261,10 @@ final class TrackInspector {
         String stepsTip = "How many steps this pattern plays, from 1 to 32. 16 is one bar. Notes past that stay on the grid, dimmed.";
         stepsLabel.setToolTipText(stepsTip);
         patternSteps.setToolTipText(stepsTip);
+        JLabel stepsUnit = Widgets.label("steps");
+        stepsUnit.setToolTipText(stepsTip);
         Widgets.fix(patternSteps, 72, 32);
-        addRow(panel, constraints, Widgets.row(stepsLabel, patternSteps));
+        addRow(panel, constraints, Widgets.row(stepsLabel, patternSteps, stepsUnit));
         addRow(panel, constraints, noteValue);
         JPanel noteButtons = Widgets.row(
             buttonPair("−", "One semitone down", -1, 44),
@@ -358,6 +361,7 @@ final class TrackInspector {
         JPanel spacer = new JPanel();
         spacer.setOpaque(false);
         addRow(panel, constraints, spacer);
+        Tips.share(panel);
         return panel;
     }
 
@@ -624,6 +628,7 @@ final class TrackInspector {
             ? "Pitch of this row."
             : "Pitch of this row, including tune: " + heading + ".");
         ((CardLayout) soundPicker.getLayout()).show(soundPicker, soundCard(track.mode()));
+        soundPicker.revalidate();
         showSample(track);
         refillDrums(track);
         refillKits(track);
@@ -2355,6 +2360,48 @@ final class TrackInspector {
             track.setNote(track.note() + delta);
         });
         auditionRow();
+    }
+
+    /**
+     * Shows one sound editor at a time and reports that editor's height.
+     * A card layout otherwise keeps the tall sample form even while a drum is selected,
+     * which leaves a large empty box under the drum name.
+     */
+    private static final class SoundCards extends JPanel {
+        private SoundCards() {
+            super(new CardLayout());
+            setOpaque(false);
+            setName("sound-picker");
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            Component shown = visibleChild();
+            return shown == null ? super.getPreferredSize() : shown.getPreferredSize();
+        }
+
+        @Override
+        public Dimension getMinimumSize() {
+            Component shown = visibleChild();
+            if (shown == null) {
+                return super.getMinimumSize();
+            }
+            return new Dimension(shown.getMinimumSize().width, shown.getPreferredSize().height);
+        }
+
+        @Override
+        public Dimension getMaximumSize() {
+            return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+        }
+
+        private Component visibleChild() {
+            for (Component child : getComponents()) {
+                if (child.isVisible()) {
+                    return child;
+                }
+            }
+            return null;
+        }
     }
 
     /**

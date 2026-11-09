@@ -50,7 +50,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         setFocusable(true);
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        setToolTipText("Click a step. Shift-click makes a loud hit. Ctrl-click or G toggles slide on a note or sample row. Drag up or down to set velocity. Drag a lit pad sideways to set its length. Right-click or Alt-click selects it.");
+        setToolTipText(KeyboardShortcuts.gridTip());
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
@@ -193,7 +193,28 @@ final class PatternPanel extends JPanel implements Scrollable {
             g.drawLine(x, metrics.header - 4, x, getHeight() - 6);
             g.setComposite(previous);
         }
+        if (PatternHints.quiet(editor.beat(), editor.viewSlot())) {
+            paintEmpty(g, metrics, length);
+        }
         g.dispose();
+    }
+
+    private void paintEmpty(Graphics2D g, Metrics metrics, int length) {
+        String hint = PatternHints.EMPTY;
+        g.setFont(getFont().deriveFont(Font.BOLD, 14f));
+        FontMetrics text = g.getFontMetrics();
+        int width = text.stringWidth(hint);
+        int left = metrics.stepX(0);
+        int right = metrics.stepX(Math.max(0, length - 1)) + metrics.cellWidth;
+        int x = left + Math.max(0, (right - left - width) / 2);
+        int y = metrics.header + metrics.rows * metrics.cellHeight / 2;
+        int boxX = Math.max(left, x - 14);
+        int boxY = y - text.getAscent() - 8;
+        int boxW = Math.min(width + 28, Math.max(0, right - boxX));
+        g.setColor(new Color(Theme.PANEL.getRed(), Theme.PANEL.getGreen(), Theme.PANEL.getBlue(), 230));
+        g.fillRoundRect(boxX, boxY, boxW, text.getHeight() + 16, 10, 10);
+        g.setColor(Theme.TEXT);
+        g.drawString(hint, x, y);
     }
 
     private void paintRow(Graphics2D g, Metrics metrics, FontMetrics names, int row, int length) {
@@ -481,10 +502,10 @@ final class PatternPanel extends JPanel implements Scrollable {
         Metrics metrics = metrics();
         int row = metrics.rowAt(event.getY());
         if (row >= 0 && metrics.mute(row).contains(event.getPoint())) {
-            return "Mute this track";
+            return "Mute this row. M mutes the selected row.";
         }
         if (row >= 0 && metrics.solo(row).contains(event.getPoint())) {
-            return "Solo this track. While any solo is on, only soloed tracks play.";
+            return "Solo this row. S solos the selected row. While any solo is on, only soloed rows play.";
         }
         if (metrics.laneColumn(event.getX(), event.getY()) >= 0) {
             return "Drag to set the velocity of this step on " + editor.selectedTrack().name() + ".";
@@ -506,8 +527,7 @@ final class PatternPanel extends JPanel implements Scrollable {
             String past = column >= editor.beat().stepCount(editor.viewSlot())
                 ? " Past this pattern's length, so it does not play."
                 : "";
-            return "Click toggles the step. Shift-click makes a loud hit. Ctrl-click or G toggles slide on a note or sample row. Drag up or down to set velocity. Drag a lit pad sideways to set how many steps it holds. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
-                + pitch + chance + held + nudged + glide + past;
+            return KeyboardShortcuts.gridTip() + pitch + chance + held + nudged + glide + past;
         }
         if (row >= 0) {
             return "Select this track";

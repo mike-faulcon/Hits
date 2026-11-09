@@ -51,6 +51,7 @@ final class OutputBar {
         soundFont.setToolTipText("Load a .sf2 SoundFont on the built-in synth. External outputs use their own sounds.");
         soundFont.addActionListener(event -> chooseSoundFont());
         output.add(soundFont);
+        Tips.share(output);
         return output;
     }
 
@@ -107,7 +108,7 @@ final class OutputBar {
         if (!player.useOutput(choice.id())) {
             JOptionPane.showMessageDialog(
                 frame,
-                player.failure() == null ? "That MIDI output is not available." : player.failure(),
+                player.failure() == null ? "That MIDI output is not available. You can still edit and save." : PlainErrors.explain(player.failure()),
                 "Hits",
                 JOptionPane.WARNING_MESSAGE
             );

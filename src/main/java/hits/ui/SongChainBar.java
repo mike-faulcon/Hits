@@ -91,6 +91,7 @@ final class SongChainBar {
         bar.add(Widgets.row(addSlot, addChain, removeChain, chainUp, chainDown, repeatsLabel, chainRepeats), BorderLayout.EAST);
         bar.setMinimumSize(new Dimension(720, 52));
         bar.setPreferredSize(new Dimension(960, 52));
+        Tips.share(bar);
         return bar;
     }
 
@@ -132,8 +133,9 @@ final class SongChainBar {
                 }
             }
             if (chain.isEmpty()) {
-                JLabel empty = Widgets.label("empty");
+                JLabel empty = Widgets.label("Add a pattern");
                 empty.setForeground(Theme.MUTED);
+                empty.setToolTipText("The song list is empty. Choose a letter and press + to add it. Song plays that list.");
                 chainSlots.add(empty);
             }
             chainSlots.revalidate();
