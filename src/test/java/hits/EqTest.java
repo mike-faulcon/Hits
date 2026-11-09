@@ -447,6 +447,174 @@ class EqTest {
         assertEquals(0, flatRun(kickPcm, 3), "kick PCM flat-topped");
     }
 
+    @Test
+    void threeBandsShelvesAndBypass() throws Exception {
+        double smooth = 1.0 / Math.sqrt(2.0);
+        assertEquals(12, ToneFilter.lowShelfDb(RATE, 1000, 12, smooth, 40), 0.5, "low shelf below the corner");
+        assertEquals(6, ToneFilter.lowShelfDb(RATE, 1000, 12, smooth, 1000), 0.5, "low shelf at the corner");
+        assertEquals(0, ToneFilter.lowShelfDb(RATE, 1000, 12, smooth, 8000), 0.5, "low shelf above the corner");
+        assertEquals(-12, ToneFilter.lowShelfDb(RATE, 400, -12, smooth, 40), 0.5, "low shelf cut");
+        assertEquals(-6, ToneFilter.lowShelfDb(RATE, 400, -12, smooth, 400), 0.5, "low shelf cut at the corner");
+        assertEquals(0, ToneFilter.highShelfDb(RATE, 1000, 12, smooth, 80), 0.5, "high shelf below the corner");
+        assertEquals(6, ToneFilter.highShelfDb(RATE, 1000, 12, smooth, 1000), 0.5, "high shelf at the corner");
+        assertEquals(12, ToneFilter.highShelfDb(RATE, 1000, 12, smooth, 8000), 0.5, "high shelf above the corner");
+        assertEquals(-6, ToneFilter.highShelfDb(RATE, 2000, -12, smooth, 2000), 0.5, "high shelf cut at the corner");
+        assertEquals(-12, ToneFilter.highShelfDb(RATE, 2000, -12, smooth, 12000), 0.5, "high shelf cut above the corner");
+
+        short[] tone = new short[RATE];
+        for (int i = 0; i < tone.length; i++) {
+            double t = i / (double) RATE;
+            double sample = Math.sin(2 * Math.PI * 100 * t) * 8000
+                + Math.sin(2 * Math.PI * 800 * t) * 8000
+                + Math.sin(2 * Math.PI * 6000 * t) * 8000;
+            tone[i] = (short) Math.round(sample);
+        }
+        Track plain = new Track("Hit", TrackMode.SAMPLE, 0, 60);
+        Track shaped = new Track("Hit", TrackMode.SAMPLE, 0, 60);
+        shaped.setEqBand(0, 250, 8, smooth, EqBand.Type.LOW_SHELF, true);
+        shaped.setEqBand(1, 800, -12, 4);
+        shaped.setEqBand(2, 2500, -10, smooth, EqBand.Type.HIGH_SHELF, true);
+        double[] dry = ToneFilter.process(tone, RATE, plain);
+        double[] eq = ToneFilter.process(tone, RATE, shaped);
+        double low = binDb(spectrum(eq, 0), 100) - binDb(spectrum(dry, 0), 100);
+        double mid = binDb(spectrum(eq, 0), 800) - binDb(spectrum(dry, 0), 800);
+        double high = binDb(spectrum(eq, 0), 6000) - binDb(spectrum(dry, 0), 6000);
+        System.out.println(String.format(Locale.ROOT, "three bands 100 %+.1f, 800 %+.1f, 6000 %+.1f", low, mid, high));
+        assertTrue(low > 4, "100 Hz " + low);
+        assertTrue(mid < -6, "800 Hz " + mid);
+        assertTrue(high < -4, "6000 Hz " + high);
+
+        shaped.setEqBypass(true);
+        assertSameAudio(dry, ToneFilter.process(tone, RATE, shaped), "whole EQ bypass");
+        shaped.setEqBypass(false);
+        shaped.setEqBand(0, 250, 8, smooth, EqBand.Type.LOW_SHELF, false);
+        shaped.setEqBand(1, 800, -12, 4, EqBand.Type.PEAK, false);
+        shaped.setEqBand(2, 2500, -10, smooth, EqBand.Type.HIGH_SHELF, false);
+        assertSameAudio(dry, ToneFilter.process(tone, RATE, shaped), "each band bypassed");
+
+        Track cut = new Track("Hit", TrackMode.SAMPLE, 0, 60);
+        cut.setLowCut(200, 24);
+        Track cutAndEq = cut.copy();
+        cutAndEq.setEqBand(0, 100, -12, 2);
+        cutAndEq.setEqBypass(true);
+        assertSameAudio(
+            ToneFilter.process(tone, RATE, cut),
+            ToneFilter.process(tone, RATE, cutAndEq),
+            "bypass keeps the low cut and drops the band"
+        );
+    }
+
+    @Test
+    void newEqFieldsRoundTripAndOldFilesStayPut() throws Exception {
+        String golden = Files.readString(Path.of("src/test/resources/slots/ab-plain.json"));
+        Beat plain = BeatJson.read(golden);
+        plain.track(0).setEqBypass(true);
+        plain.track(0).setEqBypass(false);
+        assertEquals(golden, BeatJson.write(plain));
+
+        Beat beat = Beat.drumKit("bands");
+        beat.setTrackCount(16);
+        Track kick = beat.track(0);
+        kick.setName("Kick");
+        kick.setEqBand(0, 90, -12, 1.4);
+        kick.setEqBand(1, 2400, 3.5, 0.7);
+        String two = BeatJson.write(beat);
+        assertTrue(two.contains(
+            "\"eq\": {\"bands\": [{\"hz\": 90, \"gain\": -12, \"q\": 1.4}, {\"hz\": 2400, \"gain\": 3.5, \"q\": 0.7}]}"
+        ), two);
+        assertFalse(two.contains("\"type\""), two);
+        assertFalse(two.contains("\"enabled\""), two);
+        assertFalse(two.contains("\"bypass\""), two);
+
+        Track air = beat.track(15);
+        air.setName("Air");
+        air.setEqBand(0, 180, -4, 0.7, EqBand.Type.LOW_SHELF, true);
+        air.setEqBand(1, 900, 3, 1.2, EqBand.Type.PEAK, false);
+        air.setEqBand(2, 8000, 4.5, 0.7, EqBand.Type.HIGH_SHELF, true);
+        air.setEqBypass(true);
+        air.tap(0, false);
+        String json = BeatJson.write(beat);
+        assertTrue(json.contains(
+            "{\"hz\": 180, \"gain\": -4, \"q\": 0.7, \"type\": \"lowShelf\"}"
+        ), json);
+        assertTrue(json.contains(
+            "{\"hz\": 900, \"gain\": 3, \"q\": 1.2, \"enabled\": false}"
+        ), json);
+        assertTrue(json.contains(
+            "{\"hz\": 8000, \"gain\": 4.5, \"q\": 0.7, \"type\": \"highShelf\"}"
+        ), json);
+        assertTrue(json.contains("\"bypass\": true"), json);
+        assertEquals(json, BeatJson.write(BeatJson.read(json)));
+        Track loaded = BeatJson.read(json).track(15);
+        assertEquals(EqBand.Type.LOW_SHELF, loaded.eqBand(0).type());
+        assertFalse(loaded.eqBand(1).enabled());
+        assertEquals(EqBand.Type.HIGH_SHELF, loaded.eqBand(2).type());
+        assertTrue(loaded.eqBypassed());
+        assertTrue(loaded.copy().sameAs(loaded));
+        assertTrue(loaded.shapeText().contains("eq bypassed"), loaded.shapeText());
+        assertTrue(loaded.shapeText().contains("eq low shelf 180 Hz -4 dB Q 0.7"), loaded.shapeText());
+        assertTrue(loaded.shapeText().contains("eq 900 Hz +3 dB Q 1.2 bypassed"), loaded.shapeText());
+        assertTrue(loaded.shapeText().contains("eq high shelf 8000 Hz +4.5 dB Q 0.7"), loaded.shapeText());
+
+        loaded.setEqBypass(false);
+        String heard = loaded.shapeText();
+        assertFalse(heard.contains("eq bypassed,"), heard);
+        String warning = BeatJson.read(json.replace("\"bypass\": true", "\"bypass\": false")).midiFilterWarning();
+        assertNotNull(warning);
+        assertTrue(warning.contains("Row 16 \"Air\""), warning);
+        assertTrue(warning.contains("low shelf"), warning);
+        assertTrue(warning.contains("high shelf"), warning);
+        assertTrue(warning.contains("band 3"), warning);
+
+        String dropped = json.replace(
+            "{\"hz\": 8000, \"gain\": 4.5, \"q\": 0.7, \"type\": \"highShelf\"}",
+            "{\"hz\": 8000, \"gain\": 4.5, \"q\": 0.7, \"type\": \"highShelf\"}, {\"hz\": 10000, \"gain\": 2, \"q\": 1}"
+        );
+        Beat four = BeatJson.read(dropped);
+        assertNull(four.track(15).eqBand(3));
+        assertEquals(
+            "A Air: EQ band 4 was dropped. A row keeps three bands.",
+            four.rowWarning('a', "Air", "EQ band 4")
+        );
+        Beat unknown = BeatJson.read(json.replace("\"type\": \"lowShelf\"", "\"type\": \"notch\""));
+        assertEquals(EqBand.Type.PEAK, unknown.track(15).eqBand(0).type());
+        assertEquals(
+            "A Air: EQ band 1 type notch was changed to peak.",
+            unknown.rowWarning('a', "Air", "EQ band 1 type")
+        );
+
+        Path file = temp.resolve("bands.json");
+        Files.writeString(file, json.replace("\"bypass\": true", "\"bypass\": false"));
+        Cli info = cli("info", file.toString());
+        assertEquals(0, info.code, info.err);
+        assertTrue(info.out.contains("low shelf"), info.out);
+        assertTrue(info.out.contains("high shelf"), info.out);
+        assertTrue(info.out.contains("8000 Hz"), info.out);
+        assertTrue(info.err.contains("low shelf"), info.err);
+        assertTrue(info.err.contains("high shelf"), info.err);
+        assertTrue(info.err.contains("band 3"), info.err);
+        assertTrue(info.err.contains("not in the MIDI file"), info.err);
+        Path mid = temp.resolve("bands.mid");
+        Cli midi = cli("render", file.toString(), "--out", mid.toString());
+        assertEquals(0, midi.code, midi.err);
+        assertTrue(midi.err.contains("low shelf"), midi.err);
+        assertTrue(midi.err.contains("band 3"), midi.err);
+        Path sf2 = temp.resolve("bands-sf2.mid");
+        Cli companion = cli("render", file.toString(), "--out", sf2.toString(), "--samples-sf2");
+        assertEquals(0, companion.code, companion.err);
+        assertTrue(companion.err.contains("high shelf"), companion.err);
+        assertTrue(companion.err.contains("not in the MIDI file"), companion.err);
+    }
+
+    private static void assertSameAudio(double[] expected, double[] actual, String label) {
+        assertEquals(expected.length, actual.length, label);
+        double worst = 0;
+        for (int i = 0; i < expected.length; i++) {
+            worst = Math.max(worst, Math.abs(expected[i] - actual[i]));
+        }
+        assertEquals(0, worst, 1e-9, label + " differed by " + worst);
+    }
+
     private static double halfGain(int rate, double center, double gain, double q, boolean above) {
         double target = gain / 2.0;
         double lo = above ? center : center / 32.0;

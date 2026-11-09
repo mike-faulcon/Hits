@@ -9,7 +9,8 @@ import java.util.List;
  * <ol>
  * <li>invert, for a sample row only, before this class sees the PCM</li>
  * <li>low cut, a Butterworth high-pass, 12 or 24 dB/oct, −3 dB at the corner</li>
- * <li>EQ bands, peaking biquads, in band order</li>
+ * <li>EQ bands, in band order. Each band is a peaking, low-shelf, or high-shelf biquad.
+ * A bypassed band is skipped, and an EQ bypass skips every band</li>
  * <li>high cut, a Butterworth low-pass at 6, 12, or 24 dB/oct, −3 dB at the corner.
  * 12 is the default</li>
  * <li>presence, a high shelf above about 3 kHz</li>
@@ -72,11 +73,11 @@ public final class ToneFilter {
         return process(samples, rate, hz, slope, List.of(), 0, presenceDb);
     }
 
-    /** Low cut, EQ bands, high cut, then presence. See the class note for the full order. */
+    /** Low cut, the bands playback hears, high cut, then presence. See the class note for the full order. */
     public static double[] process(short[] samples, int rate, Track track) {
         int hz = track == null ? 0 : track.lowCutHz();
         int slope = track == null ? Track.LOW_CUT_SLOPE : track.lowCutSlope();
-        List<EqBand> bands = track == null ? List.of() : track.eqBands();
+        List<EqBand> bands = track == null ? List.of() : track.audibleBands();
         int highCut = track == null ? 0 : track.highCutHz();
         int highSlope = track == null ? Track.HIGH_CUT_SLOPE : track.highCutSlope();
         double presence = track == null ? 0 : track.presence();
@@ -161,6 +162,22 @@ public final class ToneFilter {
         return Section.peaking(rate, clampHz(rate, centerHz), gainDb, Math.max(0.05, q)).magnitudeDb(freqHz);
     }
 
+    /**
+     * Low-shelf magnitude at {@code freqHz}, in dB.
+     * {@code q} is the cookbook shelf Q. {@code 1/√2} is the smooth shelf: the corner is half the gain.
+     */
+    public static double lowShelfDb(int rate, double shelfHz, double gainDb, double q, double freqHz) {
+        return Section.lowShelf(rate, clampHz(rate, shelfHz), gainDb, Math.max(0.05, q)).magnitudeDb(freqHz);
+    }
+
+    /**
+     * High-shelf magnitude at {@code freqHz}, in dB.
+     * {@code q} is the cookbook shelf Q. {@code 1/√2} is the smooth shelf: the corner is half the gain.
+     */
+    public static double highShelfDb(int rate, double shelfHz, double gainDb, double q, double freqHz) {
+        return Section.highShelf(rate, clampHz(rate, shelfHz), gainDb, Math.max(0.05, q)).magnitudeDb(freqHz);
+    }
+
     /** 12 dB/oct low-pass magnitude at {@code freqHz}, in dB. The corner is about −3 dB. */
     public static double lowPassDb(int rate, double cornerHz, double freqHz) {
         return lowPassDb(rate, cornerHz, Track.HIGH_CUT_SLOPE, freqHz);
@@ -201,7 +218,7 @@ public final class ToneFilter {
             rate,
             track.lowCutHz(),
             track.lowCutSlope(),
-            track.eqBands(),
+            track.audibleBands(),
             track.highCutHz(),
             track.highCutSlope(),
             track.presence()
@@ -243,13 +260,8 @@ public final class ToneFilter {
         }
         if (bands != null) {
             for (EqBand band : bands) {
-                if (band != null && band.active()) {
-                    chain.add(Section.peaking(
-                        rate,
-                        clampHz(rate, band.hz()),
-                        band.gain(),
-                        Math.max(0.05, band.q())
-                    ));
+                if (band != null && band.audible()) {
+                    chain.add(bandSection(rate, band));
                 }
             }
         }
@@ -292,6 +304,16 @@ public final class ToneFilter {
 
     private static Section highShelf(int rate, int shelfHz, double gainDb) {
         return Section.highShelf(rate, clampHz(rate, shelfHz), gainDb);
+    }
+
+    private static Section bandSection(int rate, EqBand band) {
+        double hz = clampHz(rate, band.hz());
+        double q = Math.max(0.05, band.q());
+        return switch (band.type()) {
+            case LOW_SHELF -> Section.lowShelf(rate, hz, band.gain(), q);
+            case HIGH_SHELF -> Section.highShelf(rate, hz, band.gain(), q);
+            case PEAK -> Section.peaking(rate, hz, band.gain(), q);
+        };
     }
 
     private static double clampHz(int rate, double hz) {
@@ -377,13 +399,30 @@ public final class ToneFilter {
             return new Section(rate, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
         }
 
+        /** Presence shelf. Slope S = 1, which is Q = 1/√2. The (A + 1/A) term drops out, leaving √2. */
         static Section highShelf(int rate, double hz, double gainDb) {
             double a = Math.pow(10, gainDb / 40.0);
             double w = 2 * Math.PI * hz / rate;
             double cos = Math.cos(w);
             double sin = Math.sin(w);
-            // Shelf slope S = 1. The (A + 1/A) term drops out, leaving √2.
             double alpha = sin / 2 * Math.sqrt(2);
+            return highShelfCoefficients(rate, a, cos, alpha);
+        }
+
+        /**
+         * Audio EQ Cookbook high shelf. {@code q} is the shelf Q, and {@code alpha = sin(ω) / (2Q)}.
+         * Q = 1/√2 is slope S = 1: monotonic, and the corner sits halfway to the shelf in dB.
+         */
+        static Section highShelf(int rate, double hz, double gainDb, double q) {
+            double a = Math.pow(10, gainDb / 40.0);
+            double w = 2 * Math.PI * hz / rate;
+            double cos = Math.cos(w);
+            double sin = Math.sin(w);
+            double alpha = sin / (2 * q);
+            return highShelfCoefficients(rate, a, cos, alpha);
+        }
+
+        private static Section highShelfCoefficients(int rate, double a, double cos, double alpha) {
             double sqrtA = Math.sqrt(a);
             double twoSqrtAAlpha = 2 * sqrtA * alpha;
             double b0 = a * ((a + 1) + (a - 1) * cos + twoSqrtAAlpha);
@@ -392,6 +431,27 @@ public final class ToneFilter {
             double a0 = (a + 1) - (a - 1) * cos + twoSqrtAAlpha;
             double a1 = 2 * ((a - 1) - (a + 1) * cos);
             double a2 = (a + 1) - (a - 1) * cos - twoSqrtAAlpha;
+            return new Section(rate, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
+        }
+
+        /**
+         * Audio EQ Cookbook low shelf. {@code q} is the shelf Q, and {@code alpha = sin(ω) / (2Q)}.
+         * Q = 1/√2 is slope S = 1: monotonic, and the corner sits halfway to the shelf in dB.
+         */
+        static Section lowShelf(int rate, double hz, double gainDb, double q) {
+            double a = Math.pow(10, gainDb / 40.0);
+            double w = 2 * Math.PI * hz / rate;
+            double cos = Math.cos(w);
+            double sin = Math.sin(w);
+            double alpha = sin / (2 * q);
+            double sqrtA = Math.sqrt(a);
+            double twoSqrtAAlpha = 2 * sqrtA * alpha;
+            double b0 = a * ((a + 1) - (a - 1) * cos + twoSqrtAAlpha);
+            double b1 = 2 * a * ((a - 1) - (a + 1) * cos);
+            double b2 = a * ((a + 1) - (a - 1) * cos - twoSqrtAAlpha);
+            double a0 = (a + 1) + (a - 1) * cos + twoSqrtAAlpha;
+            double a1 = -2 * ((a - 1) + (a + 1) * cos);
+            double a2 = (a + 1) + (a - 1) * cos - twoSqrtAAlpha;
             return new Section(rate, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
         }
 

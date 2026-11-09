@@ -277,9 +277,7 @@ public final class Beat {
         if (track.hasLowCut()) {
             filters.add("low cut");
         }
-        if (!track.eqBands().isEmpty()) {
-            filters.add("EQ");
-        }
+        track.collectEqWarnings(filters);
         if (track.hasHighCut()) {
             filters.add("high cut");
         }
@@ -607,7 +605,20 @@ public final class Beat {
             || hasSoundChoice()
             || hasShape()
             || hasSamples()
-            || hasTone();
+            || hasTone()
+            || hasStoredEq();
+    }
+
+    /** A stored band, high cut, or EQ bypass on any row. Playback may still be plain when EQ is bypassed. */
+    public boolean hasStoredEq() {
+        for (Track[] slot : slots) {
+            for (Track track : slot) {
+                if (track.hasEq()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Low cut, presence, or EQ on any row, in any pattern. */

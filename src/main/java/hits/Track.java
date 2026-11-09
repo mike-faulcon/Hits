@@ -45,27 +45,29 @@ public final class Track {
     public static final int PRESENCE_MAX = 12;
     /** High-shelf midpoint, in Hz. The boost is above this. */
     public static final int PRESENCE_HZ = 3000;
-    /** Peaking bands on a row. */
-    public static final int EQ_BANDS = 2;
-    /** Lowest peaking frequency, in Hz. */
+    /** EQ bands on a row. A fourth band in a file is dropped. */
+    public static final int EQ_BANDS = 3;
+    /** Lowest band frequency, in Hz. */
     public static final int EQ_HZ_MIN = 30;
-    /** Highest peaking frequency, in Hz. */
+    /** Highest band frequency, in Hz. */
     public static final int EQ_HZ_MAX = 12_000;
-    /** Peaking cut, in dB. */
+    /** Band cut, in dB. */
     public static final double EQ_GAIN_MIN = -18;
-    /** Peaking boost, in dB. */
+    /** Band boost, in dB. */
     public static final double EQ_GAIN_MAX = 12;
-    /** Narrowest peaking bandwidth. */
+    /** Narrowest bandwidth. Shelf Q uses the same range. */
     public static final double EQ_Q_MIN = 0.3;
-    /** Widest peaking bandwidth. Stored Q is never below this. */
+    /** Widest bandwidth. Stored Q is never below this. */
     public static final double EQ_Q_MAX = 8;
-    /** Q shown until a band is stored. 1 is a medium peak. */
+    /** Q shown until a band is stored. 1 is a medium peak. A shelf at 1 is a little steeper than the smooth cookbook shelf. */
     public static final double EQ_Q = 1;
     /** Frequency shown on band 1 until that band is stored. */
     public static final int EQ_HZ = 90;
     /** Frequency shown on band 2 until that band is stored. */
     public static final int EQ_HZ_2 = 2500;
-    /** Last slider index for a peaking frequency. Positions are round Hertz stops on a log scale. */
+    /** Frequency shown on band 3 until that band is stored. */
+    public static final int EQ_HZ_3 = 8_000;
+    /** Last slider index for a band frequency. Positions are round Hertz stops on a log scale. */
     public static final int EQ_SLIDER = eqStops().length - 1;
     /** Lowest high-cut corner, in Hz. 0 is off and is left out of the file. */
     public static final int HIGH_CUT_MIN = 1000;
@@ -117,8 +119,10 @@ public final class Track {
     private int lowCutSlope = LOW_CUT_SLOPE;
     /** High-shelf gain in tenths of a dB. 0 is off and is left out of the file. */
     private int presenceTenths;
-    /** Peaking bands. A null slot is flat and is left out of the file. */
+    /** EQ bands. A null slot is flat and is left out of the file. */
     private final EqBand[] eqBands = new EqBand[EQ_BANDS];
+    /** Skips every band. The bands stay stored so the row can be compared. */
+    private boolean eqBypass;
     /** Low-pass corner in Hz. 0 is off and is left out of the file. */
     private int highCutHz;
     /** 6, 12, or 24 dB per octave. 12 is left out of the file. Used while {@link #highCutHz} is on. */
@@ -209,6 +213,7 @@ public final class Track {
         copy.presenceTenths = presenceTenths;
         copy.highCutHz = highCutHz;
         copy.highCutSlope = highCutSlope;
+        copy.eqBypass = eqBypass;
         System.arraycopy(eqBands, 0, copy.eqBands, 0, EQ_BANDS);
         copy.sample = sample;
         for (int i = 0; i < steps.length; i++) {
@@ -692,7 +697,7 @@ public final class Track {
         return Db.fromTenths(Math.max(0, Math.min(presenceSlider(PRESENCE_MAX), slider)));
     }
 
-    /** Peaking band {@code index}, or null when that band is flat. */
+    /** Band {@code index}, or null when that band is flat. */
     public EqBand eqBand(int index) {
         if (index < 0 || index >= EQ_BANDS) {
             return null;
@@ -700,7 +705,7 @@ public final class Track {
         return eqBands[index];
     }
 
-    /** Active peaking bands, in band order. Empty when every band is flat. */
+    /** Stored bands, in band order, including a bypassed band. Empty when every band is flat. */
     public List<EqBand> eqBands() {
         List<EqBand> active = new ArrayList<>();
         for (EqBand band : eqBands) {
@@ -712,11 +717,49 @@ public final class Track {
     }
 
     /**
-     * Stores one peaking band. A gain that quantizes to 0 clears the band.
+     * Bands that playback hears. Empty when EQ is bypassed, or when every band
+     * is flat or bypassed on its own.
+     */
+    public List<EqBand> audibleBands() {
+        if (eqBypass) {
+            return List.of();
+        }
+        List<EqBand> heard = new ArrayList<>();
+        for (EqBand band : eqBands) {
+            if (band != null && band.audible()) {
+                heard.add(band);
+            }
+        }
+        return heard;
+    }
+
+    /** Frequency shown on band {@code index} until that band is stored. */
+    public static int eqDefaultHz(int index) {
+        return switch (index) {
+            case 1 -> EQ_HZ_2;
+            case 2 -> EQ_HZ_3;
+            default -> EQ_HZ;
+        };
+    }
+
+    /**
+     * Stores one band, keeping the type and bypass already on that slot.
+     * A gain that quantizes to 0 clears the band.
      * Frequency, gain, and Q are kept inside the slider ranges, on 0.1 steps for gain and Q.
      * Returns the stored band, or null when the band was cleared.
      */
     public EqBand setEqBand(int index, double hz, double gain, double q) {
+        EqBand current = eqBand(index);
+        EqBand.Type type = current == null ? EqBand.Type.PEAK : current.type();
+        boolean enabled = current == null || current.enabled();
+        return setEqBand(index, hz, gain, q, type, enabled);
+    }
+
+    /**
+     * Stores one band. {@code type} null is peaking. A gain that quantizes to 0 clears the band.
+     * {@code enabled} false keeps the band in the file and leaves it out of the filter.
+     */
+    public EqBand setEqBand(int index, double hz, double gain, double q, EqBand.Type type, boolean enabled) {
         if (index < 0 || index >= EQ_BANDS) {
             return null;
         }
@@ -727,7 +770,8 @@ public final class Track {
         }
         int storedHz = clampEqHz(hz);
         double storedQ = Db.clamp(q, EQ_Q_MIN, EQ_Q_MAX);
-        eqBands[index] = new EqBand(storedHz, Db.tenths(storedGain), Db.tenths(storedQ));
+        EqBand.Type storedType = type == null ? EqBand.Type.PEAK : type;
+        eqBands[index] = new EqBand(storedHz, Db.tenths(storedGain), Db.tenths(storedQ), storedType, enabled);
         return eqBands[index];
     }
 
@@ -737,11 +781,63 @@ public final class Track {
         }
     }
 
+    /** True when the bands are kept and not heard. High cut, low cut, and presence stay. */
+    public boolean eqBypassed() {
+        return eqBypass;
+    }
+
+    public void setEqBypass(boolean bypass) {
+        eqBypass = bypass;
+    }
+
     public void clearEq() {
         for (int i = 0; i < EQ_BANDS; i++) {
             eqBands[i] = null;
         }
         clearHighCut();
+        eqBypass = false;
+    }
+
+    /**
+     * Words added to the MIDI warning when a heard band is a shelf or the third band.
+     * A peaking band in the first two slots stays the plain {@code EQ} word.
+     */
+    public void collectEqWarnings(List<String> filters) {
+        if (filters == null || eqBypass) {
+            return;
+        }
+        boolean any = false;
+        boolean low = false;
+        boolean high = false;
+        boolean third = false;
+        for (int i = 0; i < EQ_BANDS; i++) {
+            EqBand band = eqBands[i];
+            if (band == null || !band.audible()) {
+                continue;
+            }
+            any = true;
+            if (band.type() == EqBand.Type.LOW_SHELF) {
+                low = true;
+            } else if (band.type() == EqBand.Type.HIGH_SHELF) {
+                high = true;
+            }
+            if (i == 2) {
+                third = true;
+            }
+        }
+        if (!any) {
+            return;
+        }
+        filters.add("EQ");
+        if (low) {
+            filters.add("low shelf");
+        }
+        if (high) {
+            filters.add("high shelf");
+        }
+        if (third) {
+            filters.add("band 3");
+        }
     }
 
     /** High-cut corner in Hz, or 0 when the low-pass is off. */
@@ -798,9 +894,17 @@ public final class Track {
         highCutSlope = HIGH_CUT_SLOPE;
     }
 
-    /** True when a peaking band or the high cut is on. */
+    /**
+     * True when a band, the high cut, or an EQ bypass is stored.
+     * A bypassed band is included, so the file keeps it.
+     */
     public boolean hasEq() {
-        return highCutHz > 0 || !eqBands().isEmpty();
+        return highCutHz > 0 || eqBypass || !eqBands().isEmpty();
+    }
+
+    /** True when playback hears a band or the high cut. A bypassed EQ does not. */
+    public boolean hasAudibleEq() {
+        return highCutHz > 0 || !audibleBands().isEmpty();
     }
 
     /** Slider position for a peaking frequency. Stops are round Hertz on a log scale, 30 Hz to 12 kHz. */
@@ -845,9 +949,12 @@ public final class Track {
         return Db.fromTenths(tenths);
     }
 
-    /** Low cut, presence, or EQ. Playback bakes this into PCM. It is not a MIDI controller. */
+    /**
+     * Low cut, presence, or an EQ that playback hears.
+     * A bypassed band is stored and is not baked, so the row stays on the plain voice.
+     */
     public boolean hasTone() {
-        return hasLowCut() || hasPresence() || hasEq();
+        return hasLowCut() || hasPresence() || hasAudibleEq();
     }
 
     /**
@@ -893,8 +1000,21 @@ public final class Track {
         if (presenceTenths > 0) {
             join(text, "presence " + Db.labeled(presence()));
         }
+        if (eqBypass) {
+            join(text, "eq bypassed");
+        }
         for (EqBand band : eqBands()) {
-            join(text, "eq " + band.hz() + " Hz " + Db.labeled(band.gain()) + " Q " + Db.number(band.q()));
+            StringBuilder line = new StringBuilder("eq ");
+            if (band.type() != EqBand.Type.PEAK) {
+                line.append(band.type().label()).append(' ');
+            }
+            line.append(band.hz()).append(" Hz ")
+                .append(Db.labeled(band.gain()))
+                .append(" Q ").append(Db.number(band.q()));
+            if (!band.enabled()) {
+                line.append(" bypassed");
+            }
+            join(text, line.toString());
         }
         if (highCutHz > 0) {
             join(text, "high cut " + highCutHz + " Hz " + highCutSlope + " dB/oct");
@@ -1002,7 +1122,8 @@ public final class Track {
     private boolean sameTone(Track other) {
         if (presenceTenths != other.presenceTenths
             || highCutHz != other.highCutHz
-            || highCutSlope != other.highCutSlope) {
+            || highCutSlope != other.highCutSlope
+            || eqBypass != other.eqBypass) {
             return false;
         }
         for (int i = 0; i < EQ_BANDS; i++) {

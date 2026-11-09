@@ -6,6 +6,7 @@ import hits.Player;
 
 import javax.accessibility.AccessibleState;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JTextField;
@@ -74,6 +75,34 @@ class InspectorAccessTest {
         assertEquals("High cut frequency", highCut.getAccessibleContext().getAccessibleName());
         assertEquals("High cut 24 dB per octave", high24.getAccessibleContext().getAccessibleName());
 
+        JTextField band3 = findField(panel, "eq-3-hz-value");
+        JButton peak = find(panel, "eq-1-peak");
+        JButton low = find(panel, "eq-1-low");
+        JButton highShelf = find(panel, "eq-2-high");
+        JButton bypass = find(panel, "eq-bypass");
+        JButton reset = find(panel, "eq-reset");
+        JCheckBox bandOn = findBox(panel, "eq-3-on");
+        assertNotNull(band3, "eq-3-hz-value");
+        assertNotNull(peak, "eq-1-peak");
+        assertNotNull(low, "eq-1-low");
+        assertNotNull(highShelf, "eq-2-high");
+        assertNotNull(bypass, "eq-bypass");
+        assertNotNull(reset, "eq-reset");
+        assertNotNull(bandOn, "eq-3-on");
+        assertEquals("8000 Hz", band3.getText());
+        assertEquals("Band 3 frequency", band3.getAccessibleContext().getAccessibleName());
+        assertEquals("Band 1 peaking", peak.getAccessibleContext().getAccessibleName());
+        assertEquals("Band 1 low shelf", low.getAccessibleContext().getAccessibleName());
+        assertEquals("Band 2 high shelf", highShelf.getAccessibleContext().getAccessibleName());
+        assertEquals("Bypass EQ", bypass.getAccessibleContext().getAccessibleName());
+        assertEquals("Reset EQ", reset.getAccessibleContext().getAccessibleName());
+        assertEquals("Band 3 on", bandOn.getAccessibleContext().getAccessibleName());
+        assertTrue(bandOn.isSelected(), "a band is on until it is bypassed");
+        assertMatches(peak);
+        assertMatches(low);
+        assertMatches(highShelf);
+        assertMatches(bypass);
+
         if (player.isBuiltIn()) {
             assertTrue(slope24.isSelected(), "24 dB slope is drawn selected");
             assertTrue(slope24.isEnabled());
@@ -91,6 +120,20 @@ class InspectorAccessTest {
             assertTrue(frequency.isEnabled());
             assertTrue(highCut.isEnabled());
             assertEquals("6000 Hz", highCut.getText());
+            assertTrue(peak.isSelected(), "peaking is the band type");
+            assertFalse(low.isSelected());
+            assertTrue(peak.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.CHECKED));
+            assertFalse(low.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.CHECKED));
+            assertFalse(bypass.isSelected());
+            assertTrue(band3.isEnabled());
+            assertTrue(bandOn.isEnabled());
+            beat.track(0).setEqBand(1, 4000, 3, 0.7, hits.EqBand.Type.HIGH_SHELF, true);
+            beat.track(0).setEqBand(2, 8000, -6, 1, hits.EqBand.Type.LOW_SHELF, false);
+            SwingUtilities.invokeAndWait(inspector::refresh);
+            assertTrue(highShelf.isSelected(), "band 2 is a high shelf");
+            assertTrue(highShelf.getAccessibleContext().getAccessibleStateSet().contains(AccessibleState.CHECKED));
+            assertFalse(bandOn.isSelected(), "band 3 is bypassed");
+            assertEquals("8000 Hz", band3.getText());
         } else {
             assertFalse(slope24.isSelected(), "a greyed slope is not drawn selected");
             assertFalse(slope24.isEnabled());
@@ -101,6 +144,12 @@ class InspectorAccessTest {
             assertFalse(high12.isSelected());
             assertFalse(frequency.isEnabled());
             assertFalse(highCut.isEnabled());
+            assertFalse(peak.isSelected(), "a greyed band type is not drawn selected");
+            assertFalse(peak.isEnabled());
+            assertFalse(bypass.isSelected());
+            assertFalse(bypass.isEnabled());
+            assertFalse(band3.isEnabled());
+            assertFalse(bandOn.isEnabled());
         }
         player.close();
     }
@@ -153,6 +202,21 @@ class InspectorAccessTest {
         if (root instanceof Container container) {
             for (Component child : container.getComponents()) {
                 JTextField found = findField(child, name);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JCheckBox findBox(Component root, String name) {
+        if (root instanceof JCheckBox box && name.equals(box.getName())) {
+            return box;
+        }
+        if (root instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                JCheckBox found = findBox(child, name);
                 if (found != null) {
                     return found;
                 }

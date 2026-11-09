@@ -17,9 +17,12 @@ import java.util.Map;
  * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent),
  * a track {@code lowCut} object ({@code hz}, {@code slope}) when the high-pass is on,
  * a track {@code presence} (dB, omitted at 0, 0.1 dB steps, written as an integer when whole),
- * a track {@code eq} object when a peaking band or the high cut is on
- * ({@code bands} of {@code hz}, {@code gain}, {@code q}, optional {@code highCut},
- * and optional {@code highCutSlope} in dB/oct, omitted at 12),
+ * a track {@code eq} object when a band, the high cut, or an EQ bypass is on
+ * ({@code bands} of {@code hz}, {@code gain}, {@code q}, optional {@code type}
+ * of {@code lowShelf} or {@code highShelf} omitted for a peak, optional {@code enabled}
+ * omitted when the band is on, optional {@code highCut},
+ * optional {@code highCutSlope} in dB/oct omitted at 12,
+ * and optional {@code bypass} omitted when EQ is heard),
  * and a track {@code sample} object when {@code mode} is {@code sample}
  * ({@code path}, {@code root}, {@code start}, {@code oneShot},
  * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN}, in 0.1 dB steps,
@@ -242,6 +245,7 @@ public final class BeatJson {
         indent(out, 5);
         out.append("\"eq\": {");
         List<EqBand> bands = track.eqBands();
+        boolean wrote = false;
         if (!bands.isEmpty()) {
             out.append("\"bands\": [");
             for (int i = 0; i < bands.size(); i++) {
@@ -251,19 +255,33 @@ public final class BeatJson {
                 EqBand band = bands.get(i);
                 out.append("{\"hz\": ").append(band.hz())
                     .append(", \"gain\": ").append(Db.number(band.gain()))
-                    .append(", \"q\": ").append(Db.number(band.q()))
-                    .append('}');
+                    .append(", \"q\": ").append(Db.number(band.q()));
+                if (band.type() != EqBand.Type.PEAK) {
+                    out.append(", \"type\": \"").append(band.type().json()).append('"');
+                }
+                if (!band.enabled()) {
+                    out.append(", \"enabled\": false");
+                }
+                out.append('}');
             }
             out.append(']');
+            wrote = true;
         }
         if (track.hasHighCut()) {
-            if (!bands.isEmpty()) {
+            if (wrote) {
                 out.append(", ");
             }
             out.append("\"highCut\": ").append(track.highCutHz());
             if (track.highCutSlope() != Track.HIGH_CUT_SLOPE) {
                 out.append(", \"highCutSlope\": ").append(track.highCutSlope());
             }
+            wrote = true;
+        }
+        if (track.eqBypassed()) {
+            if (wrote) {
+                out.append(", ");
+            }
+            out.append("\"bypass\": true");
         }
         out.append("},\n");
     }
@@ -492,7 +510,7 @@ public final class BeatJson {
                 if (index >= Track.EQ_BANDS) {
                     beat.addLoadWarning(
                         Beat.slotLabel(slot) + " " + track.name()
-                            + ": EQ band " + (index + 1) + " was dropped. A row keeps two bands."
+                            + ": EQ band " + (index + 1) + " was dropped. A row keeps three bands."
                     );
                     break;
                 }
@@ -504,12 +522,26 @@ public final class BeatJson {
                     continue;
                 }
                 boolean hzGiven = band.containsKey("hz") && band.get("hz") != null;
-                double requestedHz = hzGiven
-                    ? decimal(band.get("hz"))
-                    : (index == 0 ? Track.EQ_HZ : Track.EQ_HZ_2);
+                double requestedHz = hzGiven ? decimal(band.get("hz")) : Track.eqDefaultHz(index);
                 boolean qGiven = band.containsKey("q") && band.get("q") != null;
                 double requestedQ = qGiven ? decimal(band.get("q")) : Track.EQ_Q;
-                EqBand stored = track.setEqBand(index, requestedHz, requestedGain, requestedQ);
+                EqBand.Type type = EqBand.Type.PEAK;
+                if (band.get("type") instanceof String typeText && !typeText.isBlank()) {
+                    EqBand.Type parsed = EqBand.Type.parse(typeText);
+                    if (parsed == null) {
+                        beat.addLoadWarning(
+                            Beat.slotLabel(slot) + " " + track.name()
+                                + ": EQ band " + (index + 1) + " type " + typeText + " was changed to peak."
+                        );
+                    } else {
+                        type = parsed;
+                    }
+                }
+                boolean enabled = true;
+                if (band.containsKey("enabled") && band.get("enabled") != null) {
+                    enabled = bool(band.get("enabled"));
+                }
+                EqBand stored = track.setEqBand(index, requestedHz, requestedGain, requestedQ, type, enabled);
                 String label = "EQ band " + (index + 1);
                 warnLevel(
                     beat, slot, track, label + " gain", requestedGain,
@@ -551,6 +583,9 @@ public final class BeatJson {
                     );
                 }
             }
+        }
+        if (eq.containsKey("bypass") && eq.get("bypass") != null) {
+            track.setEqBypass(bool(eq.get("bypass")));
         }
     }
 

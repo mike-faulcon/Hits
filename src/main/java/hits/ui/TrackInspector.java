@@ -37,6 +37,7 @@ import javax.swing.SwingConstants;
 import javax.sound.midi.Soundbank;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -46,10 +47,13 @@ import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -141,6 +145,9 @@ final class TrackInspector {
     private final JLabel presenceValue = Widgets.label("0 dB");
     private final EqBandControls eq1;
     private final EqBandControls eq2;
+    private final EqBandControls eq3;
+    private final JButton eqBypass = Widgets.button("Bypass");
+    private final JButton eqReset = Widgets.button("Reset");
     private final JCheckBox highCutOn = new JCheckBox("High cut");
     private final JSlider highCut = Widgets.slider(0, Track.HIGH_CUT_SLIDER, Track.highCutSlider(Track.HIGH_CUT));
     private final JTextField highCutValue = hzField("high-cut-value", "High cut frequency");
@@ -183,6 +190,7 @@ final class TrackInspector {
         this.presenceDrag = new SliderDrag(editor, sync);
         this.eq1 = new EqBandControls(0, Track.EQ_HZ);
         this.eq2 = new EqBandControls(1, Track.EQ_HZ_2);
+        this.eq3 = new EqBandControls(2, Track.EQ_HZ_3);
         this.highCutDrag = new SliderDrag(editor, sync);
         this.velocityDrag = new SliderDrag(editor, sync);
         this.chanceDrag = new SliderDrag(editor, sync);
@@ -361,6 +369,9 @@ final class TrackInspector {
         presenceDrag.wire(presence, beat -> onScreen(beat).setPresence(Track.presenceFromSlider(presence.getValue())));
         eq1.wire();
         eq2.wire();
+        eq3.wire();
+        eqBypass.addActionListener(event -> applyEqBypass());
+        eqReset.addActionListener(event -> resetEq());
         highCutDrag.wire(highCut, beat -> {
             Track track = onScreen(beat);
             if (track.hasHighCut()) {
@@ -774,12 +785,18 @@ final class TrackInspector {
         + "A MIDI file does not carry it.";
     private static final String PRESENCE_TIP = "High shelf above about 3 kHz, from 0 to +12 dB in 0.1 dB steps. "
         + "0 leaves the highs as they are. Playback and WAV export use it. A MIDI file does not.";
-    private static final String EQ_TIP = "Two peaking bands, 30 Hz to 12 kHz, gain −18 to +12 dB, Q 0.3 to 8. "
+    private static final String EQ_TIP = "Three bands, 30 Hz to 12 kHz, gain −18 to +12 dB, Q 0.3 to 8. "
+        + "Peak is the default. Low shelf and high shelf tilt the tone instead of cutting a band. "
+        + "A shelf Q near 0.7 is smooth. Higher Q adds a shoulder at the corner. "
         + "Type a frequency, or use the slider, which lands on round Hertz such as 50, 100, 250, 950, and 2500. "
+        + "On bypasses that band. Bypass compares the row with and without every band. Reset clears the bands and the high cut. "
+        + "Drag a dot on the curve to move that band. "
         + "High cut is a low-pass from 1 kHz to 20 kHz at 6, 12, or 24 dB per octave, off until you turn it on. "
         + "12 is the default and is left out of the file. "
-        + "Flat bands are left out of the file. Playback and WAV export use them. A MIDI file does not.";
-    private static final String EQ_CURVE_TIP = "The curve is the whole row filter: low cut, the peaking bands, high cut, and presence.";
+        + "Flat bands are left out of the file. Peaking, and a band that is on, are left out too. "
+        + "Playback and WAV export use them. A MIDI file does not.";
+    private static final String EQ_CURVE_TIP = "The curve is the whole row filter: low cut, the three bands, high cut, and presence. "
+        + "A dot is one band. Drag it to change frequency and gain. A circle is a peak, a square is a low shelf, and a triangle is a high shelf.";
 
     private void showLowCut(Track track) {
         boolean live = player.isBuiltIn();
@@ -944,6 +961,7 @@ final class TrackInspector {
             eqContext = context;
             eq1.adopt(track.eqBand(0));
             eq2.adopt(track.eqBand(1));
+            eq3.adopt(track.eqBand(2));
             shownHighCut = track.hasHighCut() ? track.highCutHz() : Track.HIGH_CUT;
             shownHighSlope = track.hasHighCut() ? track.highCutSlope() : Track.HIGH_CUT_SLOPE;
         } else {
@@ -953,6 +971,9 @@ final class TrackInspector {
             if (track.eqBand(1) != null) {
                 eq2.adopt(track.eqBand(1));
             }
+            if (track.eqBand(2) != null) {
+                eq3.adopt(track.eqBand(2));
+            }
             if (track.hasHighCut()) {
                 shownHighCut = track.highCutHz();
                 shownHighSlope = track.highCutSlope();
@@ -960,6 +981,18 @@ final class TrackInspector {
         }
         eq1.show(track, live);
         eq2.show(track, live);
+        eq3.show(track, live);
+        boolean bypassed = track.eqBypassed();
+        eqBypass.setEnabled(live);
+        Widgets.paintToggle(eqBypass, live && bypassed);
+        eqReset.setEnabled(live);
+        String bypassTip = live
+            ? "Hear this row with every EQ band out. Low cut, high cut, and presence stay. The bands are kept."
+            : LOW_CUT_EXTERNAL;
+        eqBypass.setToolTipText(bypassTip);
+        eqReset.setToolTipText(live
+            ? "Clears the three bands and the high cut, and turns EQ back on."
+            : LOW_CUT_EXTERNAL);
         highCutOn.setSelected(track.hasHighCut());
         highCutOn.setEnabled(live);
         boolean highOn = live && track.hasHighCut();
@@ -986,6 +1019,26 @@ final class TrackInspector {
         highSlope24.setToolTipText(tip + " 24 dB per octave.");
         eqCaption.setToolTipText(EQ_CURVE_TIP);
         eqCurve.show(track, live, EQ_CURVE_TIP);
+    }
+
+    private void applyEqBypass() {
+        if (sync.on()) {
+            return;
+        }
+        boolean bypass = !editor.selectedTrack().eqBypassed();
+        editor.edit(beat -> onScreen(beat).setEqBypass(bypass));
+    }
+
+    private void resetEq() {
+        if (sync.on()) {
+            return;
+        }
+        eq1.adopt(null);
+        eq2.adopt(null);
+        eq3.adopt(null);
+        shownHighCut = Track.HIGH_CUT;
+        shownHighSlope = Track.HIGH_CUT_SLOPE;
+        editor.edit(beat -> onScreen(beat).clearEq());
     }
 
     private void paintHighSlope() {
@@ -1047,6 +1100,16 @@ final class TrackInspector {
         JLabel title = Widgets.label("EQ");
         title.setName("eq");
         title.setFont(title.getFont().deriveFont(Font.BOLD));
+        eqBypass.setName("eq-bypass");
+        eqBypass.getAccessibleContext().setAccessibleName("Bypass EQ");
+        eqReset.setName("eq-reset");
+        eqReset.getAccessibleContext().setAccessibleName("Reset EQ");
+        Widgets.fix(eqBypass, 84, 32);
+        Widgets.fix(eqReset, 72, 32);
+        JPanel heading = new JPanel(new BorderLayout(8, 0));
+        heading.setOpaque(false);
+        heading.add(title, BorderLayout.WEST);
+        heading.add(Widgets.row(eqBypass, eqReset), BorderLayout.EAST);
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
         panel.setName("eq-section");
@@ -1057,7 +1120,7 @@ final class TrackInspector {
         constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.anchor = GridBagConstraints.WEST;
         constraints.insets = new Insets(2, 0, 2, 0);
-        addRow(panel, constraints, title);
+        addRow(panel, constraints, heading);
         addRow(panel, constraints, eqCurve);
         eqCaption.setName("eq-curve-caption");
         eqCaption.setForeground(Theme.MUTED);
@@ -1066,6 +1129,7 @@ final class TrackInspector {
         addRow(panel, constraints, eqCaption);
         addRow(panel, constraints, eq1.block());
         addRow(panel, constraints, eq2.block());
+        addRow(panel, constraints, eq3.block());
         highCut.setName("high-cut");
         highCutOn.setName("high-cut-on");
         addRow(panel, constraints, highCutRow());
@@ -1109,9 +1173,13 @@ final class TrackInspector {
         return panel;
     }
 
-    /** One peaking band: frequency, gain, and Q. The sliders stay put while the band is flat. */
+    /** One band: type, bypass, frequency, gain, and Q. The sliders stay put while the band is flat. */
     private final class EqBandControls {
         private final int index;
+        private final JCheckBox on;
+        private final JButton peak;
+        private final JButton lowShelf;
+        private final JButton highShelf;
         private final JSlider hz;
         private final JTextField hzValue;
         private final JSlider gain;
@@ -1123,11 +1191,23 @@ final class TrackInspector {
         private final SliderDrag qDrag;
         private int shownHz;
         private double shownQ = Track.EQ_Q;
+        private EqBand.Type shownType = EqBand.Type.PEAK;
+        private boolean shownEnabled = true;
 
         private EqBandControls(int index, int defaultHz) {
             this.index = index;
             this.shownHz = defaultHz;
             int band = index + 1;
+            on = new JCheckBox("On");
+            on.setName("eq-" + band + "-on");
+            on.getAccessibleContext().setAccessibleName("Band " + band + " on");
+            on.setOpaque(false);
+            on.setForeground(Theme.TEXT);
+            on.setFocusable(false);
+            on.setSelected(true);
+            peak = typeButton("Peak", "eq-" + band + "-peak", "Band " + band + " peaking");
+            lowShelf = typeButton("Low", "eq-" + band + "-low", "Band " + band + " low shelf");
+            highShelf = typeButton("High", "eq-" + band + "-high", "Band " + band + " high shelf");
             hz = Widgets.slider(0, Track.EQ_SLIDER, Track.eqHzSlider(defaultHz));
             gain = Widgets.slider(Track.eqGainSlider(Track.EQ_GAIN_MIN), Track.eqGainSlider(Track.EQ_GAIN_MAX), 0);
             q = Widgets.slider(Track.eqQSlider(Track.EQ_Q_MIN), Track.eqQSlider(Track.EQ_Q_MAX), Track.eqQSlider(Track.EQ_Q));
@@ -1150,6 +1230,10 @@ final class TrackInspector {
             gainDrag.wire(gain, beat -> apply(beat));
             qDrag.wire(q, beat -> apply(beat));
             bindHz(hzValue, this::commitHz);
+            on.addActionListener(event -> applyEnabled());
+            peak.addActionListener(event -> choose(EqBand.Type.PEAK));
+            lowShelf.addActionListener(event -> choose(EqBand.Type.LOW_SHELF));
+            highShelf.addActionListener(event -> choose(EqBand.Type.HIGH_SHELF));
         }
 
         private void apply(Beat beat) {
@@ -1163,7 +1247,60 @@ final class TrackInspector {
                 track.clearEqBand(index);
                 return;
             }
-            track.setEqBand(index, shownHz, gainDb, shownQ);
+            track.setEqBand(index, shownHz, gainDb, shownQ, shownType, shownEnabled);
+        }
+
+        private void applyEnabled() {
+            if (sync.on()) {
+                return;
+            }
+            shownEnabled = on.isSelected();
+            Track current = editor.selectedTrack();
+            EqBand band = current.eqBand(index);
+            if (band == null || band.enabled() == shownEnabled) {
+                return;
+            }
+            editor.edit(beat -> {
+                Track track = onScreen(beat);
+                EqBand currentBand = track.eqBand(index);
+                if (currentBand != null) {
+                    track.setEqBand(
+                        index,
+                        currentBand.hz(),
+                        currentBand.gain(),
+                        currentBand.q(),
+                        currentBand.type(),
+                        shownEnabled
+                    );
+                }
+            });
+        }
+
+        private void choose(EqBand.Type type) {
+            if (sync.on()) {
+                return;
+            }
+            shownType = type;
+            Track current = editor.selectedTrack();
+            EqBand band = current.eqBand(index);
+            if (band == null || band.type() == type) {
+                paintType(player.isBuiltIn());
+                return;
+            }
+            editor.edit(beat -> {
+                Track track = onScreen(beat);
+                EqBand currentBand = track.eqBand(index);
+                if (currentBand != null) {
+                    track.setEqBand(
+                        index,
+                        currentBand.hz(),
+                        currentBand.gain(),
+                        currentBand.q(),
+                        type,
+                        currentBand.enabled()
+                    );
+                }
+            });
         }
 
         private void commitHz() {
@@ -1184,25 +1321,31 @@ final class TrackInspector {
             }
             double gainDb = band.gain();
             double width = band.q();
+            EqBand.Type type = band.type();
+            boolean enabled = band.enabled();
             editor.edit(beat -> {
                 Track track = onScreen(beat);
                 EqBand currentBand = track.eqBand(index);
                 if (currentBand != null) {
-                    track.setEqBand(index, clamped, currentBand.gain(), currentBand.q());
+                    track.setEqBand(index, clamped, currentBand.gain(), currentBand.q(), currentBand.type(), currentBand.enabled());
                 } else if (Math.abs(gainDb) >= 0.05) {
-                    track.setEqBand(index, clamped, gainDb, width);
+                    track.setEqBand(index, clamped, gainDb, width, type, enabled);
                 }
             });
         }
 
         private void adopt(EqBand band) {
             if (band == null) {
-                shownHz = index == 0 ? Track.EQ_HZ : Track.EQ_HZ_2;
+                shownHz = Track.eqDefaultHz(index);
                 shownQ = Track.EQ_Q;
+                shownType = EqBand.Type.PEAK;
+                shownEnabled = true;
                 return;
             }
             shownHz = band.hz();
             shownQ = band.q();
+            shownType = band.type();
+            shownEnabled = band.enabled();
         }
 
         private void show(Track track, boolean live) {
@@ -1217,39 +1360,72 @@ final class TrackInspector {
                 q.setValue(Track.eqQSlider(width));
                 shownHz = frequency;
                 shownQ = width;
+                if (band != null) {
+                    shownType = band.type();
+                    shownEnabled = band.enabled();
+                }
             }
             int frequency = hz.getValueIsAdjusting() ? Track.eqHzFromSlider(hz.getValue()) : shownHz;
             double gainDb = Track.eqGainFromSlider(gain.getValue());
             double width = Track.eqQFromSlider(q.getValue());
+            boolean heard = live && shownEnabled && !track.eqBypassed();
             showHz(hzValue, frequency + " Hz", live);
             gainValue.setText(Math.abs(gainDb) < 0.05 ? "0 dB" : Db.labeled(gainDb));
             qValue.setText(Db.number(width));
             hz.setEnabled(live);
             gain.setEnabled(live);
             q.setEnabled(live);
+            on.setEnabled(live);
+            if (!adjusting) {
+                on.setSelected(shownEnabled);
+            }
+            paintType(live);
             String warning = editor.beat().rowWarning(editor.viewSlot(), track.name(), "EQ band " + (index + 1));
             String tip = live ? EQ_TIP : LOW_CUT_EXTERNAL;
+            if (track.eqBypassed()) {
+                tip = "EQ is bypassed. " + tip;
+            } else if (!shownEnabled) {
+                tip = "This band is bypassed. " + tip;
+            }
             if (warning != null) {
                 tip = warning;
             }
-            for (JComponent control : new JComponent[] {hz, hzValue, gain, gainValue, q, qValue}) {
+            for (JComponent control : new JComponent[] {on, peak, lowShelf, highShelf, hz, hzValue, gain, gainValue, q, qValue}) {
                 control.setToolTipText(tip);
             }
-            qValue.setForeground(live ? Theme.TEXT : Theme.MUTED);
-            gainValue.setForeground(!live ? Theme.MUTED : warning != null ? Theme.STEP_ACCENT : Theme.TEXT);
+            qValue.setForeground(heard ? Theme.TEXT : Theme.MUTED);
+            gainValue.setForeground(!heard ? Theme.MUTED : warning != null ? Theme.STEP_ACCENT : Theme.TEXT);
+        }
+
+        private void paintType(boolean live) {
+            peak.setEnabled(live);
+            lowShelf.setEnabled(live);
+            highShelf.setEnabled(live);
+            Widgets.paintToggle(peak, live && shownType == EqBand.Type.PEAK);
+            Widgets.paintToggle(lowShelf, live && shownType == EqBand.Type.LOW_SHELF);
+            Widgets.paintToggle(highShelf, live && shownType == EqBand.Type.HIGH_SHELF);
         }
 
         private JPanel block() {
             JPanel panel = new JPanel(new GridBagLayout());
             panel.setOpaque(false);
+            panel.setName("eq-" + (index + 1));
             GridBagConstraints constraints = new GridBagConstraints();
             constraints.gridx = 0;
             constraints.gridy = 0;
             constraints.weightx = 1;
             constraints.fill = GridBagConstraints.HORIZONTAL;
             constraints.insets = new Insets(1, 0, 1, 0);
-            String name = "Band " + (index + 1);
-            addRow(panel, constraints, labeled(name, EQ_TIP, hz, hzValue));
+            JLabel name = Widgets.label("Band " + (index + 1));
+            name.setName("eq-" + (index + 1) + "-label");
+            name.setPreferredSize(new Dimension(88, 32));
+            JPanel heading = new JPanel(new BorderLayout(8, 0));
+            heading.setOpaque(false);
+            heading.add(name, BorderLayout.WEST);
+            heading.add(on, BorderLayout.EAST);
+            addRow(panel, constraints, heading);
+            addRow(panel, constraints, Widgets.row(peak, lowShelf, highShelf));
+            addRow(panel, constraints, labeled("Hz", EQ_TIP, hz, hzValue));
             addRow(panel, constraints, labeled("Gain", EQ_TIP, gain, gainValue));
             addRow(panel, constraints, labeled("Q", EQ_TIP, q, qValue));
             hzValue.setPreferredSize(new Dimension(88, 32));
@@ -1257,25 +1433,170 @@ final class TrackInspector {
             qValue.setPreferredSize(new Dimension(84, 32));
             return panel;
         }
+
+        private int markerHz() {
+            return shownHz;
+        }
+
+        private double markerGain() {
+            EqBand band = editor.selectedTrack().eqBand(index);
+            if (gain.getValueIsAdjusting()) {
+                return Track.eqGainFromSlider(gain.getValue());
+            }
+            return band == null ? 0 : band.gain();
+        }
+
+        private EqBand.Type markerType() {
+            return shownType;
+        }
+
+        private boolean markerEnabled() {
+            return shownEnabled;
+        }
+
+        private void moveFromCurve(int frequency, double gainDb) {
+            shownHz = frequency;
+            shownQ = Track.eqQFromSlider(q.getValue());
+            if (Math.abs(gainDb) < 0.05) {
+                onScreen(editor.beat()).clearEqBand(index);
+                return;
+            }
+            onScreen(editor.beat()).setEqBand(index, frequency, gainDb, shownQ, shownType, shownEnabled);
+        }
     }
 
-    /** Small log-frequency plot of this row's low cut, EQ, high cut, and presence. */
-    private static final class EqCurve extends JComponent {
+    private static JButton typeButton(String text, String name, String accessible) {
+        JButton button = Widgets.button(text);
+        button.setName(name);
+        button.getAccessibleContext().setAccessibleName(accessible);
+        Widgets.fix(button, 58, 32);
+        return button;
+    }
+
+    /** Small log-frequency plot of this row's low cut, EQ, high cut, and presence. Dots drag a band. */
+    private final class EqCurve extends JComponent {
         private Track track;
         private boolean live = true;
+        private int dragIndex = -1;
+        private boolean dragging;
 
         private EqCurve() {
             setName("eq-curve");
             setOpaque(true);
             setPreferredSize(new Dimension(280, 108));
             setMinimumSize(new Dimension(160, 88));
+            MouseAdapter mouse = new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent event) {
+                    if (!live || track == null) {
+                        return;
+                    }
+                    dragIndex = hit(event.getX(), event.getY());
+                }
+
+                @Override
+                public void mouseDragged(MouseEvent event) {
+                    if (dragIndex < 0 || !live) {
+                        return;
+                    }
+                    if (!dragging) {
+                        dragging = true;
+                        editor.beginAdjust();
+                    }
+                    editor.adjust(beat -> move(dragIndex, event.getX(), event.getY()));
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent event) {
+                    int index = dragIndex;
+                    dragIndex = -1;
+                    if (!dragging) {
+                        return;
+                    }
+                    dragging = false;
+                    editor.endAdjust();
+                    if (index >= 0 && live) {
+                        editor.adjust(beat -> move(index, event.getX(), event.getY()));
+                    }
+                }
+
+                @Override
+                public void mouseMoved(MouseEvent event) {
+                    setCursor(hit(event.getX(), event.getY()) >= 0
+                        ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        : Cursor.getDefaultCursor());
+                }
+
+                @Override
+                public void mouseExited(MouseEvent event) {
+                    if (dragIndex < 0) {
+                        setCursor(Cursor.getDefaultCursor());
+                    }
+                }
+            };
+            addMouseListener(mouse);
+            addMouseMotionListener(mouse);
+        }
+
+        @Override
+        public javax.accessibility.AccessibleContext getAccessibleContext() {
+            if (accessibleContext == null) {
+                accessibleContext = new AccessibleJComponent() {};
+                accessibleContext.setAccessibleName("EQ curve");
+                accessibleContext.setAccessibleDescription(EQ_CURVE_TIP);
+            }
+            return accessibleContext;
         }
 
         private void show(Track track, boolean live, String tip) {
             this.track = track;
             this.live = live;
             setToolTipText(tip);
+            if (!live) {
+                setCursor(Cursor.getDefaultCursor());
+            }
             repaint();
+        }
+
+        private void move(int index, int x, int y) {
+            Frame frame = frame();
+            if (frame == null) {
+                return;
+            }
+            EqBandControls controls = controls(index);
+            int hz = (int) Math.round(hzAt(x - frame.left, frame.plotW));
+            hz = Math.max(Track.EQ_HZ_MIN, Math.min(Track.EQ_HZ_MAX, hz));
+            double gain = dbAt(y - frame.top, frame.plotH);
+            controls.moveFromCurve(hz, gain);
+        }
+
+        private int hit(int x, int y) {
+            Frame frame = frame();
+            if (frame == null) {
+                return -1;
+            }
+            int found = -1;
+            int best = 14 * 14;
+            for (int i = 0; i < Track.EQ_BANDS; i++) {
+                int mx = frame.left + hzX(controls(i).markerHz(), frame.plotW);
+                int my = frame.top + dbY(controls(i).markerGain(), frame.plotH);
+                int dx = x - mx;
+                int dy = y - my;
+                int distance = dx * dx + dy * dy;
+                if (distance <= best) {
+                    best = distance;
+                    found = i;
+                }
+            }
+            return found;
+        }
+
+        private EqBandControls controls(int index) {
+            return switch (index) {
+                case 1 -> eq2;
+                case 2 -> eq3;
+                default -> eq1;
+            };
         }
 
         @Override
@@ -1284,18 +1605,17 @@ final class TrackInspector {
             try {
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                int width = Math.max(2, getWidth());
-                int height = Math.max(2, getHeight());
+                Frame frame = frame(g.getFontMetrics(getFont().deriveFont(10f)));
                 g.setColor(Theme.BG);
-                g.fillRect(0, 0, width, height);
+                g.fillRect(0, 0, Math.max(2, getWidth()), Math.max(2, getHeight()));
                 g.setFont(getFont().deriveFont(10f));
                 FontMetrics metrics = g.getFontMetrics();
-                int left = Math.max(28, metrics.stringWidth("−12") + 8);
-                int top = 6;
-                int right = width - 4;
-                int plotBottom = height - metrics.getHeight() - 4;
-                int plotH = Math.max(2, plotBottom - top);
-                int plotW = Math.max(2, right - left);
+                int left = frame.left;
+                int top = frame.top;
+                int right = frame.right;
+                int plotBottom = frame.plotBottom;
+                int plotH = frame.plotH;
+                int plotW = frame.plotW;
 
                 g.setColor(Theme.GRID_LINE);
                 for (int db : new int[] {12, 0, -12}) {
@@ -1318,14 +1638,14 @@ final class TrackInspector {
                     String label = hz >= 1000 ? (hz / 1000) + "k" : Integer.toString(hz);
                     int x = left + hzX(hz, plotW) - metrics.stringWidth(label) / 2;
                     x = Math.max(left, Math.min(right - metrics.stringWidth(label), x));
-                    g.drawString(label, x, height - 3);
+                    g.drawString(label, x, getHeight() - 3);
                 }
 
                 g.setColor(live ? Theme.STEP_ON : Theme.MUTED);
                 int previousY = -1;
                 int previousX = left;
                 for (int x = 0; x <= plotW; x++) {
-                    double hz = 30 * Math.pow(20_000.0 / 30.0, x / (double) plotW);
+                    double hz = hzAt(x, plotW);
                     double db = track == null ? 0 : ToneFilter.responseDb(WavAudio.SAMPLE_RATE, track, hz);
                     int y = top + dbY(db, plotH);
                     int px = left + x;
@@ -1335,9 +1655,64 @@ final class TrackInspector {
                     previousY = y;
                     previousX = px;
                 }
+                if (track != null) {
+                    for (int i = 0; i < Track.EQ_BANDS; i++) {
+                        paintMarker(g, frame, controls(i), i);
+                    }
+                }
             } finally {
                 g.dispose();
             }
+        }
+
+        private void paintMarker(Graphics2D g, Frame frame, EqBandControls controls, int index) {
+            int x = frame.left + hzX(controls.markerHz(), frame.plotW);
+            int y = frame.top + dbY(controls.markerGain(), frame.plotH);
+            boolean heard = live && controls.markerEnabled() && track != null && !track.eqBypassed();
+            java.awt.Color fill = !live ? Theme.MUTED : heard ? markerColor(controls.markerType()) : Theme.GRID_LINE;
+            g.setColor(fill);
+            int size = 8;
+            switch (controls.markerType()) {
+                case LOW_SHELF -> g.fillRect(x - size / 2, y - size / 2, size, size);
+                case HIGH_SHELF -> {
+                    Polygon triangle = new Polygon();
+                    triangle.addPoint(x, y - size / 2 - 1);
+                    triangle.addPoint(x - size / 2 - 1, y + size / 2);
+                    triangle.addPoint(x + size / 2 + 1, y + size / 2);
+                    g.fillPolygon(triangle);
+                }
+                default -> g.fillOval(x - size / 2, y - size / 2, size, size);
+            }
+            g.setColor(Theme.TEXT);
+            String number = Integer.toString(index + 1);
+            FontMetrics metrics = g.getFontMetrics();
+            g.drawString(number, x + 6, y - 2 + metrics.getAscent() / 4);
+        }
+
+        private Frame frame() {
+            Font font = getFont();
+            FontMetrics metrics = getFontMetrics(font == null ? new Font(Font.SANS_SERIF, Font.PLAIN, 10) : font.deriveFont(10f));
+            return frame(metrics);
+        }
+
+        private Frame frame(FontMetrics metrics) {
+            int width = Math.max(2, getWidth());
+            int height = Math.max(2, getHeight());
+            int left = Math.max(28, metrics.stringWidth("−12") + 8);
+            int top = 6;
+            int right = width - 4;
+            int plotBottom = height - metrics.getHeight() - 4;
+            int plotH = Math.max(2, plotBottom - top);
+            int plotW = Math.max(2, right - left);
+            return new Frame(left, top, right, plotBottom, plotW, plotH);
+        }
+
+        private static java.awt.Color markerColor(EqBand.Type type) {
+            return switch (type) {
+                case LOW_SHELF -> Theme.PLAY;
+                case HIGH_SHELF -> Theme.STEP_ACCENT;
+                case PEAK -> Theme.STEP_ON;
+            };
         }
 
         private static int dbY(double db, int height) {
@@ -1347,12 +1722,28 @@ final class TrackInspector {
             return (int) Math.round((max - clamped) / (max - min) * (height - 1));
         }
 
+        private static double dbAt(int y, int height) {
+            double min = Track.EQ_GAIN_MIN;
+            double max = Track.EQ_GAIN_MAX;
+            double t = y / (double) Math.max(1, height - 1);
+            t = Math.max(0, Math.min(1, t));
+            return max - t * (max - min);
+        }
+
         /** Log position of {@code hz} across 30 Hz to 20 kHz. */
         private static int hzX(int hz, int width) {
-            double t = Math.log(hz / 30.0) / Math.log(20_000.0 / 30.0);
+            double t = Math.log(Math.max(30, hz) / 30.0) / Math.log(20_000.0 / 30.0);
             t = Math.max(0, Math.min(1, t));
             return (int) Math.round(t * (width - 1));
         }
+
+        private static double hzAt(int x, int width) {
+            double t = x / (double) Math.max(1, width);
+            t = Math.max(0, Math.min(1, t));
+            return 30 * Math.pow(20_000.0 / 30.0, t);
+        }
+
+        private record Frame(int left, int top, int right, int plotBottom, int plotW, int plotH) {}
     }
 
     /** Thumb position when cutoff is turned on. Neutral 64 when this sound's slider includes it. */
