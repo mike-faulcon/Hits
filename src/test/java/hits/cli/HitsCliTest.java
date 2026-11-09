@@ -241,6 +241,16 @@ class HitsCliTest {
     }
 
     @Test
+    void infoPrintsAFractionalTempo() throws Exception {
+        Beat beat = Beat.drumKit("fine");
+        beat.setBpm(98.33);
+        beat.setSwing(50);
+        String text = HitsCli.describe(beat);
+        assertTrue(text.contains("tempo: 98.33 bpm\n"), text);
+        assertTrue(text.contains("length: 1 bar, 2.441 s"), text);
+    }
+
+    @Test
     void renderedMidiMatchesTheGoldenEvents(@TempDir Path directory) throws Exception {
         Path pattern = directory.resolve("pattern.mid");
         Path direct = directory.resolve("direct.mid");

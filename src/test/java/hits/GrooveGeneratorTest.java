@@ -131,7 +131,7 @@ class GrooveGeneratorTest {
         editor.holdSlot('b');
         GrooveGenerator.write(editor, GrooveGenerator.Genre.HOUSE, 5);
         assertEquals('b', editor.beat().activeSlot());
-        assertTrue(inRange(editor.beat().bpm(), 120, 128));
+        assertTrue(inRange((int) Math.round(editor.beat().bpm()), 120, 128));
         assertTrue(editor.beat().slot('b')[0].step(0).on());
         assertTrue(editor.beat().slot('b')[0].step(4).on());
         assertTrue(editor.beat().slot('b')[0].step(8).on());
@@ -177,10 +177,10 @@ class GrooveGeneratorTest {
         editor.beat().track(0).tap(0, false);
         editor.beat().track(1).tap(4, false);
         editor.selectTrack(2);
-        int bpm = editor.beat().bpm();
+        double bpm = editor.beat().bpm();
         int swing = editor.beat().swing();
         GrooveGenerator.shuffleTrack(editor, GrooveGenerator.Genre.TRAP, 9);
-        assertEquals(bpm, editor.beat().bpm());
+        assertEquals(bpm, editor.beat().bpm(), 0.0);
         assertEquals(swing, editor.beat().swing());
         assertTrue(editor.beat().track(0).step(0).on());
         assertTrue(editor.beat().track(1).step(4).on());
@@ -193,7 +193,7 @@ class GrooveGeneratorTest {
         editor.undo();
         assertFalse(editor.beat().track(2).step(0).on());
         assertTrue(editor.beat().track(0).step(0).on());
-        assertEquals(bpm, editor.beat().bpm());
+        assertEquals(bpm, editor.beat().bpm(), 0.0);
     }
 
     @Test

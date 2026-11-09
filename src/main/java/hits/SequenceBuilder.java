@@ -784,7 +784,7 @@ public final class SequenceBuilder {
         int channel,
         List<Placed> placed,
         hits.Track track,
-        int bpm,
+        double bpm,
         int range
     ) throws InvalidMidiDataException {
         // A negative nudge can put step 0 after a later step. Emit in time order so the
@@ -823,7 +823,7 @@ public final class SequenceBuilder {
         int channel,
         List<Placed> placed,
         hits.Track track,
-        int bpm,
+        double bpm,
         int range
     ) throws InvalidMidiDataException {
         int anchor = -1;
@@ -947,8 +947,8 @@ public final class SequenceBuilder {
         midi.add(new MidiEvent(released, start));
     }
 
-    private static MetaMessage tempoMessage(int bpm) throws InvalidMidiDataException {
-        int microseconds = 60_000_000 / bpm;
+    private static MetaMessage tempoMessage(double bpm) throws InvalidMidiDataException {
+        int microseconds = Tempo.microsecondsPerQuarter(bpm);
         byte[] data = {
             (byte) (microseconds >> 16),
             (byte) (microseconds >> 8),

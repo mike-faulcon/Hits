@@ -39,6 +39,8 @@ public final class Beat {
     public static final int MIN_BPM = 40;
     /** Fastest tempo the spinner, tap tempo, and saved beats can store. */
     public static final int MAX_BPM = 240;
+    /** A new beat. Whole numbers and hundredths share this range. */
+    public static final double DEFAULT_BPM = 96;
     /** Patterns A through H. */
     public static final int SLOT_COUNT = 8;
 
@@ -48,7 +50,8 @@ public final class Beat {
     private static final int[] KIT_NOTES = {36, 38, 42, 46, 39, 45, 49, 51};
 
     private String name;
-    private int bpm;
+    /** Tempo in hundredths of a BPM. {@code 9600} is 96, {@code 9250} is 92.5. */
+    private int centiBpm;
     private int swing;
     /** Root length, 16 or 32. Old readers use this for every pattern. */
     private int stepCount;
@@ -68,7 +71,7 @@ public final class Beat {
 
     private Beat(String name) {
         this.name = name == null || name.isBlank() ? "untitled" : name.trim();
-        this.bpm = 96;
+        this.centiBpm = Tempo.centi(DEFAULT_BPM);
         this.swing = 50;
         this.stepCount = 16;
         this.active = 'a';
@@ -113,7 +116,7 @@ public final class Beat {
 
     public Beat copy() {
         Beat copy = new Beat(name);
-        copy.bpm = bpm;
+        copy.centiBpm = centiBpm;
         copy.swing = swing;
         copy.stepCount = stepCount;
         System.arraycopy(slotSteps, 0, copy.slotSteps, 0, SLOT_COUNT);
@@ -368,16 +371,22 @@ public final class Beat {
         }
     }
 
-    public int bpm() {
-        return bpm;
+    /** Tempo in BPM, in steps of {@link Tempo#STEP}. {@code 96} and {@code 92.5} are both exact. */
+    public double bpm() {
+        return Tempo.fromCenti(centiBpm);
     }
 
+    public void setBpm(double bpm) {
+        this.centiBpm = Tempo.centi(bpm);
+    }
+
+    /** Whole-number tempo. {@code 92} is stored as {@code 92.00}. */
     public void setBpm(int bpm) {
-        this.bpm = clampBpm(bpm);
+        setBpm((double) bpm);
     }
 
     public static int clampBpm(int bpm) {
-        return Math.max(MIN_BPM, Math.min(MAX_BPM, bpm));
+        return (int) Tempo.fromCenti(Tempo.centi(bpm));
     }
 
     /** 50 is straight. 75 is a hard shuffle. Applies to every other 16th. */
@@ -731,14 +740,17 @@ public final class Beat {
         return false;
     }
 
-    /** A slide step, or a slide time or curve other than 80 ms linear, in any pattern. */
+    /**
+     * A slide step on a note or sample row, or a slide time or curve other than 80 ms linear.
+     * A slide flag on a drum row does not count: drums do not glide, and the file drops it.
+     */
     public boolean hasSlides() {
         for (Track[] slot : slots) {
             for (Track track : slot) {
                 if (track.slideMs() != Slide.DEFAULT_MS || track.slideCurve() != Slide.Curve.LINEAR) {
                     return true;
                 }
-                if (track.slideSteps() > 0) {
+                if (Slide.applies(track) && track.slideSteps() > 0) {
                     return true;
                 }
             }

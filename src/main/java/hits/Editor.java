@@ -270,9 +270,15 @@ public final class Editor {
         edit(current -> current.slot(slot)[row].step(column).setNudge(nudge));
     }
 
-    /** Turns slide on or off for one step. An off step is turned on. One undo step. */
+    /**
+     * Turns slide on or off for one step. An off step is turned on. One undo step.
+     * A drum row does not glide, so the flag is left alone.
+     */
     public void toggleSlide(int row, int column) {
         if (row < 0 || row >= beat.trackCount() || column < 0 || column >= beat.gridColumns(viewSlot())) {
+            return;
+        }
+        if (!Slide.applies(beat.slot(viewSlot())[row])) {
             return;
         }
         trackIndex = row;
@@ -288,13 +294,16 @@ public final class Editor {
         });
     }
 
-    /** Slide flag for the selected step. No-op when no step is selected. One undo step. */
+    /** Slide flag for the selected step. No-op when no step is selected, or the row is a drum. One undo step. */
     public void setStepSlide(boolean slide) {
         int column = stepIndex;
         if (column < 0 || column >= beat.gridColumns(viewSlot())) {
             return;
         }
         int row = trackIndex;
+        if (row < 0 || row >= beat.trackCount() || !Slide.applies(beat.slot(viewSlot())[row])) {
+            return;
+        }
         char slot = viewSlot();
         edit(current -> {
             Step step = current.slot(slot)[row].step(column);

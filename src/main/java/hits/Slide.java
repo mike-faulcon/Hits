@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Pitch glide for a note row or a sample row, including Sub.
  * A step marked slide holds the previous note and bends to its own pitch.
- * There is no new attack. Drum rows do not glide.
+ * There is no new attack. Drum rows do not glide, and a slide flag on a drum is not kept.
  * <p>
  * The bend is MIDI pitch bend. The range is RPN 0, wide enough for the largest
  * interval on the row and never wider than ±{@link ChannelPlan#BEND_RANGE} semitones.
@@ -98,10 +98,11 @@ public final class Slide {
     /**
      * Ticks a glide of {@code milliseconds} lasts at {@code bpm} on the 96 PPQ grid.
      * At least one tick, so the bend still reaches the target.
+     * The length is one rounding of the whole glide, not a chain of shorter pieces.
      */
-    public static long ticks(int bpm, int milliseconds) {
+    public static long ticks(double bpm, int milliseconds) {
         int ms = clampMs(milliseconds);
-        int tempo = Math.max(1, bpm);
+        double tempo = Math.max(Tempo.STEP, bpm);
         long ticks = Math.round(ms * (tempo / 60_000.0) * SequenceBuilder.PPQ);
         return Math.max(1, ticks);
     }

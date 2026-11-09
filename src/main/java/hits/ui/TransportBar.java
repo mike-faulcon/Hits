@@ -4,6 +4,7 @@ import hits.Beat;
 import hits.Editor;
 import hits.Player;
 import hits.TapTempo;
+import hits.Tempo;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -24,6 +25,9 @@ import java.awt.Font;
 import java.awt.Window;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.util.Locale;
 import java.util.OptionalInt;
 
 /** Play/stop, tempo, tap tempo, the metronome, swing, pattern slots A–H, copy, and the beat name. */
@@ -33,7 +37,7 @@ final class TransportBar {
     private final Sync sync;
     private final StatusLine status;
     private final JButton play = Widgets.button("Play");
-    private final JSpinner bpm = new JSpinner(new SpinnerNumberModel(96, Beat.MIN_BPM, Beat.MAX_BPM, 1));
+    private final JSpinner bpm = bpmSpinner();
     private final JButton tap = Widgets.button("Tap");
     private final JButton click = Widgets.button("Click");
     private final TapTempo tapTempo = new TapTempo();
@@ -66,12 +70,13 @@ final class TransportBar {
         bar.add(play);
         bar.add(Box.createHorizontalStrut(16));
         JLabel bpmLabel = Widgets.label("BPM");
-        String tempoTip = "Tempo, from " + Beat.MIN_BPM + " to " + Beat.MAX_BPM + ".";
+        String tempoTip = "Tempo, from " + Beat.MIN_BPM + " to " + Beat.MAX_BPM
+            + ". Hundredths are fine, such as 92.5. The arrows step by 1.";
         bpmLabel.setToolTipText(tempoTip);
         bpm.setToolTipText(tempoTip);
         bar.add(bpmLabel);
         bar.add(Box.createHorizontalStrut(6));
-        Widgets.fix(bpm, 72, 32);
+        Widgets.fix(bpm, 88, 32);
         bar.add(bpm);
         bar.add(Box.createHorizontalStrut(8));
         tap.setToolTipText("Tap tempo. T does this unless you are typing. A pause starts over.");
@@ -124,7 +129,10 @@ final class TransportBar {
             if (sync.on()) {
                 return;
             }
-            int value = (Integer) bpm.getValue();
+            double value = ((Number) bpm.getValue()).doubleValue();
+            if (Tempo.centi(value) == Tempo.centi(editor.beat().bpm())) {
+                return;
+            }
             editor.edit(beat -> beat.setBpm(value));
         });
         swingDrag.wire(swing, beat -> beat.setSwing(swing.getValue()));
@@ -152,7 +160,10 @@ final class TransportBar {
 
     void refresh() {
         var beat = editor.beat();
-        bpm.setValue(beat.bpm());
+        JTextField bpmText = ((JSpinner.NumberEditor) bpm.getEditor()).getTextField();
+        if (!bpmText.isFocusOwner() && Tempo.centi(((Number) bpm.getValue()).doubleValue()) != Tempo.centi(beat.bpm())) {
+            bpm.setValue(beat.bpm());
+        }
         if (!swing.getValueIsAdjusting()) {
             swing.setValue(beat.swing());
         }
@@ -196,7 +207,7 @@ final class TransportBar {
             return;
         }
         int bpmValue = next.getAsInt();
-        if (bpmValue != editor.beat().bpm()) {
+        if (Tempo.centi(bpmValue) != Tempo.centi(editor.beat().bpm())) {
             editor.edit(beat -> beat.setBpm(bpmValue));
         }
         status.set(bpmValue + " BPM");
@@ -246,6 +257,32 @@ final class TransportBar {
         play.setText(playShown ? "Stop" : "Play");
         play.setBackground(playShown ? Theme.PLAY : Theme.PANEL);
         play.setForeground(playShown ? Theme.INK : Theme.TEXT);
+    }
+
+    /**
+     * Tempo box. Arrows move by 1 BPM. A typed value can use hundredths, and a whole number
+     * is shown without a decimal.
+     */
+    static JSpinner bpmSpinner() {
+        JSpinner spinner = new JSpinner(new SpinnerNumberModel(
+            Beat.DEFAULT_BPM,
+            (double) Beat.MIN_BPM,
+            (double) Beat.MAX_BPM,
+            1.0
+        ));
+        spinner.setName("bpm");
+        JSpinner.NumberEditor editor = new JSpinner.NumberEditor(spinner, "0.##");
+        DecimalFormat format = (DecimalFormat) editor.getFormat();
+        format.setDecimalFormatSymbols(DecimalFormatSymbols.getInstance(Locale.ROOT));
+        format.applyPattern("0.##");
+        format.setGroupingUsed(false);
+        format.setMaximumFractionDigits(2);
+        format.setMinimumFractionDigits(0);
+        spinner.setEditor(editor);
+        JTextField field = editor.getTextField();
+        field.setName("bpm");
+        field.getAccessibleContext().setAccessibleName("Tempo");
+        return spinner;
     }
 
     private void focusPattern() {

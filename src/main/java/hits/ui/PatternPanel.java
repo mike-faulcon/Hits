@@ -50,7 +50,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         setFocusable(true);
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        setToolTipText("Click a step. Shift-click makes a loud hit. Ctrl-click or G toggles slide. Drag up or down to set velocity. Drag a lit pad sideways to set its length. Right-click or Alt-click selects it.");
+        setToolTipText("Click a step. Shift-click makes a loud hit. Ctrl-click or G toggles slide on a note or sample row. Drag up or down to set velocity. Drag a lit pad sideways to set its length. Right-click or Alt-click selects it.");
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
@@ -500,11 +500,13 @@ final class PatternPanel extends JPanel implements Scrollable {
             String held = step.extended() ? " Holds " + step.length() + " steps." : "";
             int offset = editor.viewTrack(row).playedNudge(column);
             String nudged = offset != 0 ? " Nudge " + offset + "%." : "";
-            String glide = step.slide() ? " Slides in from the previous note." : "";
+            String glide = step.slide() && Slide.applies(rowTrack)
+                ? " Slides in from the previous note."
+                : "";
             String past = column >= editor.beat().stepCount(editor.viewSlot())
                 ? " Past this pattern's length, so it does not play."
                 : "";
-            return "Click toggles the step. Shift-click makes a loud hit. Ctrl-click or G toggles slide. Drag up or down to set velocity. Drag a lit pad sideways to set how many steps it holds. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
+            return "Click toggles the step. Shift-click makes a loud hit. Ctrl-click or G toggles slide on a note or sample row. Drag up or down to set velocity. Drag a lit pad sideways to set how many steps it holds. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
                 + pitch + chance + held + nudged + glide + past;
         }
         if (row >= 0) {
