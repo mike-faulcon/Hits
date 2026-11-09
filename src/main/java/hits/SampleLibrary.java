@@ -115,6 +115,15 @@ public final class SampleLibrary {
             text.append(':').append(band.hz())
                 .append(',').append(Db.number(band.gain()))
                 .append(',').append(Db.number(band.q()));
+            if (band.type() != EqBand.Type.PEAK) {
+                text.append(',').append(band.type().json());
+            }
+            if (!band.enabled()) {
+                text.append(",off");
+            }
+        }
+        if (track.eqBypassed() && !track.eqBands().isEmpty()) {
+            text.append(":bypass");
         }
         text.append(":h").append(track.highCutHz());
         if (track.highCutHz() > 0) {

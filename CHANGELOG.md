@@ -1,5 +1,13 @@
 # Changelog
 
+## Three EQ bands
+
+Each row has three EQ bands. A band is a peak, a low shelf, or a high shelf. Peak is the default and is left out of the file, so a beat that already has one or two peaking bands still saves the same bytes and sounds the same. Low shelf and high shelf use the cookbook biquads. A Q near 0.7 is a smooth tilt. A higher Q puts a shoulder on the corner.
+
+On bypasses one band and keeps its settings. Bypass on the EQ heading takes every band out for a comparison, and leaves low cut, high cut, and presence in place. Reset clears the three bands and the high cut. The curve draws the whole row, with a dot for each band: a circle is a peak, a square is a low shelf, and a triangle is a high shelf. Drag a dot to move that band.
+
+`hits info` names the type. A MIDI file and `--samples-sf2` still drop the filters, and the warning names a low shelf, a high shelf, and band 3 when those are what playback uses. A fourth band in a file is dropped, and the warning says a row keeps three.
+
 ## More tracks
 
 A beat starts with the eight kit rows and can hold from 1 to 16. **Add row**, **Remove**, **Duplicate**, **Up**, and **Down** change that row on every pattern, in the step grid and in the mixer. A missing kit piece is filled in, Kick first. When the kit is already there, the new row is a 46 Hz sine named Sub, unless the beat already has one. Later rows are empty drums. Alt+= adds a row, Alt+- removes it, Alt+D duplicates it, and Alt+Up / Alt+Down move it. From 11 rows the grid uses a shorter cell, and the grid and the mixer scroll when the window is shorter than the rows.

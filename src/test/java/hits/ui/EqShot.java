@@ -36,7 +36,8 @@ public final class EqShot {
             kick.setLowCut(120, 24);
             kick.setPresence(4.5);
             kick.setEqBand(0, 950, -6, 1.4);
-            kick.setEqBand(1, 2500, 3.5, 0.7);
+            kick.setEqBand(1, 400, -4, 0.7, hits.EqBand.Type.LOW_SHELF, true);
+            kick.setEqBand(2, 8000, 4, 0.7, hits.EqBand.Type.HIGH_SHELF, true);
             kick.setHighCut(6000, 24);
             holder.editor = new Editor(beat);
             holder.player = new Player();
