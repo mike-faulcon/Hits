@@ -18,14 +18,25 @@ import java.awt.event.KeyEvent;
 import java.util.function.Consumer;
 
 /**
- * Undo, redo, save, and save as, plus space for play/stop and T for tap tempo.
- * There is no menu bar. Shortcuts are installed on the window.
+ * Keys the window handles. {@link #shortcuts()} and {@link #mouseShortcuts()} are the list
+ * Help shows. The dispatchers below use the same key codes.
  */
 final class KeyboardShortcuts {
+    static final int PLAY = KeyEvent.VK_SPACE;
+    static final int TAP = KeyEvent.VK_T;
+    static final int SLIDE = KeyEvent.VK_G;
+    static final int MUTE = KeyEvent.VK_M;
+    static final int SOLO = KeyEvent.VK_S;
+    static final int EARLIER = KeyEvent.VK_COMMA;
+    static final int LATER = KeyEvent.VK_PERIOD;
+    static final int HELP = KeyEvent.VK_F1;
+
+    record Shortcut(String keys, String what) {}
+
     private KeyboardShortcuts() {}
 
     static void install(JRootPane root, Runnable undo, Runnable redo, Runnable save, Runnable saveAs) {
-        int shortcut = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        int shortcut = menuShortcutMask();
         InputMap input = root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
         ActionMap actions = root.getActionMap();
         input.put(KeyStroke.getKeyStroke(KeyEvent.VK_Z, shortcut), "undo");
@@ -78,6 +89,111 @@ final class KeyboardShortcuts {
         return new RowKeys(window, add, remove, duplicate, up, down);
     }
 
+    /** M mutes the selected row. S solos it. A text field still receives the character. */
+    static KeyEventDispatcher muteSolo(Window window, Runnable mute, Runnable solo) {
+        return new MuteSolo(window, mute, solo);
+    }
+
+    /**
+     * Ctrl on Windows and Linux, ⌘ on macOS. The same mask {@link #install} uses.
+     * A headless test run has no menu mask, so it stays Ctrl.
+     */
+    static int menuShortcutMask() {
+        if (java.awt.GraphicsEnvironment.isHeadless()) {
+            return InputEvent.CTRL_DOWN_MASK;
+        }
+        try {
+            return Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        } catch (java.awt.HeadlessException exception) {
+            return InputEvent.CTRL_DOWN_MASK;
+        }
+    }
+
+    static String menuShortcutName() {
+        if ((menuShortcutMask() & InputEvent.META_DOWN_MASK) != 0) {
+            return "⌘";
+        }
+        return "Ctrl";
+    }
+
+    static String keyName(int code) {
+        return switch (code) {
+            case PLAY -> "Space";
+            case EARLIER -> ",";
+            case LATER -> ".";
+            case HELP -> "F1";
+            default -> KeyEvent.getKeyText(code);
+        };
+    }
+
+    /** Label for a row shortcut key, or null when that key is not one. */
+    static String rowLabel(int code) {
+        return switch (code) {
+            case KeyEvent.VK_EQUALS, KeyEvent.VK_PLUS, KeyEvent.VK_ADD -> "Alt+=";
+            case KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> "Alt+-";
+            case KeyEvent.VK_D -> "Alt+D";
+            case KeyEvent.VK_UP -> "Alt+Up";
+            case KeyEvent.VK_DOWN -> "Alt+Down";
+            default -> null;
+        };
+    }
+
+    /** Keyboard shortcuts, in the order Help shows them. Names come from the key codes above. */
+    static java.util.List<Shortcut> shortcuts() {
+        String mod = menuShortcutName();
+        return java.util.List.of(
+            new Shortcut(keyName(PLAY), "Play or stop. A text field still types a space."),
+            new Shortcut(keyName(TAP), "Tap the tempo. A text field still types T."),
+            new Shortcut(keyName(SLIDE), "Toggle slide on the selected step. Note and sample rows, including Sub."),
+            new Shortcut(keyName(EARLIER) + "  " + keyName(LATER), "Nudge the selected step earlier or later."),
+            new Shortcut(keyName(MUTE), "Mute the selected row."),
+            new Shortcut(keyName(SOLO), "Solo the selected row. A muted row stays quiet."),
+            new Shortcut(rowLabel(KeyEvent.VK_EQUALS), "Add a row. Alt and plus, or Alt and the numpad plus, do this too."),
+            new Shortcut(rowLabel(KeyEvent.VK_MINUS), "Remove the selected row. Alt and the numpad minus do this too."),
+            new Shortcut(rowLabel(KeyEvent.VK_D), "Duplicate the selected row."),
+            new Shortcut(rowLabel(KeyEvent.VK_UP), "Move the selected row up."),
+            new Shortcut(rowLabel(KeyEvent.VK_DOWN), "Move the selected row down."),
+            new Shortcut(mod + "+Z", "Undo a grid edit, a row change, or another edit."),
+            new Shortcut(mod + "+Shift+Z", "Redo."),
+            new Shortcut(mod + "+S", "Save."),
+            new Shortcut(mod + "+Shift+S", "Save as."),
+            new Shortcut(keyName(HELP), "Show this list.")
+        );
+    }
+
+    /**
+     * Mouse gestures the grid handles. {@link #gridTip()} is the sentence on the step grid,
+     * and it contains each of these labels.
+     */
+    static java.util.List<Shortcut> mouseShortcuts() {
+        return java.util.List.of(
+            new Shortcut("Click a step", "Turn that step on or off."),
+            new Shortcut("Shift-click", "Turn a step on as a loud hit."),
+            new Shortcut("Ctrl-click", "Toggle slide on a note or sample row. Command-click does this too."),
+            new Shortcut("Right-click", "Select a step without turning it off. Alt-click does this too."),
+            new Shortcut("Drag up or down", "Set how hard that hit is."),
+            new Shortcut("Drag sideways", "Set how many steps a lit hit holds.")
+        );
+    }
+
+    static String gridTip() {
+        return "Click a step to toggle it. Shift-click makes a loud hit. "
+            + "Ctrl-click or G toggles slide on a note or sample row. "
+            + "Drag up or down to set velocity. Drag sideways on a lit pad to set how many steps it holds. "
+            + "Right-click or Alt-click selects it so you can change its volume, chance, or step pitch.";
+    }
+
+    static String shortcutText() {
+        StringBuilder text = new StringBuilder();
+        for (Shortcut shortcut : shortcuts()) {
+            text.append(shortcut.keys()).append("  ").append(shortcut.what()).append('\n');
+        }
+        for (Shortcut shortcut : mouseShortcuts()) {
+            text.append(shortcut.keys()).append("  ").append(shortcut.what()).append('\n');
+        }
+        return text.toString();
+    }
+
     static boolean typing() {
         return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner() instanceof JTextComponent;
     }
@@ -103,7 +219,7 @@ final class KeyboardShortcuts {
 
         @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
-            boolean space = event.getKeyCode() == KeyEvent.VK_SPACE
+            boolean space = event.getKeyCode() == PLAY
                 || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && event.getKeyChar() == ' ');
             if (!space) {
                 return false;
@@ -139,7 +255,7 @@ final class KeyboardShortcuts {
 
         @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
-            boolean tee = event.getKeyCode() == KeyEvent.VK_T
+            boolean tee = event.getKeyCode() == TAP
                 || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && (event.getKeyChar() == 't' || event.getKeyChar() == 'T'));
             if (!tee) {
                 return false;
@@ -175,7 +291,7 @@ final class KeyboardShortcuts {
 
         @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
-            boolean gee = event.getKeyCode() == KeyEvent.VK_G
+            boolean gee = event.getKeyCode() == SLIDE
                 || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && (event.getKeyChar() == 'g' || event.getKeyChar() == 'G'));
             if (!gee) {
                 return false;
@@ -230,10 +346,10 @@ final class KeyboardShortcuts {
         private static Boolean nudgeKey(KeyEvent event) {
             int code = event.getKeyCode();
             char typed = event.getKeyChar();
-            if (code == KeyEvent.VK_COMMA || typed == ',') {
+            if (code == EARLIER || typed == ',') {
                 return Boolean.FALSE;
             }
-            if (code == KeyEvent.VK_PERIOD || typed == '.') {
+            if (code == LATER || typed == '.') {
                 return Boolean.TRUE;
             }
             return null;
@@ -313,5 +429,78 @@ final class KeyboardShortcuts {
                 KeyEvent.VK_D -> true;
             default -> false;
         };
+    }
+
+    /**
+     * A letter with no modifiers, and the cursor is not in a text field.
+     * M and S use this. Space, T, and G keep their own repeat rules.
+     */
+    static boolean plainShortcut(KeyEvent event, int code) {
+        if (event.getID() != KeyEvent.KEY_PRESSED || typing()) {
+            return false;
+        }
+        if (event.getModifiersEx() != 0) {
+            return false;
+        }
+        if (event.getKeyCode() == code) {
+            return true;
+        }
+        if (event.getKeyCode() != KeyEvent.VK_UNDEFINED) {
+            return false;
+        }
+        char typed = event.getKeyChar();
+        String name = keyName(code);
+        return name.length() == 1 && (typed == name.charAt(0) || typed == Character.toLowerCase(name.charAt(0)));
+    }
+
+    private static final class MuteSolo implements KeyEventDispatcher {
+        private final Window window;
+        private final Runnable mute;
+        private final Runnable solo;
+        private boolean muteDown;
+        private boolean soloDown;
+
+        private MuteSolo(Window window, Runnable mute, Runnable solo) {
+            this.window = window;
+            this.mute = mute;
+            this.solo = solo;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent event) {
+            boolean muteKey = event.getKeyCode() == MUTE
+                || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && (event.getKeyChar() == 'm' || event.getKeyChar() == 'M'));
+            boolean soloKey = event.getKeyCode() == SOLO
+                || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && (event.getKeyChar() == 's' || event.getKeyChar() == 'S'));
+            if (!muteKey && !soloKey) {
+                return false;
+            }
+            if (event.getID() == KeyEvent.KEY_RELEASED) {
+                if (muteKey) {
+                    muteDown = false;
+                }
+                if (soloKey) {
+                    soloDown = false;
+                }
+            }
+            if (event.getModifiersEx() != 0 || typing()) {
+                return false;
+            }
+            Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+            if (focused != window) {
+                muteDown = false;
+                soloDown = false;
+                return focused != null && focused.getOwner() == window;
+            }
+            if (event.getID() == KeyEvent.KEY_PRESSED && muteKey && !muteDown) {
+                muteDown = true;
+                SwingUtilities.invokeLater(mute);
+            }
+            if (event.getID() == KeyEvent.KEY_PRESSED && soloKey && !soloDown) {
+                soloDown = true;
+                SwingUtilities.invokeLater(solo);
+            }
+            return true;
+        }
     }
 }

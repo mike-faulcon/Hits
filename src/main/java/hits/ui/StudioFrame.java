@@ -91,6 +91,7 @@ final class StudioFrame extends JFrame {
     private KeyEventDispatcher nudgeKeys;
     private KeyEventDispatcher rowKeys;
     private KeyEventDispatcher slideKeys;
+    private KeyEventDispatcher mixKeys;
 
     StudioFrame(Editor editor, Player player) {
         super("Hits");
@@ -137,6 +138,7 @@ final class StudioFrame extends JFrame {
         inspector.onShuffle(grooves::shuffleSelected);
         browser.onChooseFolder(files::chooseBeatsFolder);
 
+        setJMenuBar(HelpMenu.bar(() -> ShortcutsDialog.show(this)));
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setBackground(Theme.BG);
         getContentPane().setBackground(Theme.BG);
@@ -272,12 +274,18 @@ final class StudioFrame extends JFrame {
             () -> editor.moveRow(-1),
             () -> editor.moveRow(1)
         );
+        mixKeys = KeyboardShortcuts.muteSolo(
+            this,
+            () -> editor.toggleMute(editor.trackIndex()),
+            () -> editor.toggleSolo(editor.trackIndex())
+        );
         KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
         manager.addKeyEventDispatcher(keys);
         manager.addKeyEventDispatcher(tapKeys);
         manager.addKeyEventDispatcher(nudgeKeys);
         manager.addKeyEventDispatcher(slideKeys);
         manager.addKeyEventDispatcher(rowKeys);
+        manager.addKeyEventDispatcher(mixKeys);
     }
 
     private void changed(boolean musical) {
@@ -486,6 +494,10 @@ final class StudioFrame extends JFrame {
         if (rowKeys != null) {
             manager.removeKeyEventDispatcher(rowKeys);
             rowKeys = null;
+        }
+        if (mixKeys != null) {
+            manager.removeKeyEventDispatcher(mixKeys);
+            mixKeys = null;
         }
         playhead.stop();
         exports.close();

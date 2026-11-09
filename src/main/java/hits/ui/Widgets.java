@@ -77,8 +77,6 @@ final class Widgets {
     }
 
     static String message(Throwable exception) {
-        return exception.getMessage() == null || exception.getMessage().isBlank()
-            ? exception.getClass().getSimpleName()
-            : exception.getMessage();
+        return PlainErrors.explain(exception);
     }
 }

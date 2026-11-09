@@ -69,8 +69,8 @@ final class TransportBar {
         play.setToolTipText("Play or stop. Space does this unless you are typing.");
         bar.add(play);
         bar.add(Box.createHorizontalStrut(16));
-        JLabel bpmLabel = Widgets.label("BPM");
-        String tempoTip = "Tempo, from " + Beat.MIN_BPM + " to " + Beat.MAX_BPM
+        JLabel bpmLabel = Widgets.label("Tempo");
+        String tempoTip = "Tempo in BPM, from " + Beat.MIN_BPM + " to " + Beat.MAX_BPM
             + ". Hundredths are fine, such as 92.5. The arrows step by 1.";
         bpmLabel.setToolTipText(tempoTip);
         bpm.setToolTipText(tempoTip);
@@ -78,6 +78,11 @@ final class TransportBar {
         bar.add(Box.createHorizontalStrut(6));
         Widgets.fix(bpm, 88, 32);
         bar.add(bpm);
+        JLabel bpmUnit = Widgets.label("BPM");
+        bpmUnit.setName("bpm-unit");
+        bpmUnit.setToolTipText(tempoTip);
+        bar.add(Box.createHorizontalStrut(4));
+        bar.add(bpmUnit);
         bar.add(Box.createHorizontalStrut(8));
         tap.setToolTipText("Tap tempo. T does this unless you are typing. A pause starts over.");
         bar.add(tap);
@@ -89,9 +94,10 @@ final class TransportBar {
         swingLabel.setToolTipText("50% is straight. Higher values delay every other 16th note.");
         swing.setToolTipText("50% is straight. Higher values delay every other 16th note.");
         bar.add(swingLabel);
-        Widgets.fix(swing, 160, 32);
+        swingValue.setToolTipText("50% is straight. Higher values delay every other 16th note.");
+        Widgets.fix(swing, 120, 32);
         bar.add(swing);
-        Widgets.fix(swingValue, 120, 32);
+        Widgets.fix(swingValue, 108, 32);
         bar.add(swingValue);
         bar.add(Box.createHorizontalStrut(16));
         JLabel patternLabel = Widgets.label("Pattern");
@@ -116,8 +122,9 @@ final class TransportBar {
         bar.add(Box.createHorizontalGlue());
         documentName.setFont(documentName.getFont().deriveFont(Font.BOLD, 16f));
         documentName.setToolTipText("Name stored in the file. The file name keeps letters, numbers, _ and -.");
-        Widgets.fix(documentName, 180, 32);
+        Widgets.fix(documentName, 160, 32);
         bar.add(documentName);
+        Tips.share(bar);
         return bar;
     }
 
