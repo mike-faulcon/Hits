@@ -205,9 +205,11 @@ public final class BeatFiles {
         Sequence sequence = SequenceBuilder.export(beat, options, playing, ready.use());
         Sequence supplement = SequenceBuilder.exportSupplement(beat, options, playing, ready.use());
         if (supplement == null) {
-            return WavRenderer.render(sequence, path, soundbank, ready.bank(), progress, cancelled);
+            return WavRenderer.render(sequence, path, soundbank, ready.bank(), progress, cancelled, beat.bpm());
         }
-        return WavRenderer.renderMixed(sequence, supplement, path, soundbank, ready.bank(), progress, cancelled);
+        return WavRenderer.renderMixed(
+            sequence, supplement, path, soundbank, ready.bank(), progress, cancelled, beat.bpm()
+        );
     }
 
     public static String safeName(String name) {

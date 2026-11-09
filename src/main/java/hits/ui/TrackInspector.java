@@ -583,7 +583,7 @@ final class TrackInspector {
     private void showSlide(Track track, boolean stepChosen, Step selected) {
         boolean glide = Slide.applies(track);
         slideStep.setEnabled(glide && stepChosen);
-        slideStep.setSelected(stepChosen && selected.slide());
+        slideStep.setSelected(glide && stepChosen && selected.slide());
         slideTime.setEnabled(glide);
         slideLinear.setEnabled(glide);
         slideExponential.setEnabled(glide);

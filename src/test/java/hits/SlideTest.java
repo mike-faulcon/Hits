@@ -19,6 +19,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -77,6 +78,56 @@ class SlideTest {
         assertEquals(80, editor.beat().track(1).slideMs());
         editor.undo();
         assertEquals(120, editor.beat().track(1).slideMs());
+    }
+
+    @Test
+    void drumRowsDropTheSlideFlagAndKeepTheRest() throws Exception {
+        Beat beat = Beat.drumKit("kit");
+        beat.track(0).tap(0, false);
+        beat.track(1).setMode(TrackMode.NOTE);
+        beat.track(1).setProgram(38);
+        beat.track(1).tap(1, false);
+        beat.track(1).step(1).setSlide(true);
+        beat.track(2).setMode(TrackMode.SAMPLE);
+        beat.track(2).setSample(new SampleRef("hits:808", 36, 0, true));
+        beat.track(2).tap(2, false);
+        beat.track(2).step(2).setSlide(true);
+        String written = BeatJson.write(beat);
+        assertTrue(written.contains("\"slide\":true"), written);
+        String withDrum = written.replaceFirst(
+            "\\{\"on\":true,\"velocity\":100\\}",
+            "{\"on\":true,\"velocity\":100,\"slide\":true}"
+        );
+        assertNotEquals(written, withDrum);
+        assertTrue(withDrum.contains("\"velocity\":100,\"slide\":true"), withDrum);
+        Beat loaded = BeatJson.read(withDrum);
+        assertFalse(loaded.track(0).step(0).slide(), "a drum step does not keep slide");
+        assertTrue(loaded.track(1).step(1).slide(), "a note step still glides");
+        assertTrue(loaded.track(2).step(2).slide(), "a sample step still glides");
+        assertTrue(loaded.loadWarnings().stream().anyMatch(warning -> warning.contains("drum slide")), loaded.loadWarnings().toString());
+        String saved = BeatJson.write(loaded);
+        assertEquals(written, saved);
+        assertFalse(saved.substring(0, saved.indexOf("\"mode\": \"note\"")).contains("\"slide\":true"), saved);
+
+        Editor editor = new Editor(loaded);
+        editor.selectStep(0, 0);
+        editor.setStepSlide(true);
+        assertFalse(editor.beat().track(0).step(0).slide());
+        editor.toggleSlide(0, 4);
+        assertFalse(editor.beat().track(0).step(4).on(), "G on a drum does not turn the step on");
+        assertFalse(editor.beat().track(0).step(4).slide());
+        editor.toggleSlide(1, 1);
+        assertFalse(editor.beat().track(1).step(1).slide());
+        editor.undo();
+        assertTrue(editor.beat().track(1).step(1).slide());
+
+        Beat memory = Beat.drumKit("memory");
+        memory.track(0).tap(0, false);
+        memory.track(0).step(0).setSlide(true);
+        Beat clean = Beat.drumKit("memory");
+        clean.track(0).tap(0, false);
+        assertEquals(BeatJson.write(clean), BeatJson.write(memory));
+        assertFalse(BeatJson.write(memory).contains("slide"));
     }
 
     @Test

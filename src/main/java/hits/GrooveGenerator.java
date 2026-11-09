@@ -180,7 +180,7 @@ public final class GrooveGenerator {
      * Swung tempos stay boom bap. Straight tempos follow the BPM.
      * A slow straight tempo stays boom bap, which is the friendly default.
      */
-    public static Genre infer(int bpm, int swing) {
+    public static Genre infer(double bpm, int swing) {
         if (swing >= 52) {
             return Genre.BOOM_BAP;
         }

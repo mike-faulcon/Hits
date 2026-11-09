@@ -472,7 +472,13 @@ public final class Player implements AutoCloseable {
             sequencer.setLoopEndPoint(end);
         }
         sequencer.setLoopCount(Sequencer.LOOP_CONTINUOUSLY);
-        sequencer.setTempoInBPM(beat.bpm());
+        if (Tempo.fractional(beat.bpm())) {
+            // Same integer microseconds as the MIDI file, so a loop that replays the
+            // tempo meta does not leave the first pass on a different clock.
+            sequencer.setTempoInMPQ(Tempo.microsecondsPerQuarter(beat.bpm()));
+        } else {
+            sequencer.setTempoInBPM((float) beat.bpm());
+        }
         long at = 0;
         if (loop > 0) {
             at = Math.floorMod(position, loop);

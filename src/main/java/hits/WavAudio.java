@@ -36,17 +36,42 @@ public final class WavAudio {
 
     /** Microseconds from the start of {@code sequence} to {@code tick}, following tempo changes. */
     public static long microsecondsAt(Sequence sequence, long tick) {
-        Clock clock = clock(sequence);
-        return clock.microsAt(Math.max(0, tick));
+        return microsecondsAt(sequence, tick, Double.NaN);
+    }
+
+    /**
+     * Same clock as {@link #microsecondsAt(Sequence, long)}.
+     * A fractional {@code bpm} uses that exact tempo and the absolute tick, so a long
+     * song does not pick up a microsecond of error on every step. A whole-number tempo
+     * keeps the integer meta-event clock, which is what an older file renders.
+     */
+    public static long microsecondsAt(Sequence sequence, long tick, double bpm) {
+        long at = Math.max(0, tick);
+        if (Tempo.fractional(bpm)) {
+            if (sequence == null || sequence.getDivisionType() != Sequence.PPQ || sequence.getResolution() <= 0) {
+                throw new IllegalArgumentException("WAV export expects a tick-based MIDI sequence.");
+            }
+            return Tempo.microsecondsAt(at, bpm, sequence.getResolution());
+        }
+        return clock(sequence).microsAt(at);
     }
 
     /** Time of the last tick. Export places an end marker there, which is the loop end. */
     public static long musicalMicros(Sequence sequence) {
-        return microsecondsAt(sequence, sequence.getTickLength());
+        return musicalMicros(sequence, Double.NaN);
+    }
+
+    /** Loop end at {@code bpm} when that tempo is fractional. Otherwise {@link #musicalMicros(Sequence)}. */
+    public static long musicalMicros(Sequence sequence, double bpm) {
+        return microsecondsAt(sequence, sequence.getTickLength(), bpm);
     }
 
     public static long renderMicros(Sequence sequence) {
-        return musicalMicros(sequence) + TAIL_MICROS;
+        return renderMicros(sequence, Double.NaN);
+    }
+
+    public static long renderMicros(Sequence sequence, double bpm) {
+        return musicalMicros(sequence, bpm) + TAIL_MICROS;
     }
 
     public static long frameCount(long micros) {
@@ -87,7 +112,21 @@ public final class WavAudio {
      * Program and controller changes at a tick go out before note events at that tick.
      */
     public static List<ChannelEvent> channelEvents(Sequence sequence) {
-        Clock clock = clock(sequence);
+        return channelEvents(sequence, Double.NaN);
+    }
+
+    /**
+     * Channel messages in the order they are sent to the synth.
+     * {@code bpm} is the song tempo. A fractional value places each event from its tick
+     * and that tempo. A whole number, or a non-finite value, follows the tempo meta events.
+     */
+    public static List<ChannelEvent> channelEvents(Sequence sequence, double bpm) {
+        boolean exact = Tempo.fractional(bpm);
+        if (exact && (sequence == null || sequence.getDivisionType() != Sequence.PPQ || sequence.getResolution() <= 0)) {
+            throw new IllegalArgumentException("WAV export expects a tick-based MIDI sequence.");
+        }
+        Clock clock = exact ? null : clock(sequence);
+        int resolution = exact ? sequence.getResolution() : 0;
         List<Pending> pending = new ArrayList<>();
         javax.sound.midi.Track[] tracks = sequence.getTracks();
         for (int trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
@@ -108,13 +147,20 @@ public final class WavAudio {
             .thenComparingInt(Pending::index));
         List<ChannelEvent> events = new ArrayList<>(pending.size());
         for (Pending item : pending) {
-            events.add(new ChannelEvent(clock.microsAt(item.tick), item.message));
+            long micros = exact
+                ? Tempo.microsecondsAt(item.tick, bpm, resolution)
+                : clock.microsAt(item.tick);
+            events.add(new ChannelEvent(micros, item.message));
         }
         return events;
     }
 
     static void send(Receiver receiver, Sequence sequence) throws javax.sound.midi.InvalidMidiDataException {
-        for (ChannelEvent event : channelEvents(sequence)) {
+        send(receiver, sequence, Double.NaN);
+    }
+
+    static void send(Receiver receiver, Sequence sequence, double bpm) throws javax.sound.midi.InvalidMidiDataException {
+        for (ChannelEvent event : channelEvents(sequence, bpm)) {
             MidiMessage message = (MidiMessage) event.message().clone();
             receiver.send(message, event.micros());
         }
@@ -131,7 +177,7 @@ public final class WavAudio {
         if (resolution <= 0) {
             throw new IllegalArgumentException("WAV export expects a tick-based MIDI sequence.");
         }
-        List<Tempo> tempos = new ArrayList<>();
+        List<TempoMark> tempos = new ArrayList<>();
         javax.sound.midi.Track[] tracks = sequence.getTracks();
         for (int trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
             javax.sound.midi.Track track = tracks[trackIndex];
@@ -142,16 +188,16 @@ public final class WavAudio {
                     if (data.length >= 3) {
                         long micros = ((data[0] & 0xffL) << 16) | ((data[1] & 0xffL) << 8) | (data[2] & 0xffL);
                         if (micros > 0) {
-                            tempos.add(new Tempo(event.getTick(), trackIndex, index, micros));
+                            tempos.add(new TempoMark(event.getTick(), trackIndex, index, micros));
                         }
                     }
                 }
             }
         }
         tempos.sort(Comparator
-            .comparingLong(Tempo::tick)
-            .thenComparingInt(Tempo::track)
-            .thenComparingInt(Tempo::index));
+            .comparingLong(TempoMark::tick)
+            .thenComparingInt(TempoMark::track)
+            .thenComparingInt(TempoMark::index));
         return new Clock(resolution, tempos);
     }
 
@@ -174,16 +220,16 @@ public final class WavAudio {
         }
     }
 
-    private record Tempo(long tick, int track, int index, long microsPerQuarter) {}
+    private record TempoMark(long tick, int track, int index, long microsPerQuarter) {}
 
     private record Pending(long tick, int priority, int track, int index, ShortMessage message) {}
 
-    private record Clock(int resolution, List<Tempo> tempos) {
+    private record Clock(int resolution, List<TempoMark> tempos) {
         long microsAt(long tick) {
             long usPerQuarter = DEFAULT_US_PER_QUARTER;
             long cursorTick = 0;
             long cursorUs = 0;
-            for (Tempo tempo : tempos) {
+            for (TempoMark tempo : tempos) {
                 if (tempo.tick > tick) {
                     break;
                 }

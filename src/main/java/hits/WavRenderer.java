@@ -69,6 +69,22 @@ public final class WavRenderer {
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException {
+        return render(sequence, path, soundbank, samples, progress, cancelled, Double.NaN);
+    }
+
+    /**
+     * Same render as {@link #render(Sequence, Path, Soundbank, Soundbank, IntConsumer, BooleanSupplier)}.
+     * A fractional {@code bpm} times the file from that tempo. A whole number uses the sequence clock.
+     */
+    public static String render(
+        Sequence sequence,
+        Path path,
+        Soundbank soundbank,
+        Soundbank samples,
+        IntConsumer progress,
+        BooleanSupplier cancelled,
+        double bpm
+    ) throws IOException {
         if (path == null) {
             throw new IOException("Choose a file for the WAV export");
         }
@@ -91,8 +107,8 @@ public final class WavRenderer {
             } catch (MidiUnavailableException exception) {
                 throw unavailable(exception);
             }
-            WavAudio.send(receiver, sequence);
-            long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence));
+            WavAudio.send(receiver, sequence, bpm);
+            long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence, bpm));
             MasterWatch watch = MasterWatch.attach(synthesizer);
             Path parent = path.getParent();
             Path directory = parent == null ? Path.of(".") : parent;
@@ -157,17 +173,34 @@ public final class WavRenderer {
         IntConsumer progress,
         BooleanSupplier cancelled
     ) throws IOException {
+        return renderMixed(sequence, extra, path, soundbank, samples, progress, cancelled, Double.NaN);
+    }
+
+    /**
+     * Same mix as {@link #renderMixed(Sequence, Sequence, Path, Soundbank, Soundbank, IntConsumer, BooleanSupplier)}.
+     * Both synths use {@code bpm} when it is fractional.
+     */
+    public static String renderMixed(
+        Sequence sequence,
+        Sequence extra,
+        Path path,
+        Soundbank soundbank,
+        Soundbank samples,
+        IntConsumer progress,
+        BooleanSupplier cancelled,
+        double bpm
+    ) throws IOException {
         if (extra == null) {
-            return render(sequence, path, soundbank, samples, progress, cancelled);
+            return render(sequence, path, soundbank, samples, progress, cancelled, bpm);
         }
         if (path == null) {
             throw new IOException("Choose a file for the WAV export");
         }
         throwIfCancelled(cancelled);
-        byte[] main = capture(sequence, soundbank, samples);
+        byte[] main = capture(sequence, soundbank, samples, bpm);
         report(progress, 50);
         throwIfCancelled(cancelled);
-        byte[] more = capture(extra, soundbank, samples);
+        byte[] more = capture(extra, soundbank, samples, bpm);
         byte[] mixed = mix(main, more);
         boolean clipped = mixedClipped(main, more, mixed);
         Path temp = null;
@@ -206,7 +239,7 @@ public final class WavRenderer {
     }
 
     /** Stereo PCM for one sequence, with no file written. Used only when a second synth is required. */
-    private static byte[] capture(Sequence sequence, Soundbank soundbank, Soundbank samples) throws IOException {
+    private static byte[] capture(Sequence sequence, Soundbank soundbank, Soundbank samples, double bpm) throws IOException {
         Synthesizer synthesizer = openSynthesizer();
         Receiver receiver = null;
         AudioInputStream stream = null;
@@ -223,8 +256,8 @@ public final class WavRenderer {
             } catch (MidiUnavailableException exception) {
                 throw unavailable(exception);
             }
-            WavAudio.send(receiver, sequence);
-            long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence));
+            WavAudio.send(receiver, sequence, bpm);
+            long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence, bpm));
             if (frames > Integer.MAX_VALUE / WavAudio.BYTES_PER_FRAME) {
                 throw new IOException("The beat is too long to render.");
             }

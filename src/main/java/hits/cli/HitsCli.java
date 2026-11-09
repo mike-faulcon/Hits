@@ -12,6 +12,7 @@ import hits.SampleRef;
 import hits.SampleUse;
 import hits.SequenceBuilder;
 import hits.SoundCatalog;
+import hits.Tempo;
 import hits.Timeline;
 import hits.Track;
 import hits.TrackMode;
@@ -228,7 +229,7 @@ public final class HitsCli {
         List<Timeline.Section> songSections = beat.hasChain() ? Timeline.song(beat) : patternSections;
         StringBuilder text = new StringBuilder();
         text.append(beat.name()).append('\n');
-        text.append("tempo: ").append(beat.bpm()).append(" bpm\n");
+        text.append("tempo: ").append(Tempo.format(beat.bpm())).append(" bpm\n");
         text.append("swing: ").append(beat.swing()).append('%');
         if (beat.swing() == 50) {
             text.append(" straight");
@@ -273,8 +274,8 @@ public final class HitsCli {
                 ));
             }
         }
-        text.append("length: ").append(lengthText(pattern, patternSections)).append('\n');
-        text.append("song: ").append(lengthText(song, songSections)).append('\n');
+        text.append("length: ").append(lengthText(pattern, patternSections, beat.bpm())).append('\n');
+        text.append("song: ").append(lengthText(song, songSections, beat.bpm())).append('\n');
         text.append("sample gain: +").append(SampleRef.GAIN)
             .append(" dB is the default when a sample row does not set gain\n");
         return text.toString();
@@ -367,8 +368,8 @@ public final class HitsCli {
         return text.toString();
     }
 
-    private static String lengthText(Sequence sequence, List<Timeline.Section> sections) {
-        double seconds = WavAudio.musicalMicros(sequence) / 1_000_000.0;
+    private static String lengthText(Sequence sequence, List<Timeline.Section> sections, double bpm) {
+        double seconds = WavAudio.musicalMicros(sequence, bpm) / 1_000_000.0;
         return barPhrase(sections) + ", " + String.format(Locale.ROOT, "%.3f", seconds) + " s";
     }
 

@@ -12,7 +12,7 @@ import java.util.Map;
  * a track {@code pan} or mixer {@code level}, a beat {@code master}, pattern slots {@code c} through {@code h},
  * a per-pattern {@code steps} count, a step {@code len} (note length in steps, omitted at 1),
  * a track {@code legato} flag (omitted when false), a step {@code nudge} (timing percent, omitted at 0),
- * a step {@code slide} flag (omitted when false), a track {@code slideMs} (milliseconds, omitted at 80),
+ * a step {@code slide} flag (omitted when false, and dropped on a drum row), a track {@code slideMs} (milliseconds, omitted at 80),
  * a track {@code slideCurve} ({@code exponential}, omitted when linear),
  * a track {@code shift} (omitted at 0), a track {@code tune} (cents, omitted at 0),
  * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
@@ -30,6 +30,8 @@ import java.util.Map;
  * optional {@code gain} in decibels omitted at {@link SampleRef#GAIN}, in 0.1 dB steps,
  * written as an integer when whole,
  * and optional {@code invert} omitted when false).
+ * {@code bpm} is a number from {@link Beat#MIN_BPM} to {@link Beat#MAX_BPM} in hundredths.
+ * A whole number is written without a decimal, so an older file that stores {@code 96} still saves {@code 96}.
  * Mute and solo are original track fields.
  * A pattern's {@code tracks} array holds {@link Beat#MIN_TRACKS} to {@link Beat#MAX_TRACKS} rows.
  * Eight rows is the kit, and a beat that still has eight writes the same track objects as before.
@@ -52,7 +54,8 @@ public final class BeatJson {
         out.append("{\n");
         field(out, 1, "version", documentVersion(beat), true);
         field(out, 1, "name", beat.name(), true);
-        field(out, 1, "bpm", beat.bpm(), true);
+        indent(out, 1);
+        out.append("\"bpm\": ").append(Tempo.format(beat.bpm())).append(",\n");
         field(out, 1, "swing", beat.swing(), true);
         field(out, 1, "steps", beat.stepCount(), true);
         field(out, 1, "active", String.valueOf(beat.activeSlot()), true);
@@ -86,7 +89,13 @@ public final class BeatJson {
             throw new IllegalArgumentException("Unsupported beat version " + version);
         }
         Beat beat = Beat.drumKit(text(root.get("name")));
-        beat.setBpm(number(root.get("bpm")));
+        double requestedBpm = decimal(root.get("bpm"));
+        beat.setBpm(requestedBpm);
+        if (Math.abs(requestedBpm - beat.bpm()) > 5e-4) {
+            beat.addLoadWarning(
+                "Tempo " + looseNumber(requestedBpm) + " BPM was stored as " + Tempo.format(beat.bpm()) + "."
+            );
+        }
         beat.setSwing(number(root.get("swing")));
         beat.setStepCount(number(root.get("steps")));
         beat.setActiveSlot(Beat.parseSlot(text(root.get("active"))));
@@ -235,7 +244,7 @@ public final class BeatJson {
             if (step.nudge() != 0) {
                 out.append(",\"nudge\":").append(step.nudge());
             }
-            if (step.slide()) {
+            if (step.slide() && Slide.applies(track)) {
                 out.append(",\"slide\":true");
             }
             out.append("}");
@@ -513,6 +522,7 @@ public final class BeatJson {
         }
         List<?> steps = asList(object.get("steps"));
         int count = Math.min(Track.CAPACITY, steps.size());
+        int strippedSlides = 0;
         for (int i = 0; i < count; i++) {
             Map<String, Object> step = asMap(steps.get(i));
             track.step(i).setOn(bool(step.get("on")));
@@ -529,9 +539,19 @@ public final class BeatJson {
             if (step.containsKey("nudge") && step.get("nudge") != null) {
                 track.step(i).setNudge(number(step.get("nudge")));
             }
-            if (step.containsKey("slide") && step.get("slide") != null) {
-                track.step(i).setSlide(bool(step.get("slide")));
+            if (step.containsKey("slide") && step.get("slide") != null && bool(step.get("slide"))) {
+                if (Slide.applies(track)) {
+                    track.step(i).setSlide(true);
+                } else {
+                    strippedSlides++;
+                }
             }
+        }
+        if (strippedSlides > 0) {
+            beat.addLoadWarning(
+                Beat.slotLabel(slot) + " " + track.name() + ": removed " + strippedSlides
+                    + (strippedSlides == 1 ? " drum slide flag." : " drum slide flags.")
+            );
         }
         return track;
     }
@@ -782,6 +802,14 @@ public final class BeatJson {
             return (int) Math.round(decimal);
         }
         throw new IllegalArgumentException("Expected a number");
+    }
+
+    /** A warning number. Whole values drop the decimal. */
+    private static String looseNumber(double value) {
+        if (Double.isFinite(value) && Math.abs(value - Math.rint(value)) < 1e-9) {
+            return Long.toString((long) Math.rint(value));
+        }
+        return Double.toString(value);
     }
 
     /** The number as written. An integer stays exact. A decimal is not rounded here. */
