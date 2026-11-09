@@ -49,7 +49,7 @@ final class StudioFrame extends JFrame {
     private final JButton addRow = rowButton(
         "Add row",
         "add-row",
-        "Add a row on every pattern. Alt and equals. The first extra row is a sine 808 named Sub."
+        "Add a row on every pattern. Alt and equals. A missing kit piece is filled in, Kick first. Otherwise the row is a 46 Hz sine named Sub, unless the beat already has one."
     );
     private final JButton removeRow = rowButton(
         "Remove",

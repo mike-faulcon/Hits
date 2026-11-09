@@ -90,6 +90,7 @@ public final class BeatJson {
         }
         Map<String, Object> slots = requireObject(root, "slots");
         readSlot(beat, 'a', requireObject(slots, "a"), true);
+        requireMatchingCounts(slots, beat.trackCount());
         readSlot(beat, 'b', requireObject(slots, "b"), false);
         for (char slot = 'c'; slot <= 'h'; slot++) {
             Object value = slots.get(String.valueOf(slot));
@@ -320,6 +321,47 @@ public final class BeatJson {
         return out.toString();
     }
 
+    /**
+     * Every pattern has the same number of rows as pattern A.
+     * The message names each pattern that does not, and how many rows it has.
+     */
+    private static void requireMatchingCounts(Map<String, Object> slots, int expected) {
+        List<Character> patterns = new ArrayList<>();
+        List<Integer> counts = new ArrayList<>();
+        for (char slot = 'b'; slot <= 'h'; slot++) {
+            Object value = slots.get(String.valueOf(slot));
+            if (value == null) {
+                continue;
+            }
+            int count = asList(asMap(value).get("tracks")).size();
+            if (count != expected) {
+                patterns.add(slot);
+                counts.add(count);
+            }
+        }
+        if (!patterns.isEmpty()) {
+            throw new IllegalArgumentException(countMismatch(patterns, counts, expected));
+        }
+    }
+
+    private static String countMismatch(List<Character> patterns, List<Integer> counts, int expected) {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < patterns.size(); i++) {
+            if (i > 0) {
+                text.append(i + 1 == patterns.size() ? " and " : ", ");
+            }
+            if (i == 0) {
+                text.append("Pattern ");
+            } else {
+                text.append("pattern ");
+            }
+            text.append(Beat.slotLabel(patterns.get(i))).append(" has ").append(counts.get(i));
+            text.append(counts.get(i) == 1 ? " track" : " tracks");
+        }
+        text.append(", not ").append(expected).append('.');
+        return text.toString();
+    }
+
     private static void readSlot(Beat beat, char slot, Map<String, Object> object, boolean definesCount) {
         if (object.containsKey("steps") && object.get("steps") != null) {
             beat.setSlotSteps(slot, number(object.get("steps")));
@@ -336,7 +378,7 @@ public final class BeatJson {
                 beat.setTrackCount(count);
             }
         } else if (count != beat.trackCount()) {
-            throw new IllegalArgumentException("Every pattern needs " + beat.trackCount() + " tracks");
+            throw new IllegalArgumentException(countMismatch(List.of(slot), List.of(count), beat.trackCount()));
         }
         Track[] parsed = new Track[count];
         for (int i = 0; i < count; i++) {

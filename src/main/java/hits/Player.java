@@ -307,7 +307,9 @@ public final class Player implements AutoCloseable {
         SampleUse use = installSamples(beat, List.of(viewed), !isBuiltIn(), false);
         Soundbank kits = soundbank();
         ChannelPlan plan = ChannelPlan.of(beat, List.of(viewed), kits, use);
-        int channel = plan.channel(track, row);
+        int assigned = plan.channel(track, row);
+        // Preview the instrument. Channel 10 would play a melodic row as a drum.
+        int channel = assigned < 0 ? 0 : assigned;
         int requested = Notes.clamp(note);
         if (track.mode() == TrackMode.SAMPLE && !use.plays(track, row)) {
             requested = track.note();

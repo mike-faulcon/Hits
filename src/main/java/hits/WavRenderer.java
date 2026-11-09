@@ -144,6 +144,172 @@ public final class WavRenderer {
     }
 
     /**
+     * Renders {@code sequence} and {@code extra} on two synths and sums them.
+     * {@code extra} is the melodic rows that could not have a MIDI channel.
+     * A beat that passes null {@code extra} uses {@link #render} unchanged.
+     */
+    public static String renderMixed(
+        Sequence sequence,
+        Sequence extra,
+        Path path,
+        Soundbank soundbank,
+        Soundbank samples,
+        IntConsumer progress,
+        BooleanSupplier cancelled
+    ) throws IOException {
+        if (extra == null) {
+            return render(sequence, path, soundbank, samples, progress, cancelled);
+        }
+        if (path == null) {
+            throw new IOException("Choose a file for the WAV export");
+        }
+        throwIfCancelled(cancelled);
+        byte[] main = capture(sequence, soundbank, samples);
+        report(progress, 50);
+        throwIfCancelled(cancelled);
+        byte[] more = capture(extra, soundbank, samples);
+        byte[] mixed = mix(main, more);
+        boolean clipped = mixedClipped(main, more, mixed);
+        Path temp = null;
+        boolean finished = false;
+        try {
+            Path parent = path.getParent();
+            Path directory = parent == null ? Path.of(".") : parent;
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            temp = Files.createTempFile(directory, "hits-wav", ".part");
+            try (OutputStream out = Files.newOutputStream(temp)) {
+                long frames = mixed.length / WavAudio.BYTES_PER_FRAME;
+                out.write(WavAudio.header(frames));
+                out.write(mixed);
+            }
+            applyUmaskPermissions(temp);
+            moveIntoPlace(temp, path);
+            finished = true;
+            report(progress, 100);
+            return clipped ? "The master output clipped." : null;
+        } catch (IOException exception) {
+            if (exception instanceof Cancelled) {
+                throw exception;
+            }
+            throw writeError(path, exception);
+        } finally {
+            if (temp != null && !finished) {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException ignored) {
+                    // A failed delete should not hide the render error.
+                }
+            }
+        }
+    }
+
+    /** Stereo PCM for one sequence, with no file written. Used only when a second synth is required. */
+    private static byte[] capture(Sequence sequence, Soundbank soundbank, Soundbank samples) throws IOException {
+        Synthesizer synthesizer = openSynthesizer();
+        Receiver receiver = null;
+        AudioInputStream stream = null;
+        try {
+            stream = openStream(synthesizer);
+            if (soundbank != null) {
+                SoundFonts.install(synthesizer, soundbank, synthesizer.getDefaultSoundbank());
+            }
+            if (samples != null) {
+                SoundFonts.install(synthesizer, samples, null);
+            }
+            try {
+                receiver = synthesizer.getReceiver();
+            } catch (MidiUnavailableException exception) {
+                throw unavailable(exception);
+            }
+            WavAudio.send(receiver, sequence);
+            long frames = WavAudio.frameCount(WavAudio.renderMicros(sequence));
+            if (frames > Integer.MAX_VALUE / WavAudio.BYTES_PER_FRAME) {
+                throw new IOException("The beat is too long to render.");
+            }
+            return readStereo(stream, (int) frames);
+        } catch (javax.sound.midi.InvalidMidiDataException exception) {
+            throw new IOException(
+                exception.getMessage() == null ? "The beat could not be rendered." : exception.getMessage(),
+                exception
+            );
+        } finally {
+            if (receiver != null) {
+                receiver.close();
+            }
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (IOException ignored) {
+                    // The synth is closed next.
+                }
+            }
+            if (synthesizer.isOpen()) {
+                synthesizer.close();
+            }
+        }
+    }
+
+    private static byte[] readStereo(AudioInputStream stream, int frames) throws IOException {
+        byte[] pcm = new byte[frames * WavAudio.BYTES_PER_FRAME];
+        int filled = 0;
+        while (filled < pcm.length) {
+            int read = stream.read(pcm, filled, pcm.length - filled);
+            if (read < 0) {
+                break;
+            }
+            if (read == 0) {
+                throw new IOException("The built-in synth stopped rendering.");
+            }
+            filled += read;
+        }
+        return pcm;
+    }
+
+    private static byte[] mix(byte[] main, byte[] more) {
+        int length = Math.max(main.length, more.length);
+        int frames = length / WavAudio.BYTES_PER_FRAME;
+        byte[] mixed = new byte[frames * WavAudio.BYTES_PER_FRAME];
+        for (int frame = 0; frame < frames; frame++) {
+            int offset = frame * WavAudio.BYTES_PER_FRAME;
+            writeSample(mixed, offset, sampleAt(main, offset) + sampleAt(more, offset));
+            writeSample(mixed, offset + 2, sampleAt(main, offset + 2) + sampleAt(more, offset + 2));
+        }
+        return mixed;
+    }
+
+    private static boolean mixedClipped(byte[] main, byte[] more, byte[] mixed) {
+        int frames = mixed.length / WavAudio.BYTES_PER_FRAME;
+        for (int frame = 0; frame < frames; frame++) {
+            int offset = frame * WavAudio.BYTES_PER_FRAME;
+            if (clippedSum(sampleAt(main, offset), sampleAt(more, offset))
+                || clippedSum(sampleAt(main, offset + 2), sampleAt(more, offset + 2))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean clippedSum(int left, int right) {
+        int sum = left + right;
+        return sum > 32767 || sum < -32768;
+    }
+
+    private static int sampleAt(byte[] pcm, int offset) {
+        if (offset < 0 || offset + 1 >= pcm.length) {
+            return 0;
+        }
+        return (short) ((pcm[offset] & 0xff) | (pcm[offset + 1] << 8));
+    }
+
+    private static void writeSample(byte[] pcm, int offset, int sample) {
+        int clamped = Math.max(-32768, Math.min(32767, sample));
+        pcm[offset] = (byte) clamped;
+        pcm[offset + 1] = (byte) (clamped >> 8);
+    }
+
+    /**
      * The same synth path as {@link #render}, mixed to mono and kept in memory.
      * Used to record one built-in hit so a high-pass can be baked into the sample bank.
      * {@code soundbank} null leaves the JDK's default bank loaded, matching a WAV export

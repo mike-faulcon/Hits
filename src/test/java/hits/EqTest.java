@@ -20,6 +20,7 @@ import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -156,8 +157,13 @@ class EqTest {
         assertEquals(6, BeatJson.read(gentle).track(0).highCutSlope());
         assertEquals(gentle, BeatJson.write(BeatJson.read(gentle)));
         assertTrue(beat.track(0).shapeText().contains("high cut 6000 Hz 6 dB/oct"), beat.track(0).shapeText());
-        assertTrue(beat.midiFilterWarning().contains("A Kick high cut 6 dB/oct"), beat.midiFilterWarning());
-        assertTrue(beat.midiFilterWarning().contains("not in the MIDI file"), beat.midiFilterWarning());
+        beat.track(0).tap(0, false);
+        String filterWarning = beat.midiFilterWarning();
+        assertNotNull(filterWarning);
+        assertTrue(filterWarning.contains("Row 1 \"Kick\""), filterWarning);
+        assertTrue(filterWarning.contains("high cut"), filterWarning);
+        assertTrue(filterWarning.contains("EQ"), filterWarning);
+        assertTrue(filterWarning.contains("not in the MIDI file"), filterWarning);
         assertFalse(SampleLibrary.toneToken(beat.track(0), true).equals(SampleLibrary.toneToken(BeatJson.read(steep).track(0), true)));
 
         Beat changed = BeatJson.read(gentle.replace("\"highCutSlope\": 6", "\"highCutSlope\": 24.4"));
@@ -173,16 +179,18 @@ class EqTest {
         assertTrue(ignored.loadWarnings().isEmpty(), ignored.loadWarnings().toString());
 
         Path file = temp.resolve("slope.json");
-        Files.writeString(file, gentle);
+        Files.writeString(file, BeatJson.write(beat));
         Cli info = cli("info", file.toString());
         assertEquals(0, info.code, info.err);
         assertTrue(info.out.contains("high cut 6000 Hz 6 dB/oct"), info.out);
-        assertTrue(info.err.contains("high cut 6 dB/oct"), info.err);
+        assertTrue(info.err.contains("Row 1 \"Kick\""), info.err);
+        assertTrue(info.err.contains("high cut"), info.err);
         assertTrue(info.err.contains("not in the MIDI file"), info.err);
         Path mid = temp.resolve("slope.mid");
         Cli midi = cli("render", file.toString(), "--out", mid.toString());
         assertEquals(0, midi.code, midi.err);
-        assertTrue(midi.err.contains("A Kick high cut 6 dB/oct"), midi.err);
+        assertTrue(midi.err.contains("Row 1 \"Kick\""), midi.err);
+        assertTrue(midi.err.contains("high cut"), midi.err);
         assertTrue(midi.err.contains("not in the MIDI file"), midi.err);
     }
 
@@ -271,7 +279,7 @@ class EqTest {
         );
 
         Path file = temp.resolve("levels.json");
-        Files.writeString(file, hotPresence);
+        Files.writeString(file, hotPresence.replaceFirst("\"on\":false", "\"on\":true"));
         Cli info = cli("info", file.toString());
         assertEquals(0, info.code, info.err);
         assertTrue(info.err.contains("presence 15 dB was clamped to 12 dB"), info.err);
@@ -290,7 +298,7 @@ class EqTest {
         BeatFiles.exportMidi(beat, midi, ExportOptions.matchingPlayback(), null, false);
         javax.sound.midi.Sequence file = MidiSystem.getSequence(midi.toFile());
         assertEquals(Gm.DRUM_CHANNEL, noteChannel(file, 36));
-        assertTrue(beat.midiFilterWarning().contains("A Kick"), beat.midiFilterWarning());
+        assertTrue(beat.midiFilterWarning().contains("Row 1 \"Kick\""), beat.midiFilterWarning());
 
         Path openWav = temp.resolve("kick-open.wav");
         Path cutWav = temp.resolve("kick-eq.wav");

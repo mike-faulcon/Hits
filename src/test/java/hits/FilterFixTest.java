@@ -178,28 +178,32 @@ class FilterFixTest {
         beat.track(1).setProgram(38);
         beat.track(1).setNote(36);
         beat.track(1).setPresence(6);
+        beat.track(0).tap(0, false);
+        beat.track(1).tap(0, false);
         String warning = beat.midiFilterWarning();
-        assertTrue(warning.contains("A Kick"), warning);
-        assertTrue(warning.contains("A Bass"), warning);
+        assertTrue(warning.contains("Row 1 \"Kick\""), warning);
+        assertTrue(warning.contains("low cut"), warning);
+        assertTrue(warning.contains("Row 2 \"Bass\""), warning);
+        assertTrue(warning.contains("presence"), warning);
         assertTrue(warning.contains("companion SoundFont"), warning);
 
         Path json = temp.resolve("warn.json");
         Files.writeString(json, BeatJson.write(beat));
         Cli info = cli("info", json.toString());
         assertEquals(0, info.code, info.err);
-        assertTrue(info.err.contains("A Kick"), info.err);
-        assertTrue(info.err.contains("A Bass"), info.err);
+        assertTrue(info.err.contains("Row 1 \"Kick\""), info.err);
+        assertTrue(info.err.contains("Row 2 \"Bass\""), info.err);
 
         Path mid = temp.resolve("warn.mid");
         Cli midi = cli("render", json.toString(), "--out", mid.toString());
         assertEquals(0, midi.code, midi.err);
-        assertTrue(midi.err.contains("A Kick"), midi.err);
+        assertTrue(midi.err.contains("Row 1 \"Kick\""), midi.err);
         assertTrue(midi.err.contains("not in the MIDI file"), midi.err);
 
         Path sf2 = temp.resolve("warn-sf2.mid");
         Cli companion = cli("render", json.toString(), "--out", sf2.toString(), "--samples-sf2");
         assertEquals(0, companion.code, companion.err);
-        assertTrue(companion.err.contains("A Kick"), companion.err);
+        assertTrue(companion.err.contains("Row 1 \"Kick\""), companion.err);
 
         Path wav = temp.resolve("warn.wav");
         Cli audio = cli("render", json.toString(), "--out", wav.toString());

@@ -14,9 +14,12 @@ import java.util.Map;
  * Every other row gets a channel of its own from {@link #POOL}. Channel 15 is last
  * in that pool because the metronome already uses it. Notes, sample tracks, and pitched presets
  * are placed before drums, so a drum is the row that falls back to channel 9
- * when the pool runs out. Rows that still would not fit, and that send the same
- * bank, program, pan, tune, decay, and effects, share one channel instead.
- * A row that still cannot have a channel is named by {@link #channelWarning(Beat)}.
+ * when the pool runs out. A melodic row never uses channel 9. Rows that send the same
+ * bank, program, pan, tune, decay, and effects share one channel instead.
+ * Melodic rows that still would not fit share a channel across time when their notes
+ * do not overlap, with a program change before each note. A melodic row that overlaps
+ * every free channel is left out of the MIDI file. WAV export plays it on a second synth.
+ * {@link #channelWarning(Beat)} names a real conflict, not a drum that is alone on channel 9.
  * An eight-row beat that fits the pool keeps channel == row, the same as before.
  * A sample that loaded keeps its own channel.
  * A sample that falls back plays its drum note on channel 9, because Gervill
@@ -78,6 +81,12 @@ public final class ChannelPlan {
      * so the plain hit plays the filtered recording.
      */
     private final boolean[] collided;
+    /** This row shares its channel across time, so each note sends the program again. */
+    private final boolean[] timeShared;
+    /** Lowest row index that plays on each MIDI channel, or -1. */
+    private int[] channelOwner = new int[16];
+    /** Patterns this plan was built for. */
+    private List<Character> plannedSlots = List.of();
 
     private ChannelPlan(
         int[] reserved,
@@ -88,7 +97,8 @@ public final class ChannelPlan {
         SampleUse samples,
         int[] sampleChannel,
         boolean[] acousticNine,
-        boolean[] collided
+        boolean[] collided,
+        boolean[] timeShared
     ) {
         this.reserved = reserved;
         this.overflow = overflow;
@@ -99,6 +109,8 @@ public final class ChannelPlan {
         this.sampleChannel = sampleChannel == null ? emptyChannels(reserved.length) : sampleChannel;
         this.acousticNine = acousticNine == null ? new boolean[reserved.length] : acousticNine;
         this.collided = collided == null ? new boolean[reserved.length] : collided;
+        this.timeShared = timeShared == null ? new boolean[reserved.length] : timeShared;
+        java.util.Arrays.fill(channelOwner, -1);
     }
 
     private static int[] emptyChannels(int count) {
@@ -209,11 +221,14 @@ public final class ChannelPlan {
                 signatures(beat, slots, count, kits, samples, needsPrivate)
             );
         }
+        boolean[] timeShared = new boolean[count];
+        multiplex(assigned, timeShared, beat, slots, melodic);
+        forgiveLoneDrums(assigned, beat, slots, kits, samples);
         int[] sampleChannel = emptyChannels(count);
         boolean[] acousticNine = new boolean[count];
         boolean[] collided = new boolean[count];
         separate(assigned, sampleVoice, acousticPrivate, acousticMelodic, sampleChannel, acousticNine, collided);
-        return new ChannelPlan(
+        ChannelPlan plan = new ChannelPlan(
             assigned.reserved,
             assigned.overflow,
             presetRow,
@@ -222,40 +237,49 @@ public final class ChannelPlan {
             samples,
             sampleChannel,
             acousticNine,
-            collided
+            collided,
+            timeShared
         );
+        plan.remember(beat, slots);
+        return plan;
     }
 
     /**
      * Why this plan cannot play every row on its own channel, or null when it can.
-     * Compatible rows already share. The named rows are the ones that still collide.
+     * A drum that is alone on channel 10 is not a conflict. Compatible rows already share.
+     * The text names the row, its number, and the pattern when two rows really disagree.
      */
     public String channelWarning(Beat beat) {
         if (beat == null) {
             return null;
         }
-        List<String> crowded = new ArrayList<>();
-        List<String> plain = new ArrayList<>();
-        int rows = Math.min(reserved.length, beat.trackCount());
-        Track[] tracks = beat.activeTracks();
-        for (int row = 0; row < rows; row++) {
-            String label = (row + 1) + " " + tracks[row].name();
-            if (overflow(row) || collided(row)) {
-                crowded.add(label);
-            } else if (acousticNine(row)) {
-                plain.add(label);
-            }
-        }
-        if (crowded.isEmpty() && plain.isEmpty()) {
-            return null;
-        }
         StringBuilder text = new StringBuilder();
-        if (!crowded.isEmpty()) {
-            text.append("Not enough MIDI channels. Channel 10 is drums, and the other 15 are already used. ");
-            text.append(String.join(", ", crowded));
-            text.append(crowded.size() == 1 ? " shares" : " share");
-            text.append(" a channel, so the sound can be wrong. ");
-            text.append("Rows with the same instrument, pan, tune, decay, and effects share one channel.");
+        int rows = Math.min(reserved.length, beat.trackCount());
+        List<Character> slots = plannedSlots.isEmpty() ? List.of(beat.activeSlot()) : plannedSlots;
+        for (int row = 0; row < rows; row++) {
+            if (!omitted(row)) {
+                continue;
+            }
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            Track track = beat.slot(slots.get(0))[row];
+            text.append("Row ").append(row + 1).append(" \"").append(track.name()).append("\"");
+            text.append(" has no free MIDI channel. Its notes overlap the other rows, ");
+            text.append("so it is left out of the MIDI file instead of playing as a drum. ");
+            text.append("WAV export still plays it.");
+        }
+        appendShareWarnings(text, beat, slots, rows);
+        List<String> plain = new ArrayList<>();
+        List<String> collidedRows = new ArrayList<>();
+        Track[] active = beat.activeTracks();
+        for (int row = 0; row < rows; row++) {
+            String label = "Row " + (row + 1) + " \"" + active[row].name() + "\"";
+            if (acousticNine(row)) {
+                plain.add(label);
+            } else if (collided(row)) {
+                collidedRows.add(label);
+            }
         }
         if (!plain.isEmpty()) {
             if (text.length() > 0) {
@@ -263,9 +287,366 @@ public final class ChannelPlan {
             }
             text.append(String.join(", ", plain));
             text.append(plain.size() == 1 ? " has" : " have");
-            text.append(" a filtered hit and a plain hit and no free channel, so the plain hit uses the drum channel.");
+            text.append(" a filtered hit and a plain hit and no free channel, so the plain hit uses MIDI channel 10.");
+        }
+        if (!collidedRows.isEmpty()) {
+            if (text.length() > 0) {
+                text.append(' ');
+            }
+            text.append(String.join(", ", collidedRows));
+            text.append(collidedRows.size() == 1 ? " has" : " have");
+            text.append(" a filtered hit and a plain hit and no free channel, so the plain hit plays the filtered recording.");
+        }
+        return text.length() == 0 ? null : text.toString();
+    }
+
+    private void appendShareWarnings(StringBuilder text, Beat beat, List<Character> slots, int rows) {
+        Map<Integer, List<Integer>> rowsOnChannel = new LinkedHashMap<>();
+        for (char slot : slots) {
+            Track[] tracks = beat.slot(slot);
+            int limit = Math.min(rows, tracks.length);
+            for (int row = 0; row < limit; row++) {
+                if (timeShared(row) || omitted(row)) {
+                    continue;
+                }
+                int channel = channel(tracks[row], row);
+                if (channel < 0 || channel > 15) {
+                    continue;
+                }
+                rowsOnChannel.computeIfAbsent(channel, ignored -> new ArrayList<>());
+                List<Integer> onChannel = rowsOnChannel.get(channel);
+                if (!onChannel.contains(row)) {
+                    onChannel.add(row);
+                }
+            }
+        }
+        for (Map.Entry<Integer, List<Integer>> entry : rowsOnChannel.entrySet()) {
+            List<Integer> onChannel = entry.getValue();
+            if (onChannel.size() < 2) {
+                continue;
+            }
+            int channel = entry.getKey();
+            int owner = onChannel.get(0);
+            for (int row : onChannel) {
+                if (row < owner) {
+                    owner = row;
+                }
+            }
+            for (int row : onChannel) {
+                if (row == owner) {
+                    continue;
+                }
+                List<String> diffs = new ArrayList<>();
+                List<String> patterns = new ArrayList<>();
+                String guestName = null;
+                String ownerName = null;
+                for (char slot : slots) {
+                    Track[] tracks = beat.slot(slot);
+                    if (row >= tracks.length || owner >= tracks.length) {
+                        continue;
+                    }
+                    if (channel(tracks[row], row) != channel || channel(tracks[owner], owner) != channel) {
+                        continue;
+                    }
+                    List<String> here = settingDiffs(tracks[row], tracks[owner], row, owner);
+                    if (here.isEmpty()) {
+                        continue;
+                    }
+                    if (guestName == null) {
+                        guestName = tracks[row].name();
+                        ownerName = tracks[owner].name();
+                    }
+                    patterns.add(Beat.slotLabel(slot));
+                    for (String diff : here) {
+                        if (!diffs.contains(diff)) {
+                            diffs.add(diff);
+                        }
+                    }
+                }
+                if (diffs.isEmpty()) {
+                    continue;
+                }
+                if (text.length() > 0) {
+                    text.append(' ');
+                }
+                text.append("Row ").append(row + 1).append(" \"").append(guestName).append("\"");
+                text.append(patterns.size() == 1 ? " in pattern " : " in patterns ");
+                text.append(joinEnglish(patterns));
+                text.append(" shares MIDI channel ").append(channel + 1);
+                text.append(" with row ").append(owner + 1).append(" \"").append(ownerName).append("\"");
+                text.append("; their ").append(joinEnglish(diffs));
+                text.append(diffs.size() == 1 ? " differs" : " differ");
+                text.append(", so MIDI playback will use row ").append(owner + 1).append("'s ");
+                text.append(joinEnglish(diffs)).append('.');
+            }
+        }
+    }
+
+    private List<String> settingDiffs(Track guest, Track owner, int guestRow, int ownerRow) {
+        List<String> diffs = new ArrayList<>();
+        String guestVoice = voiceSignature(guest, guestRow, kits, samples);
+        String ownerVoice = voiceSignature(owner, ownerRow, kits, samples);
+        String[] left = guestVoice.split("\\|", -1);
+        String[] right = ownerVoice.split("\\|", -1);
+        if (left.length < 3 || right.length < 3 || !left[0].equals(right[0]) || !left[1].equals(right[1]) || !left[2].equals(right[2])) {
+            diffs.add("instrument");
+        }
+        if (guest.pan() != owner.pan()) {
+            diffs.add("pan");
+        }
+        if (guest.tune() != owner.tune()) {
+            diffs.add("tune");
+        }
+        if (guest.decay() != owner.decay()) {
+            diffs.add("decay");
+        }
+        if (guest.reverb() != owner.reverb()) {
+            diffs.add("reverb");
+        }
+        if (guest.chorus() != owner.chorus()) {
+            diffs.add("chorus");
+        }
+        if (guest.cutoff() != owner.cutoff()) {
+            diffs.add("cutoff");
+        }
+        if (guest.resonance() != owner.resonance()) {
+            diffs.add("resonance");
+        }
+        return diffs;
+    }
+
+    private static String joinEnglish(List<String> items) {
+        if (items.isEmpty()) {
+            return "";
+        }
+        if (items.size() == 1) {
+            return items.get(0);
+        }
+        if (items.size() == 2) {
+            return items.get(0) + " and " + items.get(1);
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                text.append(i + 1 == items.size() ? ", and " : ", ");
+            }
+            text.append(items.get(i));
         }
         return text.toString();
+    }
+
+    private void remember(Beat beat, List<Character> slots) {
+        plannedSlots = slots == null ? List.of() : List.copyOf(slots);
+        channelOwner = new int[16];
+        java.util.Arrays.fill(channelOwner, -1);
+        if (beat == null || slots == null) {
+            return;
+        }
+        for (char slot : slots) {
+            Track[] tracks = beat.slot(slot);
+            int limit = Math.min(reserved.length, tracks.length);
+            for (int row = 0; row < limit; row++) {
+                int channel = channel(tracks[row], row);
+                if (channel < 0 || channel >= channelOwner.length) {
+                    continue;
+                }
+                if (channelOwner[channel] < 0 || row < channelOwner[channel]) {
+                    channelOwner[channel] = row;
+                }
+            }
+        }
+    }
+
+    /**
+     * Puts an unplaced melodic row on another melodic channel when the two never sound together.
+     * The sequence writer sends a program change before each note. Overlapping rows stay unplaced.
+     */
+    private static void multiplex(
+        ChannelPlan assigned,
+        boolean[] timeShared,
+        Beat beat,
+        List<Character> slots,
+        boolean[] melodic
+    ) {
+        if (beat == null || slots == null) {
+            return;
+        }
+        int count = assigned.reserved.length;
+        for (int row = 0; row < count; row++) {
+            if (!assigned.overflow[row] || assigned.reserved[row] >= 0) {
+                continue;
+            }
+            if (row >= melodic.length || !melodic[row]) {
+                continue;
+            }
+            int host = multiplexHost(assigned, beat, slots, melodic, row);
+            if (host < 0) {
+                continue;
+            }
+            assigned.reserved[row] = assigned.reserved[host];
+            assigned.overflow[row] = false;
+            if (row < timeShared.length) {
+                timeShared[row] = true;
+            }
+            if (host < timeShared.length) {
+                timeShared[host] = true;
+            }
+        }
+    }
+
+    private static int multiplexHost(
+        ChannelPlan assigned,
+        Beat beat,
+        List<Character> slots,
+        boolean[] melodic,
+        int row
+    ) {
+        int count = assigned.reserved.length;
+        for (int other = 0; other < count; other++) {
+            if (other == row || other >= melodic.length || !melodic[other]) {
+                continue;
+            }
+            int channel = assigned.reserved[other];
+            if (channel < 0 || channel == Gm.DRUM_CHANNEL) {
+                continue;
+            }
+            if (sharesTime(assigned, beat, slots, row, channel)) {
+                continue;
+            }
+            return other;
+        }
+        return -1;
+    }
+
+    /** True when {@code row} sounds at the same time as any row already on {@code channel}. */
+    private static boolean sharesTime(ChannelPlan assigned, Beat beat, List<Character> slots, int row, int channel) {
+        int count = assigned.reserved.length;
+        for (int other = 0; other < count; other++) {
+            if (other == row || assigned.reserved[other] != channel) {
+                continue;
+            }
+            if (notesOverlap(beat, slots, row, other)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean notesOverlap(Beat beat, List<Character> slots, int left, int right) {
+        for (char slot : slots) {
+            Track[] tracks = beat.slot(slot);
+            if (left >= tracks.length || right >= tracks.length) {
+                continue;
+            }
+            if (stepsOverlap(tracks[left], tracks[right], beat.stepCount(slot))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean stepsOverlap(Track left, Track right, int steps) {
+        boolean[] busy = occupied(left, steps);
+        int limit = Math.min(steps, Track.CAPACITY);
+        for (int step = 0; step < limit; step++) {
+            if (!right.step(step).on()) {
+                continue;
+            }
+            int length = occupiedLength(right, step, steps);
+            for (int index = step; index < step + length && index < busy.length; index++) {
+                if (busy[index]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean[] occupied(Track track, int steps) {
+        boolean[] busy = new boolean[Track.CAPACITY];
+        int limit = Math.min(steps, Track.CAPACITY);
+        for (int step = 0; step < limit; step++) {
+            if (!track.step(step).on()) {
+                continue;
+            }
+            int length = occupiedLength(track, step, steps);
+            for (int index = step; index < step + length && index < busy.length; index++) {
+                busy[index] = true;
+            }
+        }
+        return busy;
+    }
+
+    private static int occupiedLength(Track track, int step, int steps) {
+        int length = Math.max(1, track.step(step).length());
+        if (track.legato() && track.mode() == TrackMode.NOTE) {
+            int next = -1;
+            int limit = Math.min(steps, Track.CAPACITY);
+            for (int later = step + 1; later < limit; later++) {
+                if (track.step(later).on()) {
+                    next = later;
+                    break;
+                }
+            }
+            length = next < 0 ? Math.max(1, steps - step) : next - step;
+        }
+        return Math.max(1, length);
+    }
+
+    /**
+     * A drum that landed on channel 9 by itself, or with other drums that send the same channel
+     * state, is not a conflict. A different pan or instrument on that channel stays a conflict.
+     */
+    private static void forgiveLoneDrums(
+        ChannelPlan assigned,
+        Beat beat,
+        List<Character> slots,
+        Soundbank kits,
+        SampleUse samples
+    ) {
+        if (beat == null || slots == null) {
+            return;
+        }
+        int count = assigned.reserved.length;
+        for (int row = 0; row < count; row++) {
+            if (!assigned.overflow[row] || assigned.reserved[row] != Gm.DRUM_CHANNEL) {
+                continue;
+            }
+            if (!drumChannelConflicts(assigned, beat, slots, kits, samples, row)) {
+                assigned.overflow[row] = false;
+            }
+        }
+    }
+
+    private static boolean drumChannelConflicts(
+        ChannelPlan assigned,
+        Beat beat,
+        List<Character> slots,
+        Soundbank kits,
+        SampleUse samples,
+        int row
+    ) {
+        for (char slot : slots) {
+            Track[] tracks = beat.slot(slot);
+            if (row >= tracks.length) {
+                continue;
+            }
+            String mine = voiceSignature(tracks[row], row, kits, samples);
+            int limit = Math.min(assigned.reserved.length, tracks.length);
+            for (int other = 0; other < limit; other++) {
+                if (other == row) {
+                    continue;
+                }
+                if (assigned.channel(tracks[other], other) != Gm.DRUM_CHANNEL) {
+                    continue;
+                }
+                String theirs = voiceSignature(tracks[other], other, kits, samples);
+                if (!mine.equals(theirs)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** True when {@code row} cannot be rendered on a channel that matches its sound. */
@@ -341,7 +722,7 @@ public final class ChannelPlan {
             }
         }
         return new ChannelPlan(
-            reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null
+            reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null, null
         );
     }
 
@@ -505,7 +886,7 @@ public final class ChannelPlan {
         boolean[] taken = new boolean[16];
         place(reserved, overflow, taken, needsPrivate, melodic, true);
         place(reserved, overflow, taken, needsPrivate, melodic, false);
-        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null);
+        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null, null);
     }
 
     private static void place(
@@ -531,7 +912,8 @@ public final class ChannelPlan {
                 channel = nextFree(taken);
             }
             if (channel < 0) {
-                reserved[row] = Gm.DRUM_CHANNEL;
+                // A melodic row stays unplaced. Channel 9 would play it as a drum.
+                reserved[row] = wantMelodic ? -1 : Gm.DRUM_CHANNEL;
                 overflow[row] = true;
             } else {
                 reserved[row] = channel;
@@ -585,10 +967,69 @@ public final class ChannelPlan {
         if (row >= 0 && row < reserved.length && reserved[row] >= 0) {
             return reserved[row];
         }
+        if (overflow(row)) {
+            return -1;
+        }
         if (inPool(row)) {
             return row;
         }
         return Gm.DRUM_CHANNEL;
+    }
+
+    /** True when {@code row} has no MIDI channel and must not be written as a drum. */
+    public boolean omitted(int row) {
+        return overflow(row) && reserved(row) < 0;
+    }
+
+    /** True when any row is {@link #omitted(int)}. WAV export plays those on a second synth. */
+    public boolean hasOmitted() {
+        for (int row = 0; row < reserved.length; row++) {
+            if (omitted(row)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Melodic channel for an {@link #omitted(int)} row on the second synth.
+     * Channel 9 is not used. -1 when the row is not omitted.
+     */
+    public int wavChannel(int row) {
+        if (!omitted(row)) {
+            return -1;
+        }
+        int index = 0;
+        for (int other = 0; other < row; other++) {
+            if (omitted(other)) {
+                index++;
+            }
+        }
+        if (index >= POOL.length) {
+            index = POOL.length - 1;
+        }
+        return POOL[index];
+    }
+
+    /** True when notes on this row must send bank, program, and pan again. */
+    public boolean timeShared(int row) {
+        return row >= 0 && row < timeShared.length && timeShared[row];
+    }
+
+    /**
+     * True when an overflow row would replace the channel owner's pan or instrument.
+     * A row that already fit still writes its setup, so an eight-row beat keeps its MIDI.
+     * A time-shared row writes its own setup before each note.
+     */
+    public boolean skipSetup(int row) {
+        if (timeShared(row) || omitted(row) || !overflow(row)) {
+            return false;
+        }
+        int channel = reserved(row);
+        if (channel < 0 || channel >= channelOwner.length) {
+            return false;
+        }
+        return channelOwner[channel] != row;
     }
 
     /** The private channel reserved for {@code row}, or -1 when the row shares channel 9. */

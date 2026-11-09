@@ -2,9 +2,11 @@
 
 ## More tracks
 
-A beat starts with the eight kit rows and can hold from 1 to 16. **Add row**, **Remove**, **Duplicate**, **Up**, and **Down** change that row on every pattern, in the step grid and in the mixer. The first added row is a sine 808 named Sub, so a stop kick can sit under the kit kick. Later rows are empty drums. Alt+= adds a row, Alt+- removes it, Alt+D duplicates it, and Alt+Up / Alt+Down move it. From 11 rows the grid uses a shorter cell, and the grid and the mixer scroll when the window is shorter than the rows.
+A beat starts with the eight kit rows and can hold from 1 to 16. **Add row**, **Remove**, **Duplicate**, **Up**, and **Down** change that row on every pattern, in the step grid and in the mixer. A missing kit piece is filled in, Kick first. When the kit is already there, the new row is a 46 Hz sine named Sub, unless the beat already has one. Later rows are empty drums. Alt+= adds a row, Alt+- removes it, Alt+D duplicates it, and Alt+Up / Alt+Down move it. From 11 rows the grid uses a shorter cell, and the grid and the mixer scroll when the window is shorter than the rows.
 
 The count is the length of each pattern's `tracks` array. There is no new key and no version bump for the count alone. An eight-row beat still loads and saves the same bytes, and a beat that fits the channel pool still renders the same audio, MIDI, and SoundFont. An older Hits that expects eight tracks will not open a longer file. `.btf` is still the 2001 8×16 file.
+
+A new row is chosen from what the beat already has. A missing kit piece comes first, Kick before the rest. The next row is a steady 46 Hz sine named Sub (F#0, about 140 ms to −20 dB) when none is there yet. Its loud-hit value matches the other rows. Another Sub is not added. A melodic row is never sent to the drum channel. Rows that do not overlap share a channel with a program change. An overlapping row that cannot have a channel is left out of the MIDI file, and WAV export plays it on a second synth. Channel warnings name the row, and only when two rows really disagree. The drum Sound picker opens to eight rows.
 
 Every per-row control works on the new rows: drum, note, and sample, presets, tune, decay, cutoff, resonance, reverb, chorus, gain, pan, mute, solo, invert, low cut, the two EQ bands, high cut and its slope, presence, each pattern's steps, and the song chain. Make me a beat still writes the eight kit voices and leaves the extra rows.
 

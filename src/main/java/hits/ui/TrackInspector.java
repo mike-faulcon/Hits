@@ -210,7 +210,7 @@ final class TrackInspector {
         drums.setName("drum-sound");
         kits.setName("drum-kit");
         programs.setName("note-program");
-        drums.setMaximumRowCount(16);
+        drums.setMaximumRowCount(8);
         kits.setMaximumRowCount(8);
         programs.setMaximumRowCount(14);
         for (int note : Gm.DRUM_NOTES) {
@@ -1661,21 +1661,24 @@ final class TrackInspector {
         boolean sampleModeOn = track.mode() == TrackMode.SAMPLE && sample != null;
         choosingSample = true;
         samplePicker.removeAllItems();
+        samplePicker.addItem("Sub");
         samplePicker.addItem("808");
         samplePicker.addItem("Click");
         samplePicker.addItem("Snap");
-        int select = 1;
+        int select = 2;
         if (sampleModeOn) {
             String path = sample.path();
-            if (BuiltinSamples.EIGHT_OH_EIGHT.equals(path)) {
+            if (BuiltinSamples.SUB.equals(path)) {
                 select = 0;
-            } else if (BuiltinSamples.SNAP.equals(path)) {
-                select = 2;
-            } else if (BuiltinSamples.CLICK.equals(path) || path.isBlank()) {
+            } else if (BuiltinSamples.EIGHT_OH_EIGHT.equals(path)) {
                 select = 1;
+            } else if (BuiltinSamples.SNAP.equals(path)) {
+                select = 3;
+            } else if (BuiltinSamples.CLICK.equals(path) || path.isBlank()) {
+                select = 2;
             } else {
                 samplePicker.addItem(sample.label());
-                select = 3;
+                select = 4;
             }
         }
         samplePicker.addItem("Choose WAV…");
@@ -1730,6 +1733,7 @@ final class TrackInspector {
         }
         String label = samplePicker.getItemAt(index);
         String path = switch (label) {
+            case "Sub" -> BuiltinSamples.SUB;
             case "808" -> BuiltinSamples.EIGHT_OH_EIGHT;
             case "Click" -> BuiltinSamples.CLICK;
             case "Snap" -> BuiltinSamples.SNAP;
@@ -1744,6 +1748,11 @@ final class TrackInspector {
         }
         editor.edit(beat -> {
             Track track = onScreen(beat);
+            if (BuiltinSamples.SUB.equals(path)) {
+                track.setSample(SampleRef.builtin(path, BuiltinSamples.SUB_NOTE));
+                track.setNote(BuiltinSamples.SUB_NOTE);
+                return;
+            }
             SampleRef sample = track.sample();
             if (sample == null) {
                 track.setSample(SampleRef.builtin(path, track.note()));

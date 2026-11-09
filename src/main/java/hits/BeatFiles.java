@@ -2,6 +2,7 @@ package hits;
 
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MidiSystem;
+import javax.sound.midi.Sequence;
 import javax.sound.midi.Soundbank;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -201,14 +202,12 @@ public final class BeatFiles {
         SampleLibrary.Ready ready = SampleLibrary.prepare(
             beat, samplesFrom, SequenceBuilder.exportSlots(beat, options), soundbank, true
         );
-        return WavRenderer.render(
-            SequenceBuilder.export(beat, options, playing, ready.use()),
-            path,
-            soundbank,
-            ready.bank(),
-            progress,
-            cancelled
-        );
+        Sequence sequence = SequenceBuilder.export(beat, options, playing, ready.use());
+        Sequence supplement = SequenceBuilder.exportSupplement(beat, options, playing, ready.use());
+        if (supplement == null) {
+            return WavRenderer.render(sequence, path, soundbank, ready.bank(), progress, cancelled);
+        }
+        return WavRenderer.renderMixed(sequence, supplement, path, soundbank, ready.bank(), progress, cancelled);
     }
 
     public static String safeName(String name) {

@@ -6,6 +6,7 @@ import hits.Player;
 
 import javax.accessibility.AccessibleState;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -40,6 +41,9 @@ class InspectorAccessTest {
         JComponent panel = inspector.component();
         SwingUtilities.invokeAndWait(inspector::refresh);
 
+        JComboBox<?> sounds = findCombo(panel, "drum-sound");
+        assertNotNull(sounds, "drum-sound");
+        assertTrue(sounds.getMaximumRowCount() <= 8, "sound picker rows " + sounds.getMaximumRowCount());
         JButton drum = findText(panel, "Drum");
         assertNotNull(drum, "Drum");
         JButton slope12 = find(panel, "low-cut-12");
@@ -110,6 +114,21 @@ class InspectorAccessTest {
         var states = button.getAccessibleContext().getAccessibleStateSet();
         assertEquals(button.isEnabled(), states.contains(AccessibleState.ENABLED), button.getName());
         assertEquals(button.isSelected(), states.contains(AccessibleState.CHECKED), button.getName());
+    }
+
+    private static JComboBox<?> findCombo(Component root, String name) {
+        if (root instanceof JComboBox<?> combo && name.equals(combo.getName())) {
+            return combo;
+        }
+        if (root instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                JComboBox<?> found = findCombo(child, name);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     private static JButton find(Component root, String name) {
