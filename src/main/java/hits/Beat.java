@@ -1,7 +1,9 @@
 package hits;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A saved beat: tempo, swing, length, eight pattern slots, one to sixteen rows,
@@ -162,41 +164,149 @@ public final class Beat {
     }
 
     /**
-     * Rows that use low cut, presence, or EQ, as {@code A Kick, B Bass}.
-     * A high cut also names its slope, as {@code A Kick high cut 12 dB/oct}.
-     * Empty when the beat does not use any of them.
+     * Active pattern, any pattern with a hit, and any pattern named by the chain.
+     * {@code hits info} and the filter warning use this same list.
      */
-    public String filterRowNames() {
-        StringBuilder names = new StringBuilder();
+    public List<Character> patternsInUse() {
+        List<Character> used = new ArrayList<>();
         for (char slot = 'a'; slot <= 'h'; slot++) {
-            for (Track track : slot(slot)) {
-                if (!track.hasTone()) {
-                    continue;
-                }
-                if (names.length() > 0) {
-                    names.append(", ");
-                }
-                names.append(slotLabel(slot)).append(' ').append(track.name());
-                if (track.hasHighCut()) {
-                    names.append(" high cut ").append(track.highCutSlope()).append(" dB/oct");
-                }
+            if (slot == active || patternHasNotes(slot) || chainHas(slot)) {
+                used.add(slot);
             }
         }
-        return names.toString();
+        return used;
+    }
+
+    /** True when any step inside this pattern's length is on. */
+    public boolean patternHasNotes(char slot) {
+        int limit = stepCount(slot);
+        for (Track track : this.slot(slot)) {
+            if (trackHasNotes(track, limit)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean chainHas(char slot) {
+        for (Chain.Part part : chain) {
+            if (part.slot() == slot) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * MIDI export and a companion SoundFont drop low cut, presence, and EQ.
-     * Null when this beat does not use them.
+     * One line per row that has a note in a pattern this song actually uses,
+     * listing the filters MIDI will not carry. Empty when nothing qualifies.
+     */
+    public String filterRowNames() {
+        return midiFilterWarning() == null ? "" : midiFilterWarning();
+    }
+
+    /**
+     * MIDI export drops low cut, EQ, high cut, presence, and invert.
+     * The companion SoundFont drops the same filters except invert, which it keeps.
+     * A row is named only when it has a note in a pattern {@link #patternsInUse()} returns.
+     * Null when nothing qualifies. One line per row.
      */
     public String midiFilterWarning() {
-        String rows = filterRowNames();
-        if (rows.isEmpty()) {
+        StringBuilder lines = new StringBuilder();
+        for (int row = 0; row < trackCount; row++) {
+            List<String> filters = new ArrayList<>();
+            List<String> patterns = new ArrayList<>();
+            String name = null;
+            for (char slot : patternsInUse()) {
+                Track[] tracks = slot(slot);
+                if (row >= tracks.length) {
+                    continue;
+                }
+                Track track = tracks[row];
+                if (!trackHasNotes(track, stepCount(slot))) {
+                    continue;
+                }
+                List<String> dropped = droppedFilters(track);
+                if (dropped.isEmpty()) {
+                    continue;
+                }
+                if (name == null) {
+                    name = track.name();
+                }
+                patterns.add(slotLabel(slot));
+                for (String filter : dropped) {
+                    if (!filters.contains(filter)) {
+                        filters.add(filter);
+                    }
+                }
+            }
+            if (filters.isEmpty()) {
+                continue;
+            }
+            if (lines.length() > 0) {
+                lines.append('\n');
+            }
+            lines.append("Row ").append(row + 1).append(" \"").append(name).append("\" drops ")
+                .append(englishList(filters))
+                .append(patterns.size() == 1 ? " in pattern " : " in patterns ")
+                .append(englishList(patterns))
+                .append('.');
+        }
+        if (lines.length() == 0) {
             return null;
         }
-        return "Low cut, presence, and EQ are not in the MIDI file or the companion SoundFont: "
-            + rows
-            + ". Playback and WAV export use them.";
+        return "Low cut, EQ, high cut, and presence are not in the MIDI file or the companion SoundFont. "
+            + "Invert is not in the MIDI file.\n"
+            + lines
+            + "\nPlayback and WAV export use them.";
+    }
+
+    private static boolean trackHasNotes(Track track, int steps) {
+        int limit = Math.min(steps, Track.CAPACITY);
+        for (int step = 0; step < limit; step++) {
+            if (track.step(step).on()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Filters a MIDI file will not carry, in a stable order. */
+    private static List<String> droppedFilters(Track track) {
+        List<String> filters = new ArrayList<>();
+        if (track.hasLowCut()) {
+            filters.add("low cut");
+        }
+        if (!track.eqBands().isEmpty()) {
+            filters.add("EQ");
+        }
+        if (track.hasHighCut()) {
+            filters.add("high cut");
+        }
+        if (track.hasPresence()) {
+            filters.add("presence");
+        }
+        if (track.mode() == TrackMode.SAMPLE && track.sample() != null && track.sample().invert()) {
+            filters.add("invert");
+        }
+        return filters;
+    }
+
+    private static String englishList(List<String> items) {
+        if (items.size() == 1) {
+            return items.get(0);
+        }
+        if (items.size() == 2) {
+            return items.get(0) + " and " + items.get(1);
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                text.append(i + 1 == items.size() ? ", and " : ", ");
+            }
+            text.append(items.get(i));
+        }
+        return text.toString();
     }
 
     public String name() {
@@ -315,8 +425,8 @@ public final class Beat {
 
     /**
      * Gives every pattern {@code count} rows, from {@link #MIN_TRACKS} to {@link #MAX_TRACKS}.
-     * New rows are the kit voice, then a sine 808 named Sub, then plain drums.
-     * Dropped rows leave every pattern.
+     * A new row fills a missing kit piece, Kick first, then a 46 Hz sine named Sub if the beat
+     * does not already have one, then an empty drum. Dropped rows leave every pattern.
      */
     public void setTrackCount(int count) {
         resize(count);
@@ -770,14 +880,32 @@ public final class Beat {
         if (next == trackCount && slots[0] != null && slots[0].length == next) {
             return;
         }
+        int old = slots[0] == null ? 0 : Math.min(trackCount, slots[0].length);
+        List<Track> known = new ArrayList<>();
+        for (int slot = 0; slot < SLOT_COUNT; slot++) {
+            Track[] current = slots[slot];
+            if (current == null) {
+                continue;
+            }
+            int kept = Math.min(old, Math.min(next, current.length));
+            for (int row = 0; row < kept; row++) {
+                known.add(current[row]);
+            }
+        }
+        Track[] added = new Track[Math.max(0, next - old)];
+        for (int i = 0; i < added.length; i++) {
+            Track created = chooseDefault(known, old + i + 1);
+            added[i] = created;
+            known.add(created);
+        }
         for (int slot = 0; slot < SLOT_COUNT; slot++) {
             Track[] current = slots[slot];
             Track[] resized = new Track[next];
             for (int row = 0; row < next; row++) {
-                if (current != null && row < current.length) {
+                if (current != null && row < current.length && row < old) {
                     resized[row] = current[row];
                 } else {
-                    resized[row] = freshRow(row);
+                    resized[row] = added[row - old].copy();
                 }
             }
             slots[slot] = resized;
@@ -791,25 +919,98 @@ public final class Beat {
     }
 
     private static void fillKit(Track[] tracks) {
+        List<Track> known = new ArrayList<>();
         for (int i = 0; i < tracks.length; i++) {
-            tracks[i] = freshRow(i);
+            Track row = chooseDefault(known, i + 1);
+            tracks[i] = row;
+            known.add(row);
         }
     }
 
     /**
-     * Kit voice for the first eight rows. Row nine is a sine 808 under the kick.
-     * Later rows are empty drums the user can retune.
+     * The next row, from what {@code present} already contains.
+     * Missing kit pieces come first, Kick before Snare and the rest.
+     * Sub is next, and only when no row is already a sub.
+     * Anything further is an empty drum named Track N, where N is the row number.
      */
-    private static Track freshRow(int index) {
-        if (index >= 0 && index < TRACKS) {
-            return new Track(KIT_NAMES[index], TrackMode.DRUM, 0, KIT_NOTES[index]);
+    private static Track chooseDefault(List<Track> present, int rowNumber) {
+        for (int i = 0; i < TRACKS; i++) {
+            if (!kitPresent(present, i)) {
+                return accented(new Track(KIT_NAMES[i], TrackMode.DRUM, 0, KIT_NOTES[i]), present);
+            }
         }
-        if (index == TRACKS) {
-            Track sub = new Track("Sub", TrackMode.SAMPLE, 0, 36);
-            sub.setSample(SampleRef.builtin(BuiltinSamples.EIGHT_OH_EIGHT, 36));
-            return sub;
+        if (!subPresent(present)) {
+            Track sub = new Track("Sub", TrackMode.SAMPLE, 0, BuiltinSamples.SUB_NOTE);
+            sub.setSample(SampleRef.builtin(BuiltinSamples.SUB, BuiltinSamples.SUB_NOTE));
+            return accented(sub, present);
         }
-        return new Track("Track " + (index + 1), TrackMode.DRUM, 0, 36);
+        Track drum = new Track(nextTrackName(present, rowNumber), TrackMode.DRUM, 0, 37);
+        return accented(drum, present);
+    }
+
+    private static boolean kitPresent(List<Track> present, int index) {
+        String name = KIT_NAMES[index];
+        int note = KIT_NOTES[index];
+        for (Track row : present) {
+            if (row.mode() != TrackMode.DRUM || row.preset() != null) {
+                continue;
+            }
+            if (name.equals(row.name()) || row.note() == note) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean subPresent(List<Track> present) {
+        for (Track row : present) {
+            if ("Sub".equals(row.name())) {
+                return true;
+            }
+            if (row.mode() == TrackMode.SAMPLE && row.sample() != null && BuiltinSamples.SUB.equals(row.sample().path())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** {@code Track N} for this row number, or the next free number when that name is taken. */
+    private static String nextTrackName(List<Track> present, int rowNumber) {
+        int n = Math.max(1, rowNumber);
+        String name = "Track " + n;
+        while (nameTaken(present, name)) {
+            n++;
+            name = "Track " + n;
+        }
+        return name;
+    }
+
+    private static boolean nameTaken(List<Track> present, String name) {
+        for (Track row : present) {
+            if (name.equals(row.name())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Loud-hit value shared by the rows already on the beat, so a new row matches them. */
+    private static Track accented(Track track, List<Track> present) {
+        if (present.isEmpty()) {
+            return track;
+        }
+        Map<Integer, Integer> counts = new LinkedHashMap<>();
+        int best = present.get(0).accent();
+        int bestCount = 0;
+        for (Track row : present) {
+            int count = counts.merge(row.accent(), 1, Integer::sum);
+            if (count > bestCount) {
+                best = row.accent();
+                bestCount = count;
+            }
+        }
+        track.setAccent(best);
+        return track;
     }
 
     private static void copyTracks(Track[] from, Track[] to) {

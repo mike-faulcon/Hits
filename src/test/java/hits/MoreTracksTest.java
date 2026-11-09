@@ -122,9 +122,9 @@ class MoreTracksTest {
         IllegalArgumentException wide = assertThrows(IllegalArgumentException.class, () -> BeatJson.read(beatJson(17, 17)));
         assertTrue(wide.getMessage().contains("1 to 16"), wide.getMessage());
         IllegalArgumentException mismatch = assertThrows(IllegalArgumentException.class, () -> BeatJson.read(beatJson(8, 7)));
-        assertEquals("Every pattern needs 8 tracks", mismatch.getMessage());
+        assertEquals("Pattern B has 7 tracks, not 8.", mismatch.getMessage());
         IllegalArgumentException longer = assertThrows(IllegalArgumentException.class, () -> BeatJson.read(beatJson(12, 11)));
-        assertEquals("Every pattern needs 12 tracks", longer.getMessage());
+        assertEquals("Pattern B has 11 tracks, not 12.", longer.getMessage());
     }
 
     @Test
@@ -208,13 +208,18 @@ class MoreTracksTest {
         }
 
         Beat distinct = notes(16, false);
+        for (int row = 0; row < distinct.trackCount(); row++) {
+            distinct.track(row).tap(0, false);
+        }
         ChannelPlan crowded = ChannelPlan.of(distinct, List.of('a'));
         String warning = crowded.channelWarning(distinct);
         assertNotNull(warning);
-        assertTrue(warning.contains("Not enough MIDI channels"), warning);
-        assertTrue(warning.contains("16 V16"), warning);
-        assertTrue(warning.contains("shares a channel"), warning);
-        assertTrue(warning.contains("Rows with the same instrument, pan, tune, decay, and effects share one channel."), warning);
+        assertTrue(warning.contains("Row 16 \"V16\""), warning);
+        assertTrue(warning.contains("left out of the MIDI file"), warning);
+        assertTrue(warning.contains("WAV export still plays it"), warning);
+        assertFalse(warning.contains("channel 10"), warning);
+        assertTrue(crowded.omitted(15));
+        assertEquals(-1, crowded.channel(distinct.track(15), 15));
         assertTrue(crowded.misrendered(15));
         assertFalse(crowded.misrendered(0));
 
@@ -238,10 +243,12 @@ class MoreTracksTest {
 
         Beat spread = drums(16, -1);
         ChannelPlan spreadPlan = ChannelPlan.of(spread, List.of('a'));
-        String spreadWarning = spreadPlan.channelWarning(spread);
-        assertNotNull(spreadWarning);
-        assertTrue(spreadWarning.contains("Not enough MIDI channels"), spreadWarning);
-        assertTrue(spreadPlan.misrendered(15));
+        assertNull(spreadPlan.channelWarning(spread));
+        assertFalse(spreadPlan.misrendered(15));
+        assertEquals(Gm.DRUM_CHANNEL, spreadPlan.channel(spread.track(15), 15));
+        for (int row = 0; row < 15; row++) {
+            assertTrue(spreadPlan.channel(spread.track(row), row) != Gm.DRUM_CHANNEL, "row " + row);
+        }
     }
 
     @Test
@@ -267,7 +274,7 @@ class MoreTracksTest {
         ChannelPlan plan = ChannelPlan.of(beat, List.of('a', 'b'), null, ready.use());
         String warning = plan.channelWarning(beat);
         assertNotNull(warning);
-        assertTrue(warning.contains("16 Layer"), warning);
+        assertTrue(warning.contains("Row 16 \"Layer\""), warning);
         assertTrue(warning.contains("filtered hit and a plain hit"), warning);
         assertTrue(plan.misrendered(15));
         assertEquals(Gm.DRUM_CHANNEL, plan.channel(plain, 15));
@@ -276,19 +283,23 @@ class MoreTracksTest {
     @Test
     void infoAndRenderNameARowThatCannotHaveAChannel(@TempDir Path directory) throws Exception {
         Beat beat = notes(16, false);
+        for (int row = 0; row < beat.trackCount(); row++) {
+            beat.track(row).tap(0, false);
+        }
         Path file = directory.resolve("crowded.json");
         Files.writeString(file, BeatJson.write(beat));
         Path midi = directory.resolve("crowded.mid");
 
         Result info = run("info", file.toString());
         assertEquals(HitsCli.OK, info.code, info.err);
-        assertTrue(info.err.contains("Not enough MIDI channels"), info.err);
-        assertTrue(info.err.contains("16 V16"), info.err);
+        assertTrue(info.err.contains("Row 16 \"V16\""), info.err);
+        assertTrue(info.err.contains("left out of the MIDI file"), info.err);
         assertTrue(info.out.contains("V16"), info.out);
 
         Result rendered = run("render", file.toString(), "--out", midi.toString());
         assertEquals(HitsCli.OK, rendered.code, rendered.err);
-        assertTrue(rendered.err.contains("Not enough MIDI channels"), rendered.err);
+        assertTrue(rendered.err.contains("Row 16 \"V16\""), rendered.err);
+        assertTrue(rendered.err.contains("left out of the MIDI file"), rendered.err);
         assertTrue(Files.size(midi) > 0);
 
         Beat fitted = Beat.drumKit("fits");

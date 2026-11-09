@@ -5,7 +5,6 @@ import hits.BeatFiles;
 import hits.Chain;
 import hits.ChannelPlan;
 import hits.ExportOptions;
-import hits.GrooveGenerator;
 import hits.Notes;
 import hits.SampleLibrary;
 import hits.SamplePaths;
@@ -50,8 +49,8 @@ public final class HitsCli {
         + "render writes the active pattern once, as heard. --song writes the whole chain.\n"
         + "The output type comes from the extension (.wav, .mid, or .midi).\n"
         + "WAV uses the built-in General MIDI synth plus the beat's sample bank, and does not open an audio device.\n"
-        + "Low cut, presence, and EQ are in the WAV. A MIDI file keeps the ordinary note and does not carry them, and says so on stderr.\n"
-        + "Rows that need more than the 16 MIDI channels share a channel when the instrument, pan, and effects match. hits info and hits render name a row that still cannot.\n"
+        + "Low cut, EQ, high cut, and presence are in the WAV. A MIDI file keeps the ordinary note and does not carry them, and says so on stderr.\n"
+        + "Rows that need more than the 16 MIDI channels share a channel when the instrument, pan, and effects match. A melodic row is never put on the drum channel. hits info and hits render name a row that still cannot.\n"
         + "A user SoundFont is not loaded. --samples-sf2 writes <name>-samples.sf2 beside a MIDI file.\n"
         + "Exit codes: 0 ok, 1 the beat or the render failed, 2 the command line was wrong.\n";
 
@@ -394,22 +393,7 @@ public final class HitsCli {
 
     /** Active pattern, any pattern with a hit, and any pattern named by the chain. */
     private static List<Character> usedSlots(Beat beat) {
-        List<Character> slots = new ArrayList<>();
-        for (char slot = 'a'; slot <= 'h'; slot++) {
-            if (slot == beat.activeSlot() || GrooveGenerator.patternHasHits(beat, slot) || namedInChain(beat, slot)) {
-                slots.add(slot);
-            }
-        }
-        return slots;
-    }
-
-    private static boolean namedInChain(Beat beat, char slot) {
-        for (Chain.Part part : beat.chain()) {
-            if (part.slot() == slot) {
-                return true;
-            }
-        }
-        return false;
+        return beat.patternsInUse();
     }
 
     private static String chainText(Beat beat) {

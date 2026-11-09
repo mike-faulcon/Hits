@@ -17,4 +17,9 @@ public final class Notes {
         int octave = midi / 12 - 2;
         return NAMES[midi % 12] + octave;
     }
+
+    /** Equal-tempered pitch of {@code note}, A4 = 440 Hz at MIDI 69. */
+    public static double frequency(int note) {
+        return 440.0 * Math.pow(2.0, (clamp(note) - 69) / 12.0);
+    }
 }

@@ -4,10 +4,19 @@ import java.util.Random;
 
 /**
  * License-free one-shots generated in code. Nothing here is downloaded or copied
- * from a recording. The ids are stored in the beat as {@code hits:808}, {@code hits:click},
- * and {@code hits:snap}.
+ * from a recording. The ids are stored in the beat as {@code hits:sub}, {@code hits:808},
+ * {@code hits:click}, and {@code hits:snap}.
  */
 public final class BuiltinSamples {
+    /**
+     * Steady sub sine. {@link #SUB_NOTE} is F#0 in this app (C1 is MIDI 36),
+     * and {@link Notes#frequency(int)} of that note is about 46 Hz.
+     */
+    public static final String SUB = "hits:sub";
+    /** MIDI note whose pitch is the sub sine. The row label and the sample root both use it. */
+    public static final int SUB_NOTE = 30;
+    /** Exponential decay of {@link #SUB}, in seconds. The −20 dB point is about 140 ms after the attack. */
+    public static final double SUB_DECAY_SECONDS = 0.060;
     public static final String EIGHT_OH_EIGHT = "hits:808";
     public static final String CLICK = "hits:click";
     public static final String SNAP = "hits:snap";
@@ -16,10 +25,13 @@ public final class BuiltinSamples {
     private BuiltinSamples() {}
 
     public static boolean isBuiltin(String path) {
-        return EIGHT_OH_EIGHT.equals(path) || CLICK.equals(path) || SNAP.equals(path);
+        return SUB.equals(path) || EIGHT_OH_EIGHT.equals(path) || CLICK.equals(path) || SNAP.equals(path);
     }
 
     public static String label(String path) {
+        if (SUB.equals(path)) {
+            return "Sub";
+        }
         if (EIGHT_OH_EIGHT.equals(path)) {
             return "808";
         }
@@ -34,6 +46,9 @@ public final class BuiltinSamples {
 
     /** File name used when the one-shot is copied next to a beat. */
     public static String fileName(String path) {
+        if (SUB.equals(path)) {
+            return "sub.wav";
+        }
         if (EIGHT_OH_EIGHT.equals(path)) {
             return "808.wav";
         }
@@ -49,6 +64,9 @@ public final class BuiltinSamples {
     public record Pcm(int rate, short[] samples) {}
 
     public static Pcm pcm(String path) {
+        if (SUB.equals(path)) {
+            return new Pcm(RATE, sub());
+        }
         if (EIGHT_OH_EIGHT.equals(path)) {
             return new Pcm(RATE, eightOhEight());
         }
@@ -70,6 +88,11 @@ public final class BuiltinSamples {
      * The unfiltered full-file centroid sits lower because of the quiet low body.
      */
     public static String description(String path) {
+        if (SUB.equals(path)) {
+            return "A steady sine at " + Notes.name(SUB_NOTE) + ", about 46 Hz, with a 2 ms attack and a 60 ms decay. "
+                + "The wave is under −20 dB of its peak about 140 ms after the attack. "
+                + "Decay below 100% shortens it.";
+        }
         if (EIGHT_OH_EIGHT.equals(path)) {
             return "Sine from 80 Hz down to 68 Hz over the first 200 ms. "
                 + "The ring is the time from the start until the wave stays under −20 dB of its peak, about 400 ms.";
@@ -83,6 +106,27 @@ public final class BuiltinSamples {
                 + "With a 300 Hz high-pass, the power-weighted centroid from 5 ms before the onset to 70 ms after is about 2.2 kHz.";
         }
         return "";
+    }
+
+    /**
+     * Steady sine at {@link Notes#frequency(int)} of {@link #SUB_NOTE}.
+     * The envelope time constant is {@link #SUB_DECAY_SECONDS}, so the wave crosses −20 dB
+     * of its peak about 140 ms after the 2 ms attack.
+     */
+    static short[] sub() {
+        double freq = Notes.frequency(SUB_NOTE);
+        int count = (int) Math.round(RATE * 0.45);
+        double[] raw = new double[count];
+        double phase = 0;
+        double attack = 0.002;
+        double tau = SUB_DECAY_SECONDS;
+        for (int i = 0; i < count; i++) {
+            double t = i / (double) RATE;
+            phase += 2 * Math.PI * freq / RATE;
+            double env = t < attack ? t / attack : Math.exp(-(t - attack) / tau);
+            raw[i] = Math.sin(phase) * env;
+        }
+        return normalize(raw);
     }
 
     /**

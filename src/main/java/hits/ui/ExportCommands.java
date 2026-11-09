@@ -267,6 +267,7 @@ final class ExportCommands {
                 case '&' -> out.append("&amp;");
                 case '<' -> out.append("&lt;");
                 case '>' -> out.append("&gt;");
+                case '\n' -> out.append("<br>");
                 default -> out.append(c);
             }
         }

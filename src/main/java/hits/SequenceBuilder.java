@@ -84,7 +84,7 @@ public final class SequenceBuilder {
         if (!beat.hasChain()) {
             return build(beat, metronome);
         }
-        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true, null, SampleUse.none());
+        return arrangement(beat, new ExportOptions(true, false, 1, true), null, 1, metronome, true, null, SampleUse.none(), false);
     }
 
     /**
@@ -152,7 +152,7 @@ public final class SequenceBuilder {
         Random roll = chance ? (random != null ? random : new Random()) : null;
         SampleUse use = samples == null ? SampleUse.none() : samples;
         if (song && beat.hasChain()) {
-            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true, kits, use);
+            return arrangement(beat, new ExportOptions(true, false, 1, true), roll, passes, metronome, true, kits, use, false);
         }
         return pattern(beat, roll, passes, metronome, kits, use);
     }
@@ -212,16 +212,25 @@ public final class SequenceBuilder {
             if (!beat.audible(track)) {
                 continue;
             }
+            int channel = plan.channel(track, i);
+            if (channel < 0) {
+                continue;
+            }
             midiTracks[i] = sequence.createTrack();
             midiTracks[i].add(new MidiEvent(trackName(track.name()), 0));
-            writeSetup(midiTracks[i], track, i, 0, plan, memory);
+            if (!plan.timeShared(i) && !plan.skipSetup(i)) {
+                writeSetup(midiTracks[i], track, i, 0, plan, memory, channel);
+            }
         }
         for (int pass = 0; pass < times; pass++) {
             for (int i = 0; i < tracks.length; i++) {
                 if (midiTracks[i] == null) {
                     continue;
                 }
-                writeNotes(midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true, (pass + 1L) * loop, null, plan, samples);
+                writeNotes(
+                    midiTracks[i], beat, tracks[i], i, steps, pass * loop, loop, random, true,
+                    (pass + 1L) * loop, null, plan, samples, plan.channel(tracks[i], i)
+                );
             }
         }
         if (metronome) {
@@ -266,8 +275,42 @@ public final class SequenceBuilder {
             false,
             false,
             kits,
-            samples == null ? SampleUse.none() : samples
+            samples == null ? SampleUse.none() : samples,
+            false
         );
+    }
+
+    /**
+     * The melodic rows {@link ChannelPlan#omitted(int)} left out of {@link #export}.
+     * They play on a second synth, on ordinary melodic channels, so a WAV can still
+     * contain the pitch. Null when every row already fits in {@code export}.
+     */
+    public static Sequence exportSupplement(Beat beat, ExportOptions options, Soundbank kits, SampleUse samples)
+        throws InvalidMidiDataException {
+        SampleUse use = samples == null ? SampleUse.none() : samples;
+        ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
+        ChannelPlan plan = ChannelPlan.of(beat, exportSlots(beat, chosen), kits, use);
+        if (!plan.hasOmitted()) {
+            return null;
+        }
+        Sequence sequence = arrangement(beat, chosen, Chance.exportRandom(), 1, false, false, kits, use, true);
+        return hasNoteOn(sequence) ? sequence : null;
+    }
+
+    private static boolean hasNoteOn(Sequence sequence) {
+        if (sequence == null) {
+            return false;
+        }
+        for (Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                if (track.get(i).getMessage() instanceof ShortMessage message
+                    && message.getCommand() == ShortMessage.NOTE_ON
+                    && message.getData2() > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Patterns this export will visit, in letter order. */
@@ -285,7 +328,8 @@ public final class SequenceBuilder {
         boolean metronome,
         boolean clipEnd,
         Soundbank kits,
-        SampleUse samples
+        SampleUse samples,
+        boolean supplement
     ) throws InvalidMidiDataException {
         ExportOptions chosen = options == null ? ExportOptions.matchingPlayback() : options;
         boolean song = chosen.song() && beat.hasChain();
@@ -320,6 +364,14 @@ public final class SequenceBuilder {
                     if (chosen.asHeard() && !Beat.audibleIn(tracks, track)) {
                         continue;
                     }
+                    boolean omitted = plan.omitted(i);
+                    if (supplement != omitted) {
+                        continue;
+                    }
+                    int channel = supplement ? plan.wavChannel(i) : plan.channel(track, i);
+                    if (channel < 0) {
+                        continue;
+                    }
                     if (midiTracks[i] == null) {
                         midiTracks[i] = sequence.createTrack();
                         midiTracks[i].add(new MidiEvent(trackName(exportName(beat, chosen, spanSlots, i, joined)), 0));
@@ -337,7 +389,8 @@ public final class SequenceBuilder {
                         ahead,
                         plan,
                         samples,
-                        memory
+                        memory,
+                        channel
                     );
                 }
             }
@@ -412,9 +465,12 @@ public final class SequenceBuilder {
         int row,
         long offset,
         ChannelPlan plan,
-        ChannelMemory memory
+        ChannelMemory memory,
+        int channel
     ) throws InvalidMidiDataException {
-        int channel = plan.channel(track, row);
+        if (channel < 0) {
+            return;
+        }
         List<ShortMessage> messages = plan.setup(track, channel, row);
         memory.noteFirst(midi, channel, offset, messages);
         long hold = overlappingHold(midi, channel, offset);
@@ -520,6 +576,9 @@ public final class SequenceBuilder {
                 continue;
             }
             int channel = plan.channel(track, row);
+            if (channel < 0) {
+                continue;
+            }
             for (ShortMessage message : plan.setup(track, channel, row)) {
                 receiver.send(message, -1);
             }
@@ -556,19 +615,29 @@ public final class SequenceBuilder {
         int[] ahead,
         ChannelPlan plan,
         SampleUse samples,
-        ChannelMemory memory
+        ChannelMemory memory,
+        int channel
     ) throws InvalidMidiDataException {
+        if (channel < 0) {
+            return;
+        }
         List<Placed> notes = placedNotes(
             beat, track, row, steps, offset, sectionTicks, random, false, clipTick, ahead, samples
         );
+        if (plan.timeShared(row)) {
+            emitWithSetup(midi, track, row, channel, notes, plan);
+            return;
+        }
         long setupAt = offset;
         for (Placed note : notes) {
             if (note.sound.start() < setupAt) {
                 setupAt = note.sound.start();
             }
         }
-        writeSetup(midi, track, row, setupAt, plan, memory);
-        emitNotes(midi, plan.channel(track, row), notes);
+        if (!plan.skipSetup(row)) {
+            writeSetup(midi, track, row, setupAt, plan, memory, channel);
+        }
+        emitNotes(midi, channel, notes);
     }
 
     /**
@@ -596,12 +665,44 @@ public final class SequenceBuilder {
         long clipTick,
         int[] ahead,
         ChannelPlan plan,
-        SampleUse samples
+        SampleUse samples,
+        int channel
     ) throws InvalidMidiDataException {
-        int channel = plan.channel(track, row);
-        emitNotes(midi, channel, placedNotes(
+        if (channel < 0) {
+            return;
+        }
+        List<Placed> notes = placedNotes(
             beat, track, row, steps, offset, sectionTicks, random, wrapStart, clipTick, ahead, samples
-        ));
+        );
+        if (plan.timeShared(row)) {
+            emitWithSetup(midi, track, row, channel, notes, plan);
+            return;
+        }
+        emitNotes(midi, channel, notes);
+    }
+
+    /** Bank, program, and pan immediately before each note, so a shared channel can change instrument. */
+    private static void emitWithSetup(
+        Track midi,
+        hits.Track track,
+        int row,
+        int channel,
+        List<Placed> placed,
+        ChannelPlan plan
+    ) throws InvalidMidiDataException {
+        placed.sort((left, right) -> Long.compare(left.sound.start(), right.sound.start()));
+        for (Placed note : placed) {
+            for (ShortMessage message : plan.setup(track, channel, row)) {
+                midi.add(new MidiEvent(message, note.sound.start()));
+            }
+            truncateOverlap(midi, channel, note.note, note.sound.start());
+            ShortMessage on = new ShortMessage();
+            on.setMessage(ShortMessage.NOTE_ON, channel, note.note, note.velocity);
+            midi.add(new MidiEvent(on, note.sound.start()));
+            ShortMessage off = new ShortMessage();
+            off.setMessage(ShortMessage.NOTE_OFF, channel, note.note, 0);
+            midi.add(new MidiEvent(off, note.sound.end()));
+        }
     }
 
     private static List<Placed> placedNotes(
