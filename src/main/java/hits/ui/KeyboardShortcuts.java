@@ -55,6 +55,14 @@ final class KeyboardShortcuts {
     }
 
     /**
+     * G toggles slide on the selected step. A held key counts once.
+     * A text field still receives the character. Drum rows ignore it.
+     */
+    static KeyEventDispatcher glide(Window window, Runnable toggle) {
+        return new GlideKey(window, toggle);
+    }
+
+    /**
      * Comma nudges the selected step earlier. Period nudges it later.
      * Repeats while the key is held. A text field still receives the character.
      */
@@ -150,6 +158,42 @@ final class KeyboardShortcuts {
             if (event.getID() == KeyEvent.KEY_PRESSED && !down) {
                 down = true;
                 SwingUtilities.invokeLater(tap);
+            }
+            return true;
+        }
+    }
+
+    private static final class GlideKey implements KeyEventDispatcher {
+        private final Window window;
+        private final Runnable toggle;
+        private boolean down;
+
+        private GlideKey(Window window, Runnable toggle) {
+            this.window = window;
+            this.toggle = toggle;
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(KeyEvent event) {
+            boolean gee = event.getKeyCode() == KeyEvent.VK_G
+                || (event.getKeyCode() == KeyEvent.VK_UNDEFINED && (event.getKeyChar() == 'g' || event.getKeyChar() == 'G'));
+            if (!gee) {
+                return false;
+            }
+            if (event.getID() == KeyEvent.KEY_RELEASED) {
+                down = false;
+            }
+            if (event.getModifiersEx() != 0 || typing()) {
+                return false;
+            }
+            Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
+            if (focused != window) {
+                down = false;
+                return focused != null && focused.getOwner() == window;
+            }
+            if (event.getID() == KeyEvent.KEY_PRESSED && !down) {
+                down = true;
+                SwingUtilities.invokeLater(toggle);
             }
             return true;
         }

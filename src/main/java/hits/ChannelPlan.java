@@ -22,6 +22,10 @@ import java.util.Map;
  * {@link #channelWarning(Beat)} names a real conflict, not a drum that is alone on channel 9.
  * An eight-row beat that fits the pool keeps channel == row, the same as before.
  * A sample that loaded keeps its own channel.
+ * A row that slides never shares a channel. Pitch bend is channel-wide, so a shared
+ * channel would bend the other row. A sliding row that cannot have a channel of its
+ * own is left out of the MIDI file. WAV export plays it on a second synth, still
+ * on a channel no other row uses when one is free.
  * A sample that falls back plays its drum note on channel 9, because Gervill
  * will not switch a melodic channel from the sample bank to the drum bank.
  */
@@ -83,6 +87,10 @@ public final class ChannelPlan {
     private final boolean[] collided;
     /** This row shares its channel across time, so each note sends the program again. */
     private final boolean[] timeShared;
+    /** This row glides, so its channel cannot be shared. */
+    private final boolean[] slideRow;
+    /** RPN 0 for this row. {@link #BEND_RANGE} unless the row slides. */
+    private final int[] bendRanges;
     /** Lowest row index that plays on each MIDI channel, or -1. */
     private int[] channelOwner = new int[16];
     /** Patterns this plan was built for. */
@@ -98,7 +106,9 @@ public final class ChannelPlan {
         int[] sampleChannel,
         boolean[] acousticNine,
         boolean[] collided,
-        boolean[] timeShared
+        boolean[] timeShared,
+        boolean[] slideRow,
+        int[] bendRanges
     ) {
         this.reserved = reserved;
         this.overflow = overflow;
@@ -110,7 +120,15 @@ public final class ChannelPlan {
         this.acousticNine = acousticNine == null ? new boolean[reserved.length] : acousticNine;
         this.collided = collided == null ? new boolean[reserved.length] : collided;
         this.timeShared = timeShared == null ? new boolean[reserved.length] : timeShared;
+        this.slideRow = slideRow == null ? new boolean[reserved.length] : slideRow;
+        this.bendRanges = bendRanges == null ? defaultRanges(reserved.length) : bendRanges;
         java.util.Arrays.fill(channelOwner, -1);
+    }
+
+    private static int[] defaultRanges(int count) {
+        int[] ranges = new int[Math.max(0, count)];
+        java.util.Arrays.fill(ranges, BEND_RANGE);
+        return ranges;
     }
 
     private static int[] emptyChannels(int count) {
@@ -173,12 +191,16 @@ public final class ChannelPlan {
         boolean[] sampleVoice = new boolean[count];
         boolean[] acousticPrivate = new boolean[count];
         boolean[] acousticMelodic = new boolean[count];
+        boolean[] slideRow = new boolean[count];
         if (beat != null && slots != null) {
             for (char slot : slots) {
                 Track[] tracks = beat.slot(slot);
                 int rows = Math.min(count, tracks.length);
                 for (int row = 0; row < rows; row++) {
                     Track track = tracks[row];
+                    if (Slide.sounds(track, row, samples, beat.stepCount(slot))) {
+                        slideRow[row] = true;
+                    }
                     if (track.mode() == TrackMode.DRUM && track.preset() != null) {
                         presetRow[row] = true;
                     }
@@ -218,16 +240,24 @@ public final class ChannelPlan {
                 assigned,
                 needsPrivate,
                 melodic,
-                signatures(beat, slots, count, kits, samples, needsPrivate)
+                signatures(beat, slots, count, kits, samples, needsPrivate, slideRow)
             );
         }
         boolean[] timeShared = new boolean[count];
-        multiplex(assigned, timeShared, beat, slots, melodic);
+        multiplex(assigned, timeShared, beat, slots, melodic, slideRow);
         forgiveLoneDrums(assigned, beat, slots, kits, samples);
         int[] sampleChannel = emptyChannels(count);
         boolean[] acousticNine = new boolean[count];
         boolean[] collided = new boolean[count];
         separate(assigned, sampleVoice, acousticPrivate, acousticMelodic, sampleChannel, acousticNine, collided);
+        int[] bendRanges = defaultRanges(count);
+        if (beat != null && slots != null) {
+            for (int row = 0; row < count; row++) {
+                if (slideRow[row]) {
+                    bendRanges[row] = Slide.range(beat, slots, row);
+                }
+            }
+        }
         ChannelPlan plan = new ChannelPlan(
             assigned.reserved,
             assigned.overflow,
@@ -238,7 +268,9 @@ public final class ChannelPlan {
             sampleChannel,
             acousticNine,
             collided,
-            timeShared
+            timeShared,
+            slideRow,
+            bendRanges
         );
         plan.remember(beat, slots);
         return plan;
@@ -265,9 +297,18 @@ public final class ChannelPlan {
             }
             Track track = beat.slot(slots.get(0))[row];
             text.append("Row ").append(row + 1).append(" \"").append(track.name()).append("\"");
-            text.append(" has no free MIDI channel. Its notes overlap the other rows, ");
-            text.append("so it is left out of the MIDI file instead of playing as a drum. ");
-            text.append("WAV export still plays it.");
+            if (slides(row)) {
+                text.append(" slides, so it cannot share a MIDI channel. ");
+                text.append("No channel is free, so it is left out of the MIDI file. ");
+                text.append("WAV export still plays it.");
+                if (wavShares(row)) {
+                    text.append(" On the extra synth its bend still shares a channel.");
+                }
+            } else {
+                text.append(" has no free MIDI channel. Its notes overlap the other rows, ");
+                text.append("so it is left out of the MIDI file instead of playing as a drum. ");
+                text.append("WAV export still plays it.");
+            }
         }
         appendShareWarnings(text, beat, slots, rows);
         List<String> plain = new ArrayList<>();
@@ -466,7 +507,8 @@ public final class ChannelPlan {
         boolean[] timeShared,
         Beat beat,
         List<Character> slots,
-        boolean[] melodic
+        boolean[] melodic,
+        boolean[] sliding
     ) {
         if (beat == null || slots == null) {
             return;
@@ -479,7 +521,10 @@ public final class ChannelPlan {
             if (row >= melodic.length || !melodic[row]) {
                 continue;
             }
-            int host = multiplexHost(assigned, beat, slots, melodic, row);
+            if (sliding != null && row < sliding.length && sliding[row]) {
+                continue;
+            }
+            int host = multiplexHost(assigned, beat, slots, melodic, sliding, row);
             if (host < 0) {
                 continue;
             }
@@ -499,11 +544,15 @@ public final class ChannelPlan {
         Beat beat,
         List<Character> slots,
         boolean[] melodic,
+        boolean[] sliding,
         int row
     ) {
         int count = assigned.reserved.length;
         for (int other = 0; other < count; other++) {
             if (other == row || other >= melodic.length || !melodic[other]) {
+                continue;
+            }
+            if (sliding != null && other < sliding.length && sliding[other]) {
                 continue;
             }
             int channel = assigned.reserved[other];
@@ -722,7 +771,7 @@ public final class ChannelPlan {
             }
         }
         return new ChannelPlan(
-            reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null, null
+            reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null, null, null, null
         );
     }
 
@@ -732,7 +781,8 @@ public final class ChannelPlan {
         int count,
         Soundbank kits,
         SampleUse samples,
-        boolean[] needsPrivate
+        boolean[] needsPrivate,
+        boolean[] sliding
     ) {
         String[] keys = new String[count];
         for (int row = 0; row < count; row++) {
@@ -748,6 +798,9 @@ public final class ChannelPlan {
                     }
                     key.append(slot).append('=').append(voiceSignature(tracks[row], row, kits, samples)).append(';');
                 }
+            }
+            if (sliding != null && row < sliding.length && sliding[row]) {
+                key.append("|glide").append(row);
             }
             keys[row] = key.toString();
         }
@@ -886,7 +939,7 @@ public final class ChannelPlan {
         boolean[] taken = new boolean[16];
         place(reserved, overflow, taken, needsPrivate, melodic, true);
         place(reserved, overflow, taken, needsPrivate, melodic, false);
-        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null, null);
+        return new ChannelPlan(reserved, overflow, new boolean[count], new int[count], null, SampleUse.none(), null, null, null, null, null, null);
     }
 
     private static void place(
@@ -994,11 +1047,45 @@ public final class ChannelPlan {
     /**
      * Melodic channel for an {@link #omitted(int)} row on the second synth.
      * Channel 9 is not used. -1 when the row is not omitted.
+     * A beat with no slides keeps the old order. A sliding row takes a channel
+     * nothing else uses, until the pool on that synth runs out.
      */
     public int wavChannel(int row) {
         if (!omitted(row)) {
             return -1;
         }
+        if (!anyOmittedSlide()) {
+            return legacyWav(row);
+        }
+        return wavAssignments()[row];
+    }
+
+    /** True when this row glides and must not share a channel. */
+    public boolean slides(int row) {
+        return row >= 0 && row < slideRow.length && slideRow[row];
+    }
+
+    /**
+     * Pitch-bend range for this row, in semitones.
+     * {@link #BEND_RANGE} when the row does not slide, so an older tune bend is unchanged.
+     */
+    public int bendRange(int row) {
+        if (row < 0 || row >= bendRanges.length) {
+            return BEND_RANGE;
+        }
+        return bendRanges[row];
+    }
+
+    private boolean anyOmittedSlide() {
+        for (int row = 0; row < reserved.length; row++) {
+            if (omitted(row) && slides(row)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int legacyWav(int row) {
         int index = 0;
         for (int other = 0; other < row; other++) {
             if (omitted(other)) {
@@ -1009,6 +1096,47 @@ public final class ChannelPlan {
             index = POOL.length - 1;
         }
         return POOL[index];
+    }
+
+    private int[] wavAssignments() {
+        int[] channel = new int[reserved.length];
+        java.util.Arrays.fill(channel, -1);
+        boolean[] taken = new boolean[16];
+        taken[Gm.DRUM_CHANNEL] = true;
+        for (int row = 0; row < reserved.length; row++) {
+            if (!omitted(row) || !slides(row)) {
+                continue;
+            }
+            int free = nextFree(taken);
+            channel[row] = free >= 0 ? free : POOL[POOL.length - 1];
+            if (free >= 0) {
+                taken[free] = true;
+            }
+        }
+        for (int row = 0; row < reserved.length; row++) {
+            if (!omitted(row) || slides(row)) {
+                continue;
+            }
+            int free = nextFree(taken);
+            channel[row] = free >= 0 ? free : POOL[POOL.length - 1];
+            if (free >= 0) {
+                taken[free] = true;
+            }
+        }
+        return channel;
+    }
+
+    private boolean wavShares(int row) {
+        int channel = wavChannel(row);
+        if (channel < 0) {
+            return false;
+        }
+        for (int other = 0; other < reserved.length; other++) {
+            if (other != row && omitted(other) && wavChannel(other) == channel) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** True when notes on this row must send bank, program, and pan again. */
@@ -1117,6 +1245,11 @@ public final class ChannelPlan {
             // A rendered voice on its own channel still gets bank, program, and bend,
             // even when the plain voice on this row overflowed onto channel 9.
             boolean keyShape = (overflow(row) || acousticNine(row)) && !(rendered && channel != Gm.DRUM_CHANNEL);
+            // A glide is a channel bend. The overflow synth still has to set RPN 0.
+            // Per-key NRPN would leave the pitch wheel at the default ±2 semitones.
+            if (slides(row) && channel != Gm.DRUM_CHANNEL) {
+                keyShape = false;
+            }
             if (keyShape) {
                 addKeyShape(messages, track, channel, row);
             } else {
@@ -1140,9 +1273,12 @@ public final class ChannelPlan {
         int row,
         boolean preset
     ) throws InvalidMidiDataException {
-        if (track.tune() != 0 || shaped(row, SHAPE_TUNE)) {
-            bendRange(messages, channel);
-            messages.add(pitchBend(channel, track.tune()));
+        if (track.tune() != 0 || shaped(row, SHAPE_TUNE) || slides(row)) {
+            int range = bendRange(row);
+            bendRange(messages, channel, range);
+            int cents = track.tune();
+            int value = range == BEND_RANGE ? Track.pitchBend(cents) : Track.pitchBendForRange(cents, range);
+            messages.add(pitchBendValue(channel, value));
         }
         Integer release = releaseValue(track, row, preset);
         if (release != null) {
@@ -1254,17 +1390,17 @@ public final class ChannelPlan {
         return row >= 0 && row < presetRow.length && presetRow[row];
     }
 
-    private static void bendRange(List<ShortMessage> messages, int channel) throws InvalidMidiDataException {
+    private static void bendRange(List<ShortMessage> messages, int channel, int semitones) throws InvalidMidiDataException {
+        int range = Math.max(1, Math.min(BEND_RANGE, semitones));
         messages.add(control(channel, 101, 0));
         messages.add(control(channel, 100, 0));
-        messages.add(control(channel, 6, BEND_RANGE));
+        messages.add(control(channel, 6, range));
         messages.add(control(channel, 38, 0));
         messages.add(control(channel, 101, 127));
         messages.add(control(channel, 100, 127));
     }
 
-    private static ShortMessage pitchBend(int channel, int cents) throws InvalidMidiDataException {
-        int value = Track.pitchBend(cents);
+    private static ShortMessage pitchBendValue(int channel, int value) throws InvalidMidiDataException {
         ShortMessage message = new ShortMessage();
         message.setMessage(ShortMessage.PITCH_BEND, channel, value & 0x7f, (value >> 7) & 0x7f);
         return message;

@@ -12,6 +12,7 @@ import hits.PitchedPreset;
 import hits.Player;
 import hits.SamplePaths;
 import hits.SampleRef;
+import hits.Slide;
 import hits.SoundCatalog;
 import hits.Step;
 import hits.ToneFilter;
@@ -123,6 +124,11 @@ final class TrackInspector {
     private final JSpinner nudge = new JSpinner(new SpinnerNumberModel(0, Step.MIN_NUDGE, Step.MAX_NUDGE, 1));
     private final JLabel nudgeUnit = Widgets.label("%");
     private final JCheckBox legato = new JCheckBox("Legato");
+    private final JCheckBox slideStep = new JCheckBox("Slide");
+    private final JSlider slideTime = Widgets.slider(Slide.MIN_MS, Slide.MAX_MS, Slide.DEFAULT_MS);
+    private final JLabel slideTimeValue = Widgets.label(Slide.DEFAULT_MS + " ms");
+    private final JButton slideLinear = Widgets.button("Linear");
+    private final JButton slideExponential = Widgets.button("Exponential");
     private final JSpinner shift = new JSpinner(new SpinnerNumberModel(0, Step.MIN_NUDGE, Step.MAX_NUDGE, 1));
     private final JLabel shiftUnit = Widgets.label("%");
     private final JSpinner tuneSemi = new JSpinner(new SpinnerNumberModel(0, -24, 24, 1));
@@ -156,6 +162,7 @@ final class TrackInspector {
     private final JButton highSlope24 = Widgets.button("24");
     private final EqCurve eqCurve = new EqCurve();
     private final JLabel eqCaption = Widgets.label("Low cut, EQ, high cut, and presence");
+    private final JLabel eqDropped = Widgets.label(" ");
     private final SliderDrag highCutDrag;
     /** High-cut corner the slider shows while the filter is off. */
     private int shownHighCut = Track.HIGH_CUT;
@@ -177,6 +184,7 @@ final class TrackInspector {
     private final SliderDrag chanceDrag;
     private final SliderDrag accentDrag;
     private final SliderDrag sampleGainDrag;
+    private final SliderDrag slideDrag;
 
     TrackInspector(Editor editor, Player player, Sync sync) {
         this.editor = editor;
@@ -196,6 +204,7 @@ final class TrackInspector {
         this.chanceDrag = new SliderDrag(editor, sync);
         this.accentDrag = new SliderDrag(editor, sync);
         this.sampleGainDrag = new SliderDrag(editor, sync);
+        this.slideDrag = new SliderDrag(editor, sync);
     }
 
     void onShuffle(Runnable action) {
@@ -281,6 +290,7 @@ final class TrackInspector {
         legato.setFocusable(false);
         legato.setToolTipText("Note tracks only. Each hit holds until the next hit on this row. Drum tracks keep Hold instead.");
         addRow(panel, constraints, legato);
+        addRow(panel, constraints, slideRow());
         String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. Swing cannot push that onto the next step. 0 is left out of the file.";
         addRow(panel, constraints, spun("Shift", shiftTip, shift, shiftUnit));
         JLabel soundHeading = Widgets.label("Sound");
@@ -514,6 +524,15 @@ final class TrackInspector {
             }
             editor.setLegato(legato.isSelected());
         });
+        slideStep.addActionListener(event -> {
+            if (sync.on() || selectedStep() == null || selectedStep().slide() == slideStep.isSelected()) {
+                return;
+            }
+            editor.setStepSlide(slideStep.isSelected());
+        });
+        slideLinear.addActionListener(event -> editor.setSlideCurve(Slide.Curve.LINEAR));
+        slideExponential.addActionListener(event -> editor.setSlideCurve(Slide.Curve.EXPONENTIAL));
+        slideDrag.wire(slideTime, beat -> onScreen(beat).setSlideMs(slideTime.getValue()));
         shift.addChangeListener(event -> {
             if (sync.on()) {
                 return;
@@ -524,6 +543,60 @@ final class TrackInspector {
             }
             editor.setShift(percent);
         });
+    }
+
+    private JPanel slideRow() {
+        slideStep.setName("slide");
+        slideStep.setOpaque(false);
+        slideStep.setForeground(Theme.TEXT);
+        slideStep.setFocusable(false);
+        slideStep.getAccessibleContext().setAccessibleName("Slide into this step");
+        slideStep.setToolTipText("Glide from the previous note instead of starting again. Note and sample rows, including Sub. Ctrl-click a step, or press G. A drum row does not glide.");
+        slideTime.setName("slide-time");
+        slideTime.getAccessibleContext().setAccessibleName("Slide time");
+        slideTime.setToolTipText("How long the glide takes, from 10 to 500 milliseconds. 80 is the default and is left out of the file.");
+        slideTimeValue.setName("slide-time-value");
+        slideTimeValue.setPreferredSize(new Dimension(64, 32));
+        slideLinear.setName("slide-linear");
+        slideExponential.setName("slide-exponential");
+        slideLinear.getAccessibleContext().setAccessibleName("Linear slide");
+        slideExponential.getAccessibleContext().setAccessibleName("Exponential slide");
+        slideLinear.setToolTipText("The pitch moves in equal semitone steps.");
+        slideExponential.setToolTipText("The pitch moves on an exponential curve, fast at first, still in semitones.");
+        Widgets.fix(slideLinear, 88, 32);
+        Widgets.fix(slideExponential, 120, 32);
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        panel.setName("slide-row");
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.insets = new Insets(1, 0, 1, 0);
+        addRow(panel, constraints, slideStep);
+        addRow(panel, constraints, labeled("Time", slideTime.getToolTipText(), slideTime, slideTimeValue));
+        addRow(panel, constraints, Widgets.row(slideLinear, slideExponential));
+        return panel;
+    }
+
+    private void showSlide(Track track, boolean stepChosen, Step selected) {
+        boolean glide = Slide.applies(track);
+        slideStep.setEnabled(glide && stepChosen);
+        slideStep.setSelected(stepChosen && selected.slide());
+        slideTime.setEnabled(glide);
+        slideLinear.setEnabled(glide);
+        slideExponential.setEnabled(glide);
+        if (!slideTime.getValueIsAdjusting()) {
+            slideTime.setValue(track.slideMs());
+        }
+        slideTimeValue.setText(track.slideMs() + " ms");
+        Widgets.paintToggle(slideLinear, glide && track.slideCurve() == Slide.Curve.LINEAR);
+        Widgets.paintToggle(slideExponential, glide && track.slideCurve() == Slide.Curve.EXPONENTIAL);
+        String why = glide
+            ? "Glide from the previous note. No new attack. Ctrl-click a step, or press G."
+            : "A drum row does not glide. Slide-to on a drum is not in this version.";
+        slideStep.setToolTipText(why);
     }
 
     private Step selectedStep() {
@@ -632,6 +705,7 @@ final class TrackInspector {
         boolean noteTrack = track.mode() == TrackMode.NOTE;
         legato.setEnabled(noteTrack);
         legato.setSelected(track.legato());
+        showSlide(track, stepChosen, selected);
         shift.setValue(track.shift());
         shiftUnit.setText(signedPercent(track.shift()));
         tuneSemi.setValue(track.tuneSemitones());
@@ -1019,6 +1093,14 @@ final class TrackInspector {
         highSlope24.setToolTipText(tip + " 24 dB per octave.");
         eqCaption.setToolTipText(EQ_CURVE_TIP);
         eqCurve.show(track, live, EQ_CURVE_TIP);
+        String dropped = editor.beat().rowWarning(editor.viewSlot(), track.name(), "was dropped");
+        eqDropped.setVisible(dropped != null);
+        eqDropped.setText(dropped == null ? " " : "<html><body style='width:260px'>" + escapeHtml(dropped) + "</body></html>");
+        eqDropped.setToolTipText(dropped);
+    }
+
+    private static String escapeHtml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void applyEqBypass() {
@@ -1121,6 +1203,10 @@ final class TrackInspector {
         constraints.anchor = GridBagConstraints.WEST;
         constraints.insets = new Insets(2, 0, 2, 0);
         addRow(panel, constraints, heading);
+        eqDropped.setName("eq-dropped");
+        eqDropped.setForeground(Theme.STEP_ACCENT);
+        eqDropped.setVisible(false);
+        addRow(panel, constraints, eqDropped);
         addRow(panel, constraints, eqCurve);
         eqCaption.setName("eq-curve-caption");
         eqCaption.setForeground(Theme.MUTED);

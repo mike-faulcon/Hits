@@ -270,6 +270,55 @@ public final class Editor {
         edit(current -> current.slot(slot)[row].step(column).setNudge(nudge));
     }
 
+    /** Turns slide on or off for one step. An off step is turned on. One undo step. */
+    public void toggleSlide(int row, int column) {
+        if (row < 0 || row >= beat.trackCount() || column < 0 || column >= beat.gridColumns(viewSlot())) {
+            return;
+        }
+        trackIndex = row;
+        stepIndex = column;
+        char slot = viewSlot();
+        edit(current -> {
+            Step step = current.slot(slot)[row].step(column);
+            boolean next = !step.slide();
+            if (next && !step.on()) {
+                step.setOn(true);
+            }
+            step.setSlide(next);
+        });
+    }
+
+    /** Slide flag for the selected step. No-op when no step is selected. One undo step. */
+    public void setStepSlide(boolean slide) {
+        int column = stepIndex;
+        if (column < 0 || column >= beat.gridColumns(viewSlot())) {
+            return;
+        }
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> {
+            Step step = current.slot(slot)[row].step(column);
+            if (slide && !step.on()) {
+                step.setOn(true);
+            }
+            step.setSlide(slide);
+        });
+    }
+
+    /** Slide time for the row on screen, in milliseconds. One undo step. */
+    public void setSlideMs(int milliseconds) {
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].setSlideMs(milliseconds));
+    }
+
+    /** Slide curve for the row on screen. One undo step. */
+    public void setSlideCurve(Slide.Curve curve) {
+        int row = trackIndex;
+        char slot = viewSlot();
+        edit(current -> current.slot(slot)[row].setSlideCurve(curve));
+    }
+
     /** Note-track legato for the row on screen. One undo step. */
     public void setLegato(boolean legato) {
         int row = trackIndex;

@@ -97,6 +97,10 @@ public final class Track {
     private int accent;
     /** Note tracks: each sounding hit holds until the next hit. */
     private boolean legato;
+    /** Glide length for a slide step, in milliseconds. {@link Slide#DEFAULT_MS} is left out of the file. */
+    private int slideMs = Slide.DEFAULT_MS;
+    /** How a slide moves through pitch. Linear is left out of the file. */
+    private Slide.Curve slideCurve = Slide.Curve.LINEAR;
     /** Added to every step's nudge, as a percent of one straight step. */
     private int shift;
     /** MSB×128+LSB. Zero is the General MIDI bank and is left out of the file. */
@@ -162,6 +166,8 @@ public final class Track {
             || velocity != other.velocity
             || accent != other.accent
             || legato != other.legato
+            || slideMs != other.slideMs
+            || slideCurve != other.slideCurve
             || shift != other.shift
             || bank != other.bank
             || kit != other.kit
@@ -198,6 +204,8 @@ public final class Track {
         copy.velocity = velocity;
         copy.accent = accent;
         copy.legato = legato;
+        copy.slideMs = slideMs;
+        copy.slideCurve = slideCurve;
         copy.shift = shift;
         copy.bank = bank;
         copy.kit = kit;
@@ -330,6 +338,34 @@ public final class Track {
 
     public void setLegato(boolean legato) {
         this.legato = legato;
+    }
+
+    /** Glide time in milliseconds, from {@link Slide#MIN_MS} to {@link Slide#MAX_MS}. */
+    public int slideMs() {
+        return slideMs;
+    }
+
+    public void setSlideMs(int milliseconds) {
+        slideMs = Slide.clampMs(milliseconds);
+    }
+
+    public Slide.Curve slideCurve() {
+        return slideCurve == null ? Slide.Curve.LINEAR : slideCurve;
+    }
+
+    public void setSlideCurve(Slide.Curve curve) {
+        slideCurve = curve == null ? Slide.Curve.LINEAR : curve;
+    }
+
+    /** Steps that ask to glide, including a step that is off. */
+    public int slideSteps() {
+        int count = 0;
+        for (Step step : steps) {
+            if (step.slide()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /** Percent of a step added to every step nudge. 0 leaves each step where it is. */
@@ -547,6 +583,21 @@ public final class Track {
     public static int pitchBend(int cents) {
         int clamped = Math.max(TUNE_MIN, Math.min(TUNE_MAX, cents));
         long bend = 8192L + Math.round(clamped * 8192.0 / TUNE_MAX);
+        return (int) Math.max(0, Math.min(16383, bend));
+    }
+
+    /**
+     * Pitch bend for {@code cents} when RPN 0 is {@code rangeSemitones} wide.
+     * A range of {@link ChannelPlan#BEND_RANGE} matches {@link #pitchBend(int)}.
+     */
+    public static int pitchBendForRange(int cents, int rangeSemitones) {
+        int range = Math.max(1, Math.min(ChannelPlan.BEND_RANGE, rangeSemitones));
+        if (range == ChannelPlan.BEND_RANGE) {
+            return pitchBend(cents);
+        }
+        int limit = range * 100;
+        int clamped = Math.max(-limit, Math.min(limit, cents));
+        long bend = 8192L + Math.round(clamped * 8192.0 / limit);
         return (int) Math.max(0, Math.min(16383, bend));
     }
 
@@ -976,8 +1027,24 @@ public final class Track {
     /** Non-default tune, decay, and effects, for {@code hits info}. Empty when this row is plain. */
     public String shapeText() {
         StringBuilder text = new StringBuilder();
+        if (Slide.applies(this) && (slideMs != Slide.DEFAULT_MS || slideCurve() != Slide.Curve.LINEAR || slideSteps() > 0)) {
+            StringBuilder glide = new StringBuilder("slide ")
+                .append(slideMs)
+                .append(" ms ")
+                .append(slideCurve().label());
+            int glides = 0;
+            for (Step step : steps) {
+                if (step.on() && step.slide()) {
+                    glides++;
+                }
+            }
+            if (glides > 0) {
+                glide.append(" (").append(glides).append(glides == 1 ? " glide step)" : " glide steps)");
+            }
+            join(text, glide.toString());
+        }
         if (tune != 0) {
-            text.append("tune ").append(tune > 0 ? "+" : "").append(tune).append(" cents");
+            join(text, "tune " + (tune > 0 ? "+" : "") + tune + " cents");
         }
         if (decay != DECAY) {
             join(text, "decay " + decay + "%");
