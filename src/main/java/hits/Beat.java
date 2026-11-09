@@ -17,7 +17,7 @@ public final class Beat {
      * other than 100, the beat has a song chain, the mixer is off its defaults,
      * a pattern C–H is in use, a pattern's length differs from the root {@code steps},
      * a step is longer than one step, a note track is legato, a step is nudged
-     * off the grid, a track shift is set, or a track chooses a bank, a drum kit,
+     * off the grid, a step slides, a row sets a slide time or curve, a track shift is set, or a track chooses a bank, a drum kit,
      * or a pitched preset. Version 1 files stay version 1.
      */
     public static final int FORMAT_V2 = 2;
@@ -165,7 +165,8 @@ public final class Beat {
 
     /**
      * Active pattern, any pattern with a hit, and any pattern named by the chain.
-     * {@code hits info} and the filter warning use this same list.
+     * {@code hits info} lists these. The MIDI filter warning uses {@link #songSlots()}
+     * and only the patterns where that row sounds.
      */
     public List<Character> patternsInUse() {
         List<Character> used = new ArrayList<>();
@@ -206,24 +207,44 @@ public final class Beat {
     }
 
     /**
+     * Patterns the song plays. The chain when there is one, otherwise the active pattern.
+     */
+    public List<Character> songSlots() {
+        if (hasChain()) {
+            return Chain.distinctSlots(chain);
+        }
+        return List.of(active);
+    }
+
+    /**
      * MIDI export drops low cut, EQ, high cut, presence, and invert.
      * The companion SoundFont drops the same filters except invert, which it keeps.
-     * A row is named only when it has a note in a pattern {@link #patternsInUse()} returns.
+     * A row is named only for a pattern in {@link #songSlots()} where that row sounds.
      * Null when nothing qualifies. One line per row.
      */
     public String midiFilterWarning() {
+        return midiFilterWarning(songSlots());
+    }
+
+    /**
+     * Same warning as {@link #midiFilterWarning()}, limited to {@code slots}.
+     * A pattern is listed only when this row has a hit there that playback will sound.
+     * An empty pattern, a muted row, and a pattern outside {@code slots} are left out.
+     */
+    public String midiFilterWarning(List<Character> slots) {
+        List<Character> scope = slots == null || slots.isEmpty() ? songSlots() : slots;
         StringBuilder lines = new StringBuilder();
         for (int row = 0; row < trackCount; row++) {
             List<String> filters = new ArrayList<>();
             List<String> patterns = new ArrayList<>();
             String name = null;
-            for (char slot : patternsInUse()) {
+            for (char slot : scope) {
                 Track[] tracks = slot(slot);
                 if (row >= tracks.length) {
                     continue;
                 }
                 Track track = tracks[row];
-                if (!trackHasNotes(track, stepCount(slot))) {
+                if (!rowSounds(slot, row)) {
                     continue;
                 }
                 List<String> dropped = droppedFilters(track);
@@ -233,7 +254,10 @@ public final class Beat {
                 if (name == null) {
                     name = track.name();
                 }
-                patterns.add(slotLabel(slot));
+                String label = slotLabel(slot);
+                if (!patterns.contains(label)) {
+                    patterns.add(label);
+                }
                 for (String filter : dropped) {
                     if (!filters.contains(filter)) {
                         filters.add(filter);
@@ -265,6 +289,33 @@ public final class Beat {
         int limit = Math.min(steps, Track.CAPACITY);
         for (int step = 0; step < limit; step++) {
             if (track.step(step).on()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when {@code row} produces a note in {@code slot}.
+     * A step that is off, past the pattern length, muted, soloed out, at velocity 0,
+     * or at chance 0 does not sound.
+     */
+    private boolean rowSounds(char slot, int row) {
+        Track[] tracks = this.slot(slot);
+        if (row < 0 || row >= tracks.length) {
+            return false;
+        }
+        Track track = tracks[row];
+        if (!audibleIn(tracks, track)) {
+            return false;
+        }
+        int limit = Math.min(stepCount(slot), Track.CAPACITY);
+        for (int step = 0; step < limit; step++) {
+            Step cell = track.step(step);
+            if (!cell.on() || cell.probability() <= 0) {
+                continue;
+            }
+            if (Mix.velocity(cell.velocity(), track.level(), master) > 0) {
                 return true;
             }
         }
@@ -602,6 +653,7 @@ public final class Beat {
             || hasCustomLengths()
             || hasNoteLength()
             || hasNudge()
+            || hasSlides()
             || hasSoundChoice()
             || hasShape()
             || hasSamples()
@@ -674,6 +726,21 @@ public final class Beat {
         for (Track[] slot : slots) {
             if (held(slot)) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    /** A slide step, or a slide time or curve other than 80 ms linear, in any pattern. */
+    public boolean hasSlides() {
+        for (Track[] slot : slots) {
+            for (Track track : slot) {
+                if (track.slideMs() != Slide.DEFAULT_MS || track.slideCurve() != Slide.Curve.LINEAR) {
+                    return true;
+                }
+                if (track.slideSteps() > 0) {
+                    return true;
+                }
             }
         }
         return false;

@@ -4,6 +4,7 @@ import hits.Beat;
 import hits.Editor;
 import hits.NoteSpan;
 import hits.SampleRef;
+import hits.Slide;
 import hits.Step;
 import hits.Track;
 import hits.TrackMode;
@@ -49,7 +50,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         setFocusable(true);
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        setToolTipText("Click a step. Shift-click makes a loud hit. Drag up or down to set velocity. Drag a lit pad sideways to set its length. Right-click or Alt-click selects it.");
+        setToolTipText("Click a step. Shift-click makes a loud hit. Ctrl-click or G toggles slide. Drag up or down to set velocity. Drag a lit pad sideways to set its length. Right-click or Alt-click selects it.");
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
@@ -257,6 +258,9 @@ final class PatternPanel extends JPanel implements Scrollable {
                 int mark = Math.max(2, cell.height / 8);
                 g.fillRect(cell.x + 4, cell.y + cell.height - mark - 3, Math.max(4, cell.width - 8), 2);
             }
+            if (cellStep.slide() && Slide.applies(track)) {
+                paintSlide(g, metrics, row, column, cell);
+            }
             if (row == editor.trackIndex() && column == editor.stepIndex()) {
                 g.setColor(Theme.LINE);
                 g.setStroke(new BasicStroke(2f));
@@ -298,6 +302,21 @@ final class PatternPanel extends JPanel implements Scrollable {
             g.setComposite(barComposite);
         }
         g.setComposite(previous);
+    }
+
+    /** A green wedge on the left of a slide step, and a line back to the previous step. */
+    private void paintSlide(Graphics2D g, Metrics metrics, int row, int column, Rectangle cell) {
+        g.setColor(Theme.PLAY);
+        int size = Math.max(6, Math.min(cell.height / 2, 10));
+        int x = cell.x + 2;
+        int y = cell.y + 2;
+        g.fillPolygon(new int[] {x, x + size, x}, new int[] {y, y + size / 2, y + size}, 3);
+        if (column > 0) {
+            Rectangle previous = metrics.step(row, column - 1);
+            int yMid = cell.y + cell.height / 2;
+            g.setStroke(new BasicStroke(2f));
+            g.drawLine(previous.x + previous.width - 2, yMid, cell.x + 1, yMid);
+        }
     }
 
     private static void dim(Graphics2D g, Composite base) {
@@ -363,6 +382,10 @@ final class PatternPanel extends JPanel implements Scrollable {
             }
             Track track = editor.viewTrack(row);
             Step step = track.step(column);
+            if ((event.isControlDown() || event.isMetaDown()) && Slide.applies(track)) {
+                editor.toggleSlide(row, column);
+                return;
+            }
             int start = step.on() ? step.velocity() : (event.isShiftDown() ? track.accent() : track.velocity());
             gesture = Gesture.pad(
                 row,
@@ -477,11 +500,12 @@ final class PatternPanel extends JPanel implements Scrollable {
             String held = step.extended() ? " Holds " + step.length() + " steps." : "";
             int offset = editor.viewTrack(row).playedNudge(column);
             String nudged = offset != 0 ? " Nudge " + offset + "%." : "";
+            String glide = step.slide() ? " Slides in from the previous note." : "";
             String past = column >= editor.beat().stepCount(editor.viewSlot())
                 ? " Past this pattern's length, so it does not play."
                 : "";
-            return "Click toggles the step. Shift-click makes a loud hit. Drag up or down to set velocity. Drag a lit pad sideways to set how many steps it holds. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
-                + pitch + chance + held + nudged + past;
+            return "Click toggles the step. Shift-click makes a loud hit. Ctrl-click or G toggles slide. Drag up or down to set velocity. Drag a lit pad sideways to set how many steps it holds. Right-click or Alt-click selects it so you can change its volume, chance, or step pitch."
+                + pitch + chance + held + nudged + glide + past;
         }
         if (row >= 0) {
             return "Select this track";

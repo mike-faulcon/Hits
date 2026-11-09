@@ -140,7 +140,7 @@ public final class HitsCli {
         warnSamples(ready, err);
         warnChannels(beat, slots, ready.use(), err);
         if (midi || parsed.samplesSf2) {
-            warnFilters(beat, err);
+            warnFilters(beat, slots, err);
         }
         try {
             Path parent = parsed.out.getParent();
@@ -304,10 +304,19 @@ public final class HitsCli {
     }
 
     private static void warnFilters(Beat beat, PrintStream err) {
+        warnFilters(beat, null, err);
+    }
+
+    /**
+     * Names filters the MIDI file will drop.
+     * {@code slots} is the patterns this command writes. Null uses the song chain.
+     * A pattern is named only when the row sounds there.
+     */
+    private static void warnFilters(Beat beat, List<Character> slots, PrintStream err) {
         if (beat == null) {
             return;
         }
-        String warning = beat.midiFilterWarning();
+        String warning = slots == null ? beat.midiFilterWarning() : beat.midiFilterWarning(slots);
         if (warning != null) {
             err.println(warning);
         }

@@ -94,14 +94,18 @@ class SampleTrackTest {
             )));
             SoundFonts.install(synth, kits, synth.getDefaultSoundbank());
             SoundFonts.install(synth, samples, null);
+            javax.sound.midi.Instrument kitVoice = kits.getInstruments()[0];
+            javax.sound.midi.Instrument sampleVoice = samples.getInstruments()[0];
             boolean kitsLoaded = false;
             boolean samplesLoaded = false;
             for (javax.sound.midi.Instrument instrument : synth.getLoadedInstruments()) {
-                int bank = instrument.getPatch().getBank();
-                if (bank == kits.getInstruments()[0].getPatch().getBank()) {
+                // Gervill keeps the soundbank's own instrument object. Identity, not the
+                // patch number: unloading the default bank used to delete this object
+                // because unload removes by patch, and the default bank uses the same patches.
+                if (instrument == kitVoice) {
                     kitsLoaded = true;
                 }
-                if (bank == SampleBank.MIDI_BANK || bank == SampleBank.SF2_BANK) {
+                if (instrument == sampleVoice) {
                     samplesLoaded = true;
                 }
             }

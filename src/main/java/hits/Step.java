@@ -25,6 +25,11 @@ public final class Step {
     private int length = MIN_LENGTH;
     /** Timing offset as a percent of one straight step, from {@link #MIN_NUDGE} to {@link #MAX_NUDGE}. */
     private int nudge;
+    /**
+     * Glide into this step from the previous sounding note. Omitted from the file when false.
+     * A drum row stores the flag and does not glide.
+     */
+    private boolean slide;
 
     public Step() {
         this(false, 100);
@@ -41,6 +46,7 @@ public final class Step {
         copy.probability = probability;
         copy.length = length;
         copy.nudge = nudge;
+        copy.slide = slide;
         return copy;
     }
 
@@ -51,6 +57,7 @@ public final class Step {
         this.probability = other.probability;
         this.length = other.length;
         this.nudge = other.nudge;
+        this.slide = other.slide;
     }
 
     public boolean on() {
@@ -130,6 +137,15 @@ public final class Step {
         return nudge != 0;
     }
 
+    /** True when this step glides from the previous note instead of attacking again. */
+    public boolean slide() {
+        return slide;
+    }
+
+    public void setSlide(boolean slide) {
+        this.slide = slide;
+    }
+
     /**
      * Every stored field. Pattern C–H is omitted from the file when each track
      * {@linkplain Track#sameAs(Track) matches} the empty kit, so a new field belongs here.
@@ -141,7 +157,8 @@ public final class Step {
             && probability == other.probability
             && pitch == other.pitch
             && length == other.length
-            && nudge == other.nudge;
+            && nudge == other.nudge
+            && slide == other.slide;
     }
 
     public int soundingNote(int trackNote) {

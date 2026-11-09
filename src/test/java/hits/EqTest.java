@@ -573,9 +573,24 @@ class EqTest {
         Beat four = BeatJson.read(dropped);
         assertNull(four.track(15).eqBand(3));
         assertEquals(
-            "A Air: EQ band 4 was dropped. A row keeps three bands.",
+            "A Air: EQ band 4 (peak 10000 Hz +2 dB) was dropped. A row keeps three bands.",
             four.rowWarning('a', "Air", "EQ band 4")
         );
+        assertEquals(EqBand.Type.HIGH_SHELF, four.track(15).eqBand(2).type());
+        String shelfLast = json.replace(
+            "{\"hz\": 180, \"gain\": -4, \"q\": 0.7, \"type\": \"lowShelf\"}",
+            "{\"hz\": 180, \"gain\": -4, \"q\": 0.7, \"type\": \"lowShelf\"}, {\"hz\": 900, \"gain\": 3, \"q\": 1.2}, {\"hz\": 2000, \"gain\": 2, \"q\": 1}, {\"hz\": 7000, \"gain\": -4, \"q\": 0.7, \"type\": \"highShelf\"}"
+        );
+        Beat kept = BeatJson.read(shelfLast);
+        assertEquals(EqBand.Type.LOW_SHELF, kept.track(15).eqBand(0).type());
+        assertEquals(EqBand.Type.PEAK, kept.track(15).eqBand(1).type());
+        assertEquals(EqBand.Type.PEAK, kept.track(15).eqBand(2).type());
+        assertNull(kept.track(15).eqBand(3));
+        String named = kept.rowWarning('a', "Air", "EQ band 4");
+        assertNotNull(named);
+        assertTrue(named.contains("high shelf"), named);
+        assertTrue(named.contains("7000 Hz"), named);
+        assertTrue(named.contains("dropped"), named);
         Beat unknown = BeatJson.read(json.replace("\"type\": \"lowShelf\"", "\"type\": \"notch\""));
         assertEquals(EqBand.Type.PEAK, unknown.track(15).eqBand(0).type());
         assertEquals(

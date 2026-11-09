@@ -313,6 +313,29 @@ class RowBugsTest {
         assertFalse(patterns.contains("B"), patterns);
     }
 
+    @Test
+    void filterWarningSkipsPatternsWhereTheRowIsSilent() {
+        Beat beat = Beat.drumKit("silent");
+        Track snare = beat.track(1);
+        snare.setName("Snare");
+        snare.setHighCut(4000, 12);
+        snare.tap(0, false);
+        beat.slot('b')[1].setName("Snare");
+        beat.slot('b')[1].setHighCut(4000, 12);
+        beat.slot('c')[1].setName("Snare stop");
+        beat.slot('c')[1].setHighCut(3000, 12);
+        beat.slot('c')[1].tap(2, false);
+        beat.addChain('a');
+        beat.addChain('b');
+
+        String warning = beat.midiFilterWarning();
+        assertNotNull(warning);
+        assertTrue(warning.contains("in pattern A"), warning);
+        assertFalse(warning.contains("pattern B"), warning);
+        assertFalse(warning.contains("pattern C"), warning);
+        assertFalse(warning.contains("Snare stop"), warning);
+    }
+
     private static int countNamed(Beat beat, String name) {
         int count = 0;
         for (Track track : beat.slot('a')) {

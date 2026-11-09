@@ -12,6 +12,8 @@ import java.util.Map;
  * a track {@code pan} or mixer {@code level}, a beat {@code master}, pattern slots {@code c} through {@code h},
  * a per-pattern {@code steps} count, a step {@code len} (note length in steps, omitted at 1),
  * a track {@code legato} flag (omitted when false), a step {@code nudge} (timing percent, omitted at 0),
+ * a step {@code slide} flag (omitted when false), a track {@code slideMs} (milliseconds, omitted at 80),
+ * a track {@code slideCurve} ({@code exponential}, omitted when linear),
  * a track {@code shift} (omitted at 0), a track {@code tune} (cents, omitted at 0),
  * a track {@code decay} (percent, omitted at 100), and track {@code reverb}, {@code chorus},
  * {@code cutoff}, and {@code resonance} (each omitted when unset, so no controller is sent),
@@ -165,6 +167,12 @@ public final class BeatJson {
         if (track.legato()) {
             field(out, 5, "legato", true, true);
         }
+        if (track.slideMs() != Slide.DEFAULT_MS) {
+            field(out, 5, "slideMs", track.slideMs(), true);
+        }
+        if (track.slideCurve() != Slide.Curve.LINEAR) {
+            field(out, 5, "slideCurve", track.slideCurve().json(), true);
+        }
         if (track.shift() != 0) {
             field(out, 5, "shift", track.shift(), true);
         }
@@ -226,6 +234,9 @@ public final class BeatJson {
             }
             if (step.nudge() != 0) {
                 out.append(",\"nudge\":").append(step.nudge());
+            }
+            if (step.slide()) {
+                out.append(",\"slide\":true");
             }
             out.append("}");
         }
@@ -426,6 +437,28 @@ public final class BeatJson {
         if (object.containsKey("legato") && object.get("legato") != null) {
             track.setLegato(bool(object.get("legato")));
         }
+        if (object.containsKey("slideMs") && object.get("slideMs") != null) {
+            int requested = number(object.get("slideMs"));
+            track.setSlideMs(requested);
+            if (requested != track.slideMs()) {
+                beat.addLoadWarning(
+                    Beat.slotLabel(slot) + " " + track.name()
+                        + ": slide time " + requested + " ms was clamped to " + track.slideMs() + " ms."
+                );
+            }
+        }
+        if (object.get("slideCurve") instanceof String curveText && !curveText.isBlank()) {
+            Slide.Curve parsed = Slide.Curve.parse(curveText);
+            if (parsed == null) {
+                beat.addLoadWarning(
+                    Beat.slotLabel(slot) + " " + track.name()
+                        + ": slide curve " + curveText + " was changed to linear."
+                );
+                track.setSlideCurve(Slide.Curve.LINEAR);
+            } else {
+                track.setSlideCurve(parsed);
+            }
+        }
         if (object.containsKey("shift") && object.get("shift") != null) {
             track.setShift(number(object.get("shift")));
         }
@@ -496,6 +529,9 @@ public final class BeatJson {
             if (step.containsKey("nudge") && step.get("nudge") != null) {
                 track.step(i).setNudge(number(step.get("nudge")));
             }
+            if (step.containsKey("slide") && step.get("slide") != null) {
+                track.step(i).setSlide(bool(step.get("slide")));
+            }
         }
         return track;
     }
@@ -503,18 +539,17 @@ public final class BeatJson {
     private static void readEq(Beat beat, char slot, Track track, Map<String, Object> eq) {
         if (eq.get("bands") instanceof List<?> list) {
             int index = 0;
+            List<String> dropped = new ArrayList<>();
             for (Object item : list) {
                 if (!(item instanceof Map<?, ?> rawBand)) {
                     continue;
                 }
-                if (index >= Track.EQ_BANDS) {
-                    beat.addLoadWarning(
-                        Beat.slotLabel(slot) + " " + track.name()
-                            + ": EQ band " + (index + 1) + " was dropped. A row keeps three bands."
-                    );
-                    break;
-                }
                 Map<String, Object> band = asMap(rawBand);
+                if (index >= Track.EQ_BANDS) {
+                    dropped.add(droppedBand(index + 1, band));
+                    index++;
+                    continue;
+                }
                 boolean gainGiven = band.containsKey("gain") && band.get("gain") != null;
                 double requestedGain = gainGiven ? decimal(band.get("gain")) : 0;
                 if (!gainGiven || Math.abs(requestedGain) < 1e-9) {
@@ -562,6 +597,14 @@ public final class BeatJson {
                 }
                 index++;
             }
+            if (!dropped.isEmpty()) {
+                beat.addLoadWarning(
+                    Beat.slotLabel(slot) + " " + track.name()
+                        + ": " + joinDropped(dropped)
+                        + (dropped.size() == 1 ? " was dropped. " : " were dropped. ")
+                        + "A row keeps three bands."
+                );
+            }
         }
         if (eq.containsKey("highCut") && eq.get("highCut") != null) {
             double requested = decimal(eq.get("highCut"));
@@ -587,6 +630,37 @@ public final class BeatJson {
         if (eq.containsKey("bypass") && eq.get("bypass") != null) {
             track.setEqBypass(bool(eq.get("bypass")));
         }
+    }
+
+    /** {@code EQ band 4 (high shelf 7000 Hz -4 dB)}. The first three bands stay, in file order. */
+    private static String droppedBand(int number, Map<String, Object> band) {
+        String typeWord = "peak";
+        if (band.get("type") instanceof String typeText && !typeText.isBlank()) {
+            EqBand.Type parsed = EqBand.Type.parse(typeText);
+            typeWord = parsed == null ? typeText.trim() : parsed.label();
+        }
+        double hz = band.containsKey("hz") && band.get("hz") != null
+            ? decimal(band.get("hz"))
+            : Track.eqDefaultHz(Math.min(number - 1, Track.EQ_BANDS - 1));
+        double gain = band.containsKey("gain") && band.get("gain") != null ? decimal(band.get("gain")) : 0;
+        return "EQ band " + number + " (" + typeWord + " " + Db.exact(hz) + " Hz " + Db.labeled(gain) + ")";
+    }
+
+    private static String joinDropped(List<String> items) {
+        if (items.size() == 1) {
+            return items.get(0);
+        }
+        if (items.size() == 2) {
+            return items.get(0) + " and " + items.get(1);
+        }
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                text.append(i + 1 == items.size() ? ", and " : ", ");
+            }
+            text.append(items.get(i));
+        }
+        return text.toString();
     }
 
     /**

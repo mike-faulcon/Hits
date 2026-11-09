@@ -90,6 +90,7 @@ final class StudioFrame extends JFrame {
     private KeyEventDispatcher tapKeys;
     private KeyEventDispatcher nudgeKeys;
     private KeyEventDispatcher rowKeys;
+    private KeyEventDispatcher slideKeys;
 
     StudioFrame(Editor editor, Player player) {
         super("Hits");
@@ -257,6 +258,12 @@ final class StudioFrame extends JFrame {
         keys = KeyboardShortcuts.spacePlay(this, () -> transport.togglePlay(this));
         tapKeys = KeyboardShortcuts.tapTempo(this, transport::tapTempo);
         nudgeKeys = KeyboardShortcuts.nudge(this, () -> editor.bumpStepNudge(-1), () -> editor.bumpStepNudge(1));
+        slideKeys = KeyboardShortcuts.glide(this, () -> {
+            int column = editor.stepIndex();
+            if (column >= 0) {
+                editor.toggleSlide(editor.trackIndex(), column);
+            }
+        });
         rowKeys = KeyboardShortcuts.rows(
             this,
             editor::addRow,
@@ -269,6 +276,7 @@ final class StudioFrame extends JFrame {
         manager.addKeyEventDispatcher(keys);
         manager.addKeyEventDispatcher(tapKeys);
         manager.addKeyEventDispatcher(nudgeKeys);
+        manager.addKeyEventDispatcher(slideKeys);
         manager.addKeyEventDispatcher(rowKeys);
     }
 
@@ -470,6 +478,10 @@ final class StudioFrame extends JFrame {
         if (nudgeKeys != null) {
             manager.removeKeyEventDispatcher(nudgeKeys);
             nudgeKeys = null;
+        }
+        if (slideKeys != null) {
+            manager.removeKeyEventDispatcher(slideKeys);
+            slideKeys = null;
         }
         if (rowKeys != null) {
             manager.removeKeyEventDispatcher(rowKeys);

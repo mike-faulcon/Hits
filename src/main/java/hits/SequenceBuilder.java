@@ -637,7 +637,7 @@ public final class SequenceBuilder {
         if (!plan.skipSetup(row)) {
             writeSetup(midi, track, row, setupAt, plan, memory, channel);
         }
-        emitNotes(midi, channel, notes);
+        emitNotes(midi, channel, notes, track, beat.bpm(), plan.bendRange(row));
     }
 
     /**
@@ -678,7 +678,7 @@ public final class SequenceBuilder {
             emitWithSetup(midi, track, row, channel, notes, plan);
             return;
         }
-        emitNotes(midi, channel, notes);
+        emitNotes(midi, channel, notes, track, beat.bpm(), plan.bendRange(row));
     }
 
     /** Bank, program, and pan immediately before each note, so a shared channel can change instrument. */
@@ -770,16 +770,30 @@ public final class SequenceBuilder {
                 ahead
             );
             if (sound != null) {
-                placed.add(new Placed(sound, sounding[step], velocities[step]));
+                boolean glide = track.step(step).slide()
+                    && Slide.applies(track)
+                    && !(track.mode() == TrackMode.SAMPLE && (samples == null || !samples.plays(track, row)));
+                placed.add(new Placed(sound, sounding[step], velocities[step], glide));
             }
         }
         return placed;
     }
 
-    private static void emitNotes(Track midi, int channel, List<Placed> placed) throws InvalidMidiDataException {
+    private static void emitNotes(
+        Track midi,
+        int channel,
+        List<Placed> placed,
+        hits.Track track,
+        int bpm,
+        int range
+    ) throws InvalidMidiDataException {
         // A negative nudge can put step 0 after a later step. Emit in time order so the
         // later note-on shortens a same-pitch note that would otherwise overlap it.
         placed.sort((left, right) -> Long.compare(left.sound.start(), right.sound.start()));
+        if (anySlide(placed)) {
+            emitGlide(midi, channel, placed, track, bpm, range);
+            return;
+        }
         for (Placed note : placed) {
             truncateOverlap(midi, channel, note.note, note.sound.start());
             ShortMessage on = new ShortMessage();
@@ -791,7 +805,104 @@ public final class SequenceBuilder {
         }
     }
 
-    private record Placed(NoteTiming.Sound sound, int note, int velocity) {}
+    private static boolean anySlide(List<Placed> placed) {
+        for (Placed note : placed) {
+            if (note.slide) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A slide step does not attack. The previous note stays down and the pitch wheel
+     * moves from that note to this one. A slide with no previous note still attacks.
+     */
+    private static void emitGlide(
+        Track midi,
+        int channel,
+        List<Placed> placed,
+        hits.Track track,
+        int bpm,
+        int range
+    ) throws InvalidMidiDataException {
+        int anchor = -1;
+        int fromNote = -1;
+        MidiEvent heldOff = null;
+        long glideTicks = Slide.ticks(bpm, track.slideMs());
+        for (Placed note : placed) {
+            boolean glide = note.slide && anchor >= 0 && heldOff != null;
+            if (glide) {
+                long end = Math.max(heldOff.getTick(), note.sound.end());
+                midi.remove(heldOff);
+                ShortMessage released = new ShortMessage();
+                released.setMessage(ShortMessage.NOTE_OFF, channel, anchor, 0);
+                heldOff = new MidiEvent(released, end);
+                midi.add(heldOff);
+                long room = Math.max(1, end - note.sound.start());
+                writeGlide(midi, channel, note.sound.start(), Math.min(glideTicks, room), track, range, anchor, fromNote, note.note);
+                fromNote = note.note;
+                continue;
+            }
+            if (heldOff != null && heldOff.getTick() > note.sound.start()) {
+                midi.remove(heldOff);
+                ShortMessage released = new ShortMessage();
+                released.setMessage(ShortMessage.NOTE_OFF, channel, anchor, 0);
+                midi.add(new MidiEvent(released, note.sound.start()));
+            }
+            if (anchor >= 0) {
+                addBend(midi, channel, note.sound.start(), track.tune(), range);
+            }
+            truncateOverlap(midi, channel, note.note, note.sound.start());
+            ShortMessage on = new ShortMessage();
+            on.setMessage(ShortMessage.NOTE_ON, channel, note.note, note.velocity);
+            midi.add(new MidiEvent(on, note.sound.start()));
+            ShortMessage off = new ShortMessage();
+            off.setMessage(ShortMessage.NOTE_OFF, channel, note.note, 0);
+            heldOff = new MidiEvent(off, note.sound.end());
+            midi.add(heldOff);
+            anchor = note.note;
+            fromNote = note.note;
+        }
+    }
+
+    private static void writeGlide(
+        Track midi,
+        int channel,
+        long start,
+        long ticks,
+        hits.Track track,
+        int range,
+        int anchor,
+        int fromNote,
+        int toNote
+    ) throws InvalidMidiDataException {
+        long span = Math.max(1, ticks);
+        int previous = Integer.MIN_VALUE;
+        for (long tick = 0; tick <= span; tick++) {
+            double shaped = track.slideCurve().shape(tick / (double) span);
+            int cents = Slide.cents(track.tune(), anchor, fromNote, toNote, shaped);
+            int value = range == ChannelPlan.BEND_RANGE ? hits.Track.pitchBend(cents) : hits.Track.pitchBendForRange(cents, range);
+            if (value == previous && tick != span) {
+                continue;
+            }
+            previous = value;
+            addBendValue(midi, channel, start + tick, value);
+        }
+    }
+
+    private static void addBend(Track midi, int channel, long tick, int cents, int range) throws InvalidMidiDataException {
+        int value = range == ChannelPlan.BEND_RANGE ? hits.Track.pitchBend(cents) : hits.Track.pitchBendForRange(cents, range);
+        addBendValue(midi, channel, tick, value);
+    }
+
+    private static void addBendValue(Track midi, int channel, long tick, int value) throws InvalidMidiDataException {
+        ShortMessage bend = new ShortMessage();
+        bend.setMessage(ShortMessage.PITCH_BEND, channel, value & 0x7f, (value >> 7) & 0x7f);
+        midi.add(new MidiEvent(bend, Math.max(0, tick)));
+    }
+
+    private record Placed(NoteTiming.Sound sound, int note, int velocity, boolean slide) {}
 
     private static int nextPlaying(boolean[] play, int step) {
         for (int next = step + 1; next < play.length; next++) {

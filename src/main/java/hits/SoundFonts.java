@@ -1,13 +1,17 @@
 package hits;
 
+import javax.sound.midi.Instrument;
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MidiSystem;
+import javax.sound.midi.Patch;
 import javax.sound.midi.Soundbank;
 import javax.sound.midi.Synthesizer;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * {@code .sf2} loading through the JDK SoundFont reader ({@link MidiSystem#getSoundbank}).
@@ -39,9 +43,15 @@ public final class SoundFonts {
     }
 
     /**
-     * Loads {@code bank} and then unloads {@code previous}, so a failed load leaves the current sounds.
+     * Loads {@code bank} and then unloads the parts of {@code previous} the new bank did not replace.
+     * A failed load leaves the current sounds.
      * {@code previous} is only the bank being replaced. A user SoundFont and a sample bank
      * stay loaded together when each install names only the bank it replaces.
+     * <p>
+     * Gervill stores a loaded instrument under its patch, and {@code unloadInstrument}
+     * removes that patch, not that object. Unloading the whole default bank after a user
+     * bank has taken those patches deletes the user instruments too. Only patches the new
+     * bank does not use are unloaded.
      */
     public static void install(Synthesizer synthesizer, Soundbank bank, Soundbank previous) {
         if (synthesizer == null || !synthesizer.isOpen()) {
@@ -54,8 +64,29 @@ public final class SoundFonts {
             throw new IllegalArgumentException("The built-in synth did not load this SoundFont.");
         }
         if (previous != null && previous != bank) {
-            synthesizer.unloadAllInstruments(previous);
+            unloadLeftovers(synthesizer, previous, bank);
         }
+    }
+
+    /** Drops instruments from {@code previous} whose patch the new bank did not take. */
+    private static void unloadLeftovers(Synthesizer synthesizer, Soundbank previous, Soundbank loaded) {
+        Set<String> kept = new HashSet<>();
+        for (Instrument instrument : loaded.getInstruments()) {
+            kept.add(patchKey(instrument.getPatch()));
+        }
+        for (Instrument instrument : previous.getInstruments()) {
+            if (instrument == null || kept.contains(patchKey(instrument.getPatch()))) {
+                continue;
+            }
+            synthesizer.unloadInstrument(instrument);
+        }
+    }
+
+    private static String patchKey(Patch patch) {
+        if (patch == null) {
+            return "";
+        }
+        return patch.getBank() + ":" + patch.getProgram();
     }
 
     public static String displayName(Soundbank bank, Path path) {

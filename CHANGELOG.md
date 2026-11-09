@@ -1,5 +1,17 @@
 # Changelog
 
+## Pitch slides
+
+A step on a note row or a sample row, including Sub, can slide. The step holds the previous note and bends to its own pitch. There is no second attack. Slide time is 10–500 ms. 80 ms is the default and is left out of the file. The curve is linear or exponential in pitch. Linear is left out of the file.
+
+Ctrl-click a step, or press G with a step selected, to toggle the glide. The grid draws a green wedge and a line back to the previous step. The inspector has the step's Slide checkbox, the time, and Linear / Exponential. Each of those has an accessible name, and the curve button that is filled is selected. The change is one undo step.
+
+The glide is MIDI pitch bend. RPN 0 is set to the largest interval that row uses, and never wider than ±24 semitones. A sliding row does not share a channel, because the bend would move the other row. `hits info` names the time, the curve, and how many steps glide. `hits render` plays them. A filter baked into the sample bank still follows the bend.
+
+A beat that does not slide still loads, saves, and renders the same bytes. A drum row can store the flag and does not glide. A slide farther than ±24 semitones stops at that edge. A sample that failed to load does not glide, because it is on the drum channel.
+
+A fourth EQ band is still dropped. The first three stay, in the order they were written, and the warning names each band that was dropped, including a shelf. The MIDI filter warning names a pattern only when that row sounds there, in the song chain or in the patterns the render writes.
+
 ## Three EQ bands
 
 Each row has three EQ bands. A band is a peak, a low shelf, or a high shelf. Peak is the default and is left out of the file, so a beat that already has one or two peaking bands still saves the same bytes and sounds the same. Low shelf and high shelf use the cookbook biquads. A Q near 0.7 is a smooth tilt. A higher Q puts a shoulder on the corner.
