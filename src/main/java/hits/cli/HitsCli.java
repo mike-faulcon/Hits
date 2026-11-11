@@ -346,7 +346,9 @@ public final class HitsCli {
         }
         String problem = SamplePaths.problem(track, beatFile);
         if (problem != null) {
-            text.append(", missing, plays ").append(Notes.name(track.note()));
+            boolean missing = problem.contains("not found");
+            text.append(missing ? ", missing, plays " : ", unreadable, plays ");
+            text.append(Notes.name(track.note()));
             return text.toString();
         }
         if (samples == null || samples.plays(track, row)) {

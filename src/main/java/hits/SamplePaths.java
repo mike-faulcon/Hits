@@ -217,6 +217,10 @@ public final class SamplePaths {
         if (resolved == null || !Files.isRegularFile(resolved)) {
             return "Sample file was not found. " + fallback;
         }
+        String rejected = SampleAudio.rejection(resolved);
+        if (rejected != null) {
+            return rejected + " " + fallback;
+        }
         return null;
     }
 }

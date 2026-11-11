@@ -1,5 +1,9 @@
 # Changelog
 
+## Sample load
+
+A one-shot is read only up to 10 seconds at the file's own rate, then downmixed as before. A longer file is cut there, and a beat that already used a shorter sample still loads, saves, and renders the same bytes. An empty file, a file over 512 MB, a header that lies about the length, a format Hits cannot play, or a file that ends early is refused. The inspector, `hits info`, and `hits render` say why in plain language, and that row plays its drum note. A read that takes more than 5 seconds stops.
+
 ## UI polish
 
 Help → Keyboard Shortcuts, or F1, lists the keys and mouse gestures the window handles. M mutes the selected row and S solos it. Controls have tooltips, including those shortcuts. An empty pattern says to click a square and press Space. The first launch still starts on Boom bap. The drum sound picker no longer leaves a tall empty box, the tempo value is labeled BPM, and the step count says steps. A damaged beat, a newer file, and a failed WAV or SoundFont now explain the problem in plain language. Undo and redo were already there for grid edits and for adding, removing, and reordering rows. Saved beats still load, save, and render the same bytes.
