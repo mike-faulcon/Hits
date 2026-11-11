@@ -9,6 +9,11 @@ import hits.Step;
 import hits.Track;
 import hits.TrackMode;
 
+import javax.accessibility.Accessible;
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleRole;
+import javax.accessibility.AccessibleState;
+import javax.accessibility.AccessibleStateSet;
 import javax.swing.JPanel;
 import javax.swing.Scrollable;
 import javax.swing.SwingUtilities;
@@ -22,12 +27,18 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.IllegalComponentStateException;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.datatransfer.DataFlavor;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -43,14 +54,54 @@ final class PatternPanel extends JPanel implements Scrollable {
     private final Editor editor;
     private int playhead = -1;
     private Gesture gesture;
+    /** Enter toggles once per press. A held key must not flip the step on every repeat. */
+    private boolean enterDown;
 
     PatternPanel(Editor editor) {
         this.editor = editor;
         setOpaque(true);
         setFocusable(true);
+        setName("step-grid");
         setBackground(Theme.BG);
         setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
         setToolTipText(KeyboardShortcuts.gridTip());
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent event) {
+                if (handleKey(event)) {
+                    event.consume();
+                }
+            }
+
+            @Override
+            public void keyReleased(KeyEvent event) {
+                handleKey(event);
+            }
+        });
+        addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusGained(FocusEvent event) {
+                if (editor.stepIndex() < 0) {
+                    int rows = editor.beat().trackCount();
+                    int columns = editor.beat().gridColumns(editor.viewSlot());
+                    if (rows > 0 && columns > 0) {
+                        int row = editor.trackIndex();
+                        if (row < 0 || row >= rows) {
+                            row = 0;
+                        }
+                        editor.selectStep(row, 0);
+                    }
+                }
+                announce(null);
+                revealCursor();
+                repaint();
+            }
+
+            @Override
+            public void focusLost(FocusEvent event) {
+                repaint();
+            }
+        });
         MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent event) {
@@ -196,6 +247,7 @@ final class PatternPanel extends JPanel implements Scrollable {
         if (PatternHints.quiet(editor.beat(), editor.viewSlot())) {
             paintEmpty(g, metrics, length);
         }
+        paintCursor(g, metrics);
         g.dispose();
     }
 
@@ -282,11 +334,6 @@ final class PatternPanel extends JPanel implements Scrollable {
             if (cellStep.slide() && Slide.applies(track)) {
                 paintSlide(g, metrics, row, column, cell);
             }
-            if (row == editor.trackIndex() && column == editor.stepIndex()) {
-                g.setColor(Theme.LINE);
-                g.setStroke(new BasicStroke(2f));
-                g.drawRoundRect(cell.x + 1, cell.y + 1, cell.width - 3, cell.height - 3, 6, 6);
-            }
             g.setComposite(cellComposite);
         }
         g.setComposite(previous);
@@ -314,11 +361,6 @@ final class PatternPanel extends JPanel implements Scrollable {
                 int filled = VelocityGesture.fillHeight(step.velocity(), bar.height);
                 g.setColor(colorFor(step.shade(track.accent())));
                 g.fillRoundRect(bar.x, bar.y + bar.height - filled, bar.width, filled, 4, 4);
-            }
-            if (column == editor.stepIndex()) {
-                g.setColor(Theme.LINE);
-                g.setStroke(new BasicStroke(2f));
-                g.drawRoundRect(bar.x + 1, bar.y + 1, bar.width - 3, bar.height - 3, 4, 4);
             }
             g.setComposite(barComposite);
         }
@@ -724,6 +766,337 @@ final class PatternPanel extends JPanel implements Scrollable {
         boolean bright = shade == Step.Shade.NORMAL || shade == Step.Shade.ACCENT;
         g.setColor(bright ? Theme.INK : Theme.LINE);
         g.fillRect(x, cell.y + 3, 2, Math.max(4, cell.height / 3));
+    }
+
+    /**
+     * Keyboard cursor. Drawn after the cells, at full opacity, so a slide wedge,
+     * velocity fill, mute, or solo cannot fade it. The cyan ring sits inside a dark
+     * edge so it still reads on a bright accent.
+     */
+    private void paintCursor(Graphics2D g, Metrics metrics) {
+        int column = editor.stepIndex();
+        if (column < 0 || column >= metrics.columns) {
+            return;
+        }
+        int row = editor.trackIndex();
+        if (row < 0 || row >= metrics.rows) {
+            return;
+        }
+        boolean focused = isFocusOwner();
+        paintMark(g, metrics.step(row, column), 6, focused);
+        paintMark(g, metrics.laneBar(column), 4, focused);
+    }
+
+    private static void paintMark(Graphics2D g, Rectangle cell, int arc, boolean focused) {
+        Composite previous = g.getComposite();
+        g.setComposite(AlphaComposite.SrcOver);
+        if (focused) {
+            g.setColor(Theme.FOCUS_EDGE);
+            g.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawRoundRect(cell.x - 2, cell.y - 2, cell.width + 3, cell.height + 3, arc + 2, arc + 2);
+            g.setColor(Theme.FOCUS);
+            g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawRoundRect(cell.x + 1, cell.y + 1, cell.width - 3, cell.height - 3, arc, arc);
+        } else {
+            g.setColor(Theme.FOCUS_EDGE);
+            g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawRoundRect(cell.x - 1, cell.y - 1, cell.width + 1, cell.height + 1, arc, arc);
+            g.setColor(Theme.LINE);
+            g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.drawRoundRect(cell.x + 1, cell.y + 1, cell.width - 3, cell.height - 3, arc, arc);
+        }
+        g.setComposite(previous);
+    }
+
+    /**
+     * Grid keys while this panel has focus. Enter toggles through {@link Editor#tap}.
+     * A repeated Enter is ignored until the key is released. Returns true when the
+     * grid owns the event.
+     */
+    boolean handleKey(KeyEvent event) {
+        if (event.getID() == KeyEvent.KEY_RELEASED) {
+            if (event.getKeyCode() == KeyEvent.VK_ENTER) {
+                enterDown = false;
+            }
+            return false;
+        }
+        if (event.getKeyCode() == KeyEvent.VK_ENTER && enterDown && GridKeys.gridClaim(event)) {
+            return true;
+        }
+        if (!GridKeys.gridClaim(event)) {
+            return false;
+        }
+        String before = currentCellName();
+        GridKeys.apply(editor, event);
+        if (event.getKeyCode() == KeyEvent.VK_ENTER) {
+            enterDown = true;
+        }
+        revealCursor();
+        announce(before);
+        repaint();
+        return true;
+    }
+
+    private void revealCursor() {
+        int columns = editor.beat().gridColumns(editor.viewSlot());
+        if (columns <= 0) {
+            return;
+        }
+        Metrics metrics = metrics();
+        int row = Math.max(0, Math.min(metrics.rows - 1, editor.trackIndex()));
+        int column = editor.stepIndex();
+        if (column < 0 || column >= metrics.columns) {
+            column = 0;
+        }
+        Rectangle cell = metrics.step(row, column);
+        cell.grow(6, 6);
+        scrollRectToVisible(cell);
+    }
+
+    private String currentCellName() {
+        int rows = editor.beat().trackCount();
+        int columns = editor.beat().gridColumns(editor.viewSlot());
+        if (rows <= 0 || columns <= 0) {
+            return GridAccess.GRID_NAME;
+        }
+        return GridAccess.cellName(editor.viewTrack(cursorRow(rows)), cursorColumn(columns), columns);
+    }
+
+    private int cursorRow(int rows) {
+        int row = editor.trackIndex();
+        if (row < 0 || row >= rows) {
+            return 0;
+        }
+        return row;
+    }
+
+    private int cursorColumn(int columns) {
+        int column = editor.stepIndex();
+        if (column < 0 || column >= columns) {
+            return 0;
+        }
+        return column;
+    }
+
+    /** Tells assistive tech the focused cell changed. The grid's own name stays "Step grid". */
+    private void announce(String previous) {
+        String next = currentCellName();
+        if (next.equals(previous)) {
+            return;
+        }
+        AccessibleContext grid = getAccessibleContext();
+        grid.firePropertyChange(AccessibleContext.ACCESSIBLE_TEXT_PROPERTY, previous, next);
+        Accessible cell = focusedCell();
+        if (cell != null) {
+            cell.getAccessibleContext().firePropertyChange(AccessibleContext.ACCESSIBLE_NAME_PROPERTY, previous, next);
+            grid.firePropertyChange(AccessibleContext.ACCESSIBLE_ACTIVE_DESCENDANT_PROPERTY, null, cell);
+        }
+    }
+
+    Accessible focusedCell() {
+        int rows = editor.beat().trackCount();
+        int columns = editor.beat().gridColumns(editor.viewSlot());
+        if (rows <= 0 || columns <= 0) {
+            return null;
+        }
+        Accessible row = getAccessibleContext().getAccessibleChild(cursorRow(rows));
+        if (row == null) {
+            return null;
+        }
+        return row.getAccessibleContext().getAccessibleChild(cursorColumn(columns));
+    }
+
+    @Override
+    public AccessibleContext getAccessibleContext() {
+        if (accessibleContext == null) {
+            accessibleContext = new GridAccessible();
+        }
+        return accessibleContext;
+    }
+
+    private Locale componentLocale() {
+        try {
+            return getLocale();
+        } catch (IllegalComponentStateException exception) {
+            return Locale.getDefault();
+        }
+    }
+
+    private final class GridAccessible extends AccessibleJPanel {
+        private RowAccessible[] rows = new RowAccessible[0];
+
+        @Override
+        public String getAccessibleName() {
+            return GridAccess.GRID_NAME;
+        }
+
+        @Override
+        public String getAccessibleDescription() {
+            String tip = getToolTipText();
+            return tip == null ? super.getAccessibleDescription() : tip;
+        }
+
+        @Override
+        public AccessibleRole getAccessibleRole() {
+            return AccessibleRole.TABLE;
+        }
+
+        @Override
+        public int getAccessibleChildrenCount() {
+            return editor.beat().trackCount();
+        }
+
+        @Override
+        public Accessible getAccessibleChild(int index) {
+            int count = editor.beat().trackCount();
+            if (index < 0 || index >= count) {
+                return null;
+            }
+            if (rows.length != count) {
+                rows = Arrays.copyOf(rows, count);
+            }
+            if (rows[index] == null) {
+                rows[index] = new RowAccessible(index);
+            }
+            return rows[index];
+        }
+    }
+
+    private final class RowAccessible extends AccessibleContext implements Accessible {
+        private final int row;
+        private CellAccessible[] cells = new CellAccessible[0];
+
+        private RowAccessible(int row) {
+            this.row = row;
+            setAccessibleParent(PatternPanel.this);
+        }
+
+        @Override
+        public AccessibleContext getAccessibleContext() {
+            return this;
+        }
+
+        @Override
+        public String getAccessibleName() {
+            return GridAccess.rowName(editor.viewTrack(row));
+        }
+
+        @Override
+        public String getAccessibleDescription() {
+            return editor.viewTrack(row).soundName();
+        }
+
+        @Override
+        public AccessibleRole getAccessibleRole() {
+            return AccessibleRole.LABEL;
+        }
+
+        @Override
+        public AccessibleStateSet getAccessibleStateSet() {
+            AccessibleStateSet states = new AccessibleStateSet();
+            states.add(AccessibleState.ENABLED);
+            states.add(AccessibleState.VISIBLE);
+            if (row == editor.trackIndex()) {
+                states.add(AccessibleState.SELECTED);
+            }
+            return states;
+        }
+
+        @Override
+        public int getAccessibleIndexInParent() {
+            return row;
+        }
+
+        @Override
+        public Locale getLocale() {
+            return componentLocale();
+        }
+
+        @Override
+        public int getAccessibleChildrenCount() {
+            return editor.beat().gridColumns(editor.viewSlot());
+        }
+
+        @Override
+        public Accessible getAccessibleChild(int index) {
+            int count = editor.beat().gridColumns(editor.viewSlot());
+            if (index < 0 || index >= count) {
+                return null;
+            }
+            if (cells.length < count) {
+                cells = Arrays.copyOf(cells, count);
+            }
+            if (cells[index] == null) {
+                cells[index] = new CellAccessible(row, index, this);
+            }
+            return cells[index];
+        }
+    }
+
+    private final class CellAccessible extends AccessibleContext implements Accessible {
+        private final int row;
+        private final int column;
+
+        private CellAccessible(int row, int column, Accessible parent) {
+            this.row = row;
+            this.column = column;
+            setAccessibleParent(parent);
+        }
+
+        @Override
+        public AccessibleContext getAccessibleContext() {
+            return this;
+        }
+
+        @Override
+        public String getAccessibleName() {
+            int count = editor.beat().gridColumns(editor.viewSlot());
+            return GridAccess.cellName(editor.viewTrack(row), column, count);
+        }
+
+        @Override
+        public AccessibleRole getAccessibleRole() {
+            return AccessibleRole.LABEL;
+        }
+
+        @Override
+        public AccessibleStateSet getAccessibleStateSet() {
+            AccessibleStateSet states = new AccessibleStateSet();
+            states.add(AccessibleState.ENABLED);
+            states.add(AccessibleState.VISIBLE);
+            states.add(AccessibleState.SELECTABLE);
+            states.add(AccessibleState.FOCUSABLE);
+            int rows = editor.beat().trackCount();
+            int columns = editor.beat().gridColumns(editor.viewSlot());
+            if (rows > 0 && columns > 0 && row == cursorRow(rows) && column == cursorColumn(columns)
+                && editor.stepIndex() == column) {
+                states.add(AccessibleState.SELECTED);
+                if (isFocusOwner()) {
+                    states.add(AccessibleState.FOCUSED);
+                }
+            }
+            return states;
+        }
+
+        @Override
+        public int getAccessibleIndexInParent() {
+            return column;
+        }
+
+        @Override
+        public Locale getLocale() {
+            return componentLocale();
+        }
+
+        @Override
+        public int getAccessibleChildrenCount() {
+            return 0;
+        }
+
+        @Override
+        public Accessible getAccessibleChild(int index) {
+            return null;
+        }
     }
 
     private static final class Gesture {
