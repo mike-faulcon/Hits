@@ -238,7 +238,13 @@ public final class SampleLibrary {
                     SampleBank.attenuation(sample.gain() + makeup)
                 )));
             } catch (IOException exception) {
-                append(warnings, track.name() + ": Could not read this sample. This row plays " + Notes.name(track.note()) + ".");
+                String reason = exception.getMessage();
+                if (reason == null || reason.isBlank()) {
+                    reason = "Could not read this sample.";
+                } else if (!reason.endsWith(".")) {
+                    reason = reason + ".";
+                }
+                append(warnings, track.name() + ": " + reason + " This row plays " + Notes.name(track.note()) + ".");
             }
         }
         return found;

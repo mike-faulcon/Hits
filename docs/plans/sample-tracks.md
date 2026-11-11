@@ -12,6 +12,7 @@
 - Deleting files in `<beat>.samples/` that the beat no longer names. Collect only copies.
 - CC 75. Decay stays on CC 72 for drum and note rows. A sample row does not send CC 72. See the plans index.
 - A one-shot cannot ring longer than its file. Decay above 100% matches 100% and the inspector marks that part of the slider `file`.
+- Streaming the first 10 seconds of a file larger than 512 MB. Those files are refused. MP3 and FLAC are still not decoded.
 
 ## What the code does
 
@@ -30,5 +31,7 @@ A sample row that plays sends reverb 0 unless the row sets a send. The channel s
 Cutoff for a sample row is 0–64. The voice has no filter of its own, so 64 is already open and a higher controller does not brighten it. Kit drums, bass, and other notes keep the ranges measured for those instruments.
 
 WAV export with no beat file resolves a relative sample against the working directory and throws if the file is not there. Export with a beat file still warns and falls back when the file is missing.
+
+A sample file is read only up to 10 seconds at its own rate and channel count, then downmixed to mono 16-bit. Nothing is resampled on the way in, and the SoundFont's trailing silence is not taken from the file, so the read stops at that cap. A longer file is cut there. The audio kept for a file that already fit, and the first 10 seconds of a longer file, match the earlier full-file read. An empty file, a file over 512 MB, a header whose length is zero, negative, or far too long, a format Hits cannot play, or a file that ends before that header's audio is refused. The inspector, `hits info`, and `hits render` say why, and the row plays its drum note. A read that runs longer than 5 seconds stops. At most 64 MB of source audio is read, which still covers 10 seconds of a normal recording.
 
 The built-in 808 is a sine from 80 Hz to 68 Hz. Its −20 dB point, measured from the start to the last sample still at that level, is about 400 ms. The old 406 ms figure was the −40 dB point, and the old −20 dB point was about 205 ms. Click's rendered onset centroid, over the first 70 ms, is about 1.4 kHz. Snap, with a 300 Hz high-pass and a window from 5 ms before the onset to 70 ms after, is about 2.2 kHz. The unfiltered full-file Snap centroid is lower because of the quiet low body.
