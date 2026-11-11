@@ -34,13 +34,21 @@ class InspectorFitTest {
         assertTrue(drumHeight < 80, "drum picker height " + drumHeight);
         assertNotNull(label(panel, "steps"));
 
+        JComponent sampleSection = find(panel, "section-sample");
+        assertNotNull(sampleSection);
+        assertTrue(!sampleSection.isVisible(), "a drum row has no sample section");
+
         editor.edit(beat -> {
             beat.track(0).setMode(TrackMode.SAMPLE);
             beat.track(0).setSample(new SampleRef(BuiltinSamples.CLICK, 60, 0, true));
         });
         SwingUtilities.invokeAndWait(inspector::refresh);
         int sampleHeight = picker.getPreferredSize().height;
-        assertTrue(sampleHeight > drumHeight + 80, "sample picker height " + sampleHeight);
+        assertTrue(sampleHeight < drumHeight + 80, "sample file row stays out of the drum picker, height " + sampleHeight);
+        assertTrue(sampleSection.isVisible(), "a sample row shows the sample section");
+        JComponent controls = find(panel, "sample-controls");
+        assertNotNull(controls);
+        assertTrue(controls.getPreferredSize().height > 80, "sample controls height " + controls.getPreferredSize().height);
         player.close();
     }
 

@@ -8,6 +8,7 @@ import javax.swing.JRootPane;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
+import java.awt.Component;
 import java.awt.KeyboardFocusManager;
 import java.awt.KeyEventDispatcher;
 import java.awt.Toolkit;
@@ -143,13 +144,14 @@ final class KeyboardShortcuts {
     static java.util.List<Shortcut> shortcuts() {
         String mod = menuShortcutName();
         return java.util.List.of(
-            new Shortcut(keyName(PLAY), "Play or stop, including while the step grid has focus. A text field still types a space."),
+            new Shortcut(keyName(PLAY), "Play or stop, including while the step grid has focus. A text field still types a space. A focused inspector section uses Space to expand or collapse."),
             new Shortcut("Tab", "Move focus. The step grid is in the Tab order and shows the cursor while it has focus."),
             new Shortcut("Left  Right", "Move the cursor one step. It stops at the first and last step and does not wrap."),
             new Shortcut("Up  Down", "Move the cursor to the row above or below. It stops at the first and last row."),
             new Shortcut("Ctrl+Up  Ctrl+Down", "Move the cursor between rows. Alt+Up and Alt+Down still reorder the row."),
             new Shortcut("Home  End", "Jump to the first or last step on this row."),
             new Shortcut("Enter", "Toggle the step under the cursor. Shift+Enter makes a loud hit."),
+            new Shortcut("Enter or Space", "Expand or collapse the focused inspector section. Space still plays or stops unless that header is focused."),
             new Shortcut(keyName(TAP), "Tap the tempo. A text field still types T."),
             new Shortcut(keyName(SLIDE), "Toggle slide on the selected step. Note and sample rows, including Sub."),
             new Shortcut(keyName(EARLIER) + "  " + keyName(LATER), "Nudge the selected step earlier or later."),
@@ -203,7 +205,25 @@ final class KeyboardShortcuts {
     }
 
     static boolean typing() {
-        return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner() instanceof JTextComponent;
+        return focusOwner() instanceof JTextComponent;
+    }
+
+    /**
+     * Space plays or stops unless a text field or an inspector section header has focus.
+     * The header uses Space to expand or collapse, which is the row in {@link #shortcuts()}.
+     */
+    static boolean spacePlays(Component focus) {
+        return !(focus instanceof JTextComponent) && !sectionHeader(focus);
+    }
+
+    /** True for the focusable header of an inspector section. */
+    static boolean sectionHeader(Component component) {
+        return component instanceof JComponent widget
+            && Boolean.TRUE.equals(widget.getClientProperty(InspectorSection.HEADER));
+    }
+
+    private static Component focusOwner() {
+        return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
     }
 
     /** Shift, Ctrl, Alt, and ⌘. Button and AltGr bits are ignored so a chord stays stable. */
@@ -230,6 +250,9 @@ final class KeyboardShortcuts {
             return true;
         }
         if (typing()) {
+            return false;
+        }
+        if (mods == 0 && code == PLAY && !spacePlays(focusOwner())) {
             return false;
         }
         if (mods == 0 && (code == PLAY || code == TAP || code == SLIDE || code == MUTE || code == SOLO
@@ -275,7 +298,7 @@ final class KeyboardShortcuts {
             if (event.getID() == KeyEvent.KEY_RELEASED) {
                 spaceDown = false;
             }
-            if (event.getModifiersEx() != 0 || typing()) {
+            if (event.getModifiersEx() != 0 || !spacePlays(focusOwner())) {
                 return false;
             }
             Window focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();

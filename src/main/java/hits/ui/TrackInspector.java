@@ -61,7 +61,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
-/** Track name, sound, length, hold, nudge, volume, chance, loud hit, mode, step pitch, and pattern length. */
+/**
+ * Track name, the step controls, and the row's sound.
+ * Sound, tone, filter, slide, and sample sit in sections. Slide is only on a note or
+ * sample row, and sample controls are only on a sample row. A section that is doing
+ * something other than the defaults keeps that summary on its header when collapsed.
+ */
 final class TrackInspector {
     private final Editor editor;
     private final Player player;
@@ -186,6 +191,13 @@ final class TrackInspector {
     private final SliderDrag accentDrag;
     private final SliderDrag sampleGainDrag;
     private final SliderDrag slideDrag;
+    private final SectionMemory sectionMemory = new SectionMemory();
+    private final InspectorSection soundSection = new InspectorSection(SectionSummary.Id.SOUND);
+    private final InspectorSection toneSection = new InspectorSection(SectionSummary.Id.TONE);
+    private final InspectorSection filterSection = new InspectorSection(SectionSummary.Id.FILTER);
+    private final InspectorSection slideSection = new InspectorSection(SectionSummary.Id.SLIDE);
+    private final InspectorSection sampleSection = new InspectorSection(SectionSummary.Id.SAMPLE);
+    private JPanel panel;
 
     TrackInspector(Editor editor, Player player, Sync sync) {
         this.editor = editor;
@@ -206,6 +218,11 @@ final class TrackInspector {
         this.accentDrag = new SliderDrag(editor, sync);
         this.sampleGainDrag = new SliderDrag(editor, sync);
         this.slideDrag = new SliderDrag(editor, sync);
+        soundSection.onChoice(open -> sectionMemory.choose(SectionSummary.Id.SOUND, open));
+        toneSection.onChoice(open -> sectionMemory.choose(SectionSummary.Id.TONE, open));
+        filterSection.onChoice(open -> sectionMemory.choose(SectionSummary.Id.FILTER, open));
+        slideSection.onChoice(open -> sectionMemory.choose(SectionSummary.Id.SLIDE, open));
+        sampleSection.onChoice(open -> sectionMemory.choose(SectionSummary.Id.SAMPLE, open));
     }
 
     void onShuffle(Runnable action) {
@@ -222,6 +239,9 @@ final class TrackInspector {
     }
 
     JPanel component() {
+        if (panel != null) {
+            return panel;
+        }
         noteValue.setName("note-heading");
         noteValue.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
         noteValue.setForeground(Theme.TEXT);
@@ -288,17 +308,13 @@ final class TrackInspector {
         addRow(panel, constraints, spun("Hold", holdTip, hold, holdUnit));
         String nudgeTip = "Moves the selected hit off the grid, as a percent of one step. −50 is half a step early, +50 is half a step late. Comma and period nudge it. 0 is left out of the file.";
         addRow(panel, constraints, spun("Nudge", nudgeTip, nudge, nudgeUnit));
-        legato.setOpaque(false);
-        legato.setForeground(Theme.TEXT);
-        legato.setFocusable(false);
-        legato.setToolTipText("Note tracks only. Each hit holds until the next hit on this row. Drum tracks keep Hold instead.");
-        addRow(panel, constraints, legato);
-        addRow(panel, constraints, slideRow());
         String shiftTip = "Moves every hit on this track by the same percent of a step. Added to each step's nudge, then kept inside half a step. Swing cannot push that onto the next step. 0 is left out of the file.";
         addRow(panel, constraints, spun("Shift", shiftTip, shift, shiftUnit));
-        JLabel soundHeading = Widgets.label("Sound");
-        soundHeading.setName("sound-heading");
-        addRow(panel, constraints, soundHeading);
+        addRow(panel, constraints, Widgets.label("Mode"));
+        drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
+        noteMode.setToolTipText("One pitched instrument for the whole track.");
+        sampleMode.setToolTipText("A one-shot WAV, played through the built-in synth. Tune, decay, gain, polarity, and effects still apply.");
+        addRow(panel, constraints, Widgets.row(drumMode, noteMode, sampleMode));
         drums.setToolTipText("Drum key, or a pitched percussion preset. A preset plays a melodic instrument at its own pitch, on this row's channel.");
         kits.setToolTipText("Drum kit on this row. Standard is the kit in the loaded bank. Another kit uses its own channel. A pitched preset replaces the kit.");
         programs.setToolTipText("Instrument from the loaded soundbank. The numbers are bank and program.");
@@ -313,40 +329,44 @@ final class TrackInspector {
         soundPicker.add(drums, "drum");
         soundPicker.add(programs, "note");
         soundPicker.add(sampleCard(), "sample");
-        addRow(panel, constraints, soundPicker);
-        addRow(panel, constraints, kits);
-        addRow(panel, constraints, kitNote);
-        addRow(panel, constraints, channelNote);
+        fill(soundSection.body(), soundPicker, kits, kitNote, channelNote);
+        addRow(panel, constraints, soundSection);
         String tuneTip = "Pitch of this row, from −24 to +24 semitones, plus or minus 50 cents. A tuned drum uses its own channel. Built-in synth only. A DAW may ignore this.";
         tuneSemi.setName("tune-semitone");
         tuneCents.setName("tune-cents");
-        addRow(panel, constraints, tuneRow(tuneTip));
         decay.setName("decay");
         decayValue.setName("decay-value");
-        addRow(panel, constraints, labeled(decayTitle, DECAY_TIP, decay, decayValue));
         decayValue.setPreferredSize(new Dimension(96, 32));
         cutoff.setName("cutoff");
-        addRow(panel, constraints, effectRow(cutoffOn, cutoff, cutoffValue, "Low-pass filter, from dull to bright. 64 is the synth's own tone. Off leaves the controller unset, so the sound stays as it is. Built-in synth only. A DAW may ignore this."));
         resonance.setName("resonance");
-        addRow(panel, constraints, effectRow(resonanceOn, resonance, resonanceValue, "Filter emphasis. 64 is the synth's own resonance. Off leaves the controller unset. Built-in synth only. A DAW may ignore this."));
+        legato.setOpaque(false);
+        legato.setForeground(Theme.TEXT);
+        legato.setFocusable(false);
+        legato.setToolTipText("Note tracks only. Each hit holds until the next hit on this row. Drum tracks keep Hold instead.");
+        fill(
+            toneSection.body(),
+            tuneRow(tuneTip),
+            labeled(decayTitle, DECAY_TIP, decay, decayValue),
+            effectRow(cutoffOn, cutoff, cutoffValue, "Low-pass filter, from dull to bright. 64 is the synth's own tone. Off leaves the controller unset, so the sound stays as it is. Built-in synth only. A DAW may ignore this."),
+            effectRow(resonanceOn, resonance, resonanceValue, "Filter emphasis. 64 is the synth's own resonance. Off leaves the controller unset. Built-in synth only. A DAW may ignore this."),
+            legato
+        );
+        addRow(panel, constraints, toneSection);
         lowCut.setName("low-cut");
         lowCutOn.setName("low-cut-on");
         lowCutValue.setName("low-cut-value");
-        addRow(panel, constraints, lowCutRow());
-        addRow(panel, constraints, slopeRow());
         presence.setName("presence");
         presenceValue.setName("presence-value");
-        addRow(panel, constraints, presenceRow());
-        addRow(panel, constraints, eqSection());
+        fill(filterSection.body(), lowCutRow(), slopeRow(), presenceRow(), eqSection());
+        addRow(panel, constraints, filterSection);
+        fill(slideSection.body(), slideRow());
+        addRow(panel, constraints, slideSection);
+        fill(sampleSection.body(), sampleControls());
+        addRow(panel, constraints, sampleSection);
         addRow(panel, constraints, labeled("Length", "How long the last step of a hit holds, as a percent of that step. A one-step hit uses the whole step this way.", gate, gateValue));
         addRow(panel, constraints, labeled("Volume", "How hard a hit is. Drag a pad up or down, or the velocity lane, to edit that step. Right-click or Alt-click selects it.", velocity, velocityValue));
         addRow(panel, constraints, labeled("Chance", "Percent chance the selected step plays. 100% always plays. Playback rolls each pass. Export uses a fixed seed.", chance, chanceValue));
         addRow(panel, constraints, labeled("Loud hit", "Shift-click uses this volume. Pads at least this loud use the bright color.", accent, accentValue));
-        addRow(panel, constraints, Widgets.label("Mode"));
-        drumMode.setToolTipText("Drum kit sounds, on the drum channel.");
-        noteMode.setToolTipText("One pitched instrument for the whole track.");
-        sampleMode.setToolTipText("A one-shot WAV, played through the built-in synth. Tune, decay, gain, polarity, and effects still apply.");
-        addRow(panel, constraints, Widgets.row(drumMode, noteMode, sampleMode));
         shuffle.setToolTipText("New hits on this track. The sound stays. Undo puts the old hits back.");
         shuffle.addActionListener(event -> shuffleTrack.run());
         addRow(panel, constraints, shuffle);
@@ -362,6 +382,7 @@ final class TrackInspector {
         spacer.setOpaque(false);
         addRow(panel, constraints, spacer);
         Tips.share(panel);
+        this.panel = panel;
         return panel;
     }
 
@@ -724,6 +745,38 @@ final class TrackInspector {
         showLowCut(track);
         showPresence(track);
         showEq(track);
+        showSections(track);
+    }
+
+    /** Headers follow the row. A choice the user already made stays for the session. */
+    private void showSections(Track track) {
+        showSection(soundSection, SectionSummary.Id.SOUND, track);
+        showSection(toneSection, SectionSummary.Id.TONE, track);
+        showSection(filterSection, SectionSummary.Id.FILTER, track);
+        showSection(slideSection, SectionSummary.Id.SLIDE, track);
+        showSection(sampleSection, SectionSummary.Id.SAMPLE, track);
+        if (soundSection.getParent() != null) {
+            soundSection.getParent().revalidate();
+        }
+    }
+
+    private void showSection(InspectorSection section, SectionSummary.Id id, Track track) {
+        boolean applies = SectionSummary.applies(id, track);
+        String summary = SectionSummary.summary(id, track);
+        section.show(applies, sectionMemory.expanded(id, applies && !summary.isEmpty()), summary);
+    }
+
+    private static void fill(JPanel panel, JComponent... rows) {
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.anchor = GridBagConstraints.WEST;
+        constraints.insets = new Insets(3, 0, 3, 0);
+        for (JComponent row : rows) {
+            addRow(panel, constraints, row);
+        }
     }
 
     private void applyTune() {
@@ -2093,13 +2146,28 @@ final class TrackInspector {
         constraints.insets = new Insets(0, 0, 6, 0);
         card.add(samplePicker, constraints);
         constraints.gridy++;
+        constraints.insets = new Insets(0, 0, 0, 0);
         card.add(sampleWarning, constraints);
+        return card;
+    }
+
+    /** Root, start, one-shot, gain, and polarity. Shown only while the row is a sample. */
+    private JPanel sampleControls() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        panel.setName("sample-controls");
+        GridBagConstraints constraints = new GridBagConstraints();
+        constraints.gridx = 0;
+        constraints.gridy = 0;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.anchor = GridBagConstraints.WEST;
+        constraints.insets = new Insets(0, 0, 6, 0);
+        panel.add(sampleSpin("Root", sampleRoot, sampleRootName), constraints);
         constraints.gridy++;
-        card.add(sampleSpin("Root", sampleRoot, sampleRootName), constraints);
+        panel.add(sampleSpin("Start", sampleStart, Widgets.label("frames")), constraints);
         constraints.gridy++;
-        card.add(sampleSpin("Start", sampleStart, Widgets.label("frames")), constraints);
-        constraints.gridy++;
-        card.add(Widgets.row(oneShot, choke), constraints);
+        panel.add(Widgets.row(oneShot, choke), constraints);
         constraints.gridy++;
         JPanel gain = labeled(
             "Gain",
@@ -2110,13 +2178,13 @@ final class TrackInspector {
             sampleGainValue
         );
         sampleGainValue.setPreferredSize(new Dimension(72, 32));
-        card.add(gain, constraints);
+        panel.add(gain, constraints);
         constraints.gridy++;
-        card.add(sampleInvert, constraints);
+        panel.add(sampleInvert, constraints);
         constraints.gridy++;
         constraints.insets = new Insets(0, 0, 0, 0);
-        card.add(collectSamples, constraints);
-        return card;
+        panel.add(collectSamples, constraints);
+        return panel;
     }
 
     private static JPanel sampleSpin(String label, JSpinner spinner, JLabel extra) {

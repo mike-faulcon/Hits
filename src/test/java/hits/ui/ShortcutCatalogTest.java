@@ -25,6 +25,7 @@ class ShortcutCatalogTest {
     void helpTextComesFromTheKeyCodes() {
         String text = KeyboardShortcuts.shortcutText();
         assertTrue(text.contains(KeyboardShortcuts.keyName(KeyboardShortcuts.PLAY) + "  Play or stop"));
+        assertTrue(text.contains("Enter or Space  Expand or collapse the focused inspector section"));
         assertTrue(text.contains(KeyboardShortcuts.keyName(KeyboardShortcuts.TAP) + "  Tap the tempo"));
         assertTrue(text.contains(KeyboardShortcuts.keyName(KeyboardShortcuts.SLIDE) + "  Toggle slide"));
         assertTrue(text.contains(KeyboardShortcuts.keyName(KeyboardShortcuts.MUTE) + "  Mute"));
