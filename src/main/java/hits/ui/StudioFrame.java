@@ -191,6 +191,8 @@ final class StudioFrame extends JFrame {
         left.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         JScrollPane stepsScroll = new JScrollPane(pattern);
         stepsScroll.setBorder(BorderFactory.createEmptyBorder());
+        stepsScroll.setFocusable(false);
+        stepsScroll.getViewport().setFocusable(false);
         stepsScroll.getViewport().setBackground(Theme.BG);
         JScrollPane mixerScroll = new JScrollPane(mixer.component());
         mixerScroll.setBorder(BorderFactory.createEmptyBorder());

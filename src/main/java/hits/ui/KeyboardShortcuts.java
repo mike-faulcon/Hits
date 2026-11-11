@@ -19,7 +19,8 @@ import java.util.function.Consumer;
 
 /**
  * Keys the window handles. {@link #shortcuts()} and {@link #mouseShortcuts()} are the list
- * Help shows. The dispatchers below use the same key codes.
+ * Help shows. The dispatchers below use the same key codes. Grid cursor keys live in
+ * {@link GridKeys} and are listed here too, so the dialog and the conflict check share one list.
  */
 final class KeyboardShortcuts {
     static final int PLAY = KeyEvent.VK_SPACE;
@@ -142,7 +143,13 @@ final class KeyboardShortcuts {
     static java.util.List<Shortcut> shortcuts() {
         String mod = menuShortcutName();
         return java.util.List.of(
-            new Shortcut(keyName(PLAY), "Play or stop. A text field still types a space."),
+            new Shortcut(keyName(PLAY), "Play or stop, including while the step grid has focus. A text field still types a space."),
+            new Shortcut("Tab", "Move focus. The step grid is in the Tab order and shows the cursor while it has focus."),
+            new Shortcut("Left  Right", "Move the cursor one step. It stops at the first and last step and does not wrap."),
+            new Shortcut("Up  Down", "Move the cursor to the row above or below. It stops at the first and last row."),
+            new Shortcut("Ctrl+Up  Ctrl+Down", "Move the cursor between rows. Alt+Up and Alt+Down still reorder the row."),
+            new Shortcut("Home  End", "Jump to the first or last step on this row."),
+            new Shortcut("Enter", "Toggle the step under the cursor. Shift+Enter makes a loud hit."),
             new Shortcut(keyName(TAP), "Tap the tempo. A text field still types T."),
             new Shortcut(keyName(SLIDE), "Toggle slide on the selected step. Note and sample rows, including Sub."),
             new Shortcut(keyName(EARLIER) + "  " + keyName(LATER), "Nudge the selected step earlier or later."),
@@ -180,7 +187,8 @@ final class KeyboardShortcuts {
         return "Click a step to toggle it. Shift-click makes a loud hit. "
             + "Ctrl-click or G toggles slide on a note or sample row. "
             + "Drag up or down to set velocity. Drag sideways on a lit pad to set how many steps it holds. "
-            + "Right-click or Alt-click selects it so you can change its volume, chance, or step pitch.";
+            + "Right-click or Alt-click selects it so you can change its volume, chance, or step pitch. "
+            + "Tab to this grid, then the arrow keys move the cursor and Enter toggles that step.";
     }
 
     static String shortcutText() {
@@ -196,6 +204,46 @@ final class KeyboardShortcuts {
 
     static boolean typing() {
         return KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner() instanceof JTextComponent;
+    }
+
+    /** Shift, Ctrl, Alt, and ⌘. Button and AltGr bits are ignored so a chord stays stable. */
+    static int chordModifiers(KeyEvent event) {
+        return event.getModifiersEx() & (
+            InputEvent.SHIFT_DOWN_MASK
+                | InputEvent.CTRL_DOWN_MASK
+                | InputEvent.META_DOWN_MASK
+                | InputEvent.ALT_DOWN_MASK
+        );
+    }
+
+    /**
+     * True when the window already handles this key, outside a text field.
+     * {@link GridKeys} must not claim the same chord. F1 still opens Help from a text field.
+     */
+    static boolean globalClaim(KeyEvent event) {
+        if (event == null || event.getID() != KeyEvent.KEY_PRESSED) {
+            return false;
+        }
+        int mods = chordModifiers(event);
+        int code = event.getKeyCode();
+        if (code == HELP && mods == 0) {
+            return true;
+        }
+        if (typing()) {
+            return false;
+        }
+        if (mods == 0 && (code == PLAY || code == TAP || code == SLIDE || code == MUTE || code == SOLO
+            || code == EARLIER || code == LATER)) {
+            return true;
+        }
+        if (rowShortcut(event)) {
+            return true;
+        }
+        int menu = menuShortcutMask();
+        if (code == KeyEvent.VK_Z && (mods == menu || mods == (menu | InputEvent.SHIFT_DOWN_MASK))) {
+            return true;
+        }
+        return code == KeyEvent.VK_S && (mods == menu || mods == (menu | InputEvent.SHIFT_DOWN_MASK));
     }
 
     private static AbstractAction action(Consumer<ActionEvent> handler) {

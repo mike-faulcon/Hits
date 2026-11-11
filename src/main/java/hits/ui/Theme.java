@@ -14,6 +14,10 @@ final class Theme {
     static final Color PLAY = new Color(0x3DDC84);
     static final Color SELECT = new Color(0x3A3120);
     static final Color LINE = new Color(0xF4F4F4);
+    /** Keyboard cursor. Cyan stays distinct from a gold hit and the green slide wedge. */
+    static final Color FOCUS = new Color(0x00E5FF);
+    /** Dark edge so that cursor still reads on a bright accent or the white playhead. */
+    static final Color FOCUS_EDGE = new Color(0x050607);
     static final Color GRID_LINE = new Color(0x6A7380);
     static final Color SOLO = new Color(0xE0A020);
     static final Color MUTE_ON = new Color(0xC45C5C);
